@@ -24,6 +24,7 @@ services:
       - "${HTTPS_PORT:-8444}:443"
     volumes:
       - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./certs:/certs:ro
       - caddy_data:/data
       - caddy_config:/config
 

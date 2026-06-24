@@ -7,6 +7,11 @@ coverage/
 !.env.example
 runs/
 data/
+certs/*.key
+certs/*.pem
+certs/*.crt
+certs/*.csr
+!certs/.gitkeep
 *.log
 .DS_Store
 apps/web/dist/

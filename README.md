@@ -109,6 +109,15 @@ If `ssh a` logs into the target server:
 
 Production uses Caddy as the public reverse proxy in front of the API/dashboard container. Defaults are `HTTP_PORT=8088` and `HTTPS_PORT=8444` so this project can run on the same server as `poly-elon` without taking 80/443.
 
+The repository expects a certificate at:
+
+```text
+certs/b.dark20.xyz.pem
+certs/b.dark20.xyz.key
+```
+
+The included local certificate is self-signed for `b.dark20.xyz`. With that certificate, set Cloudflare SSL/TLS mode to `Full`, not `Full strict`, and set the Origin Rule destination port to `8444`. For `Full strict`, replace these files with a Cloudflare Origin Certificate for `b.dark20.xyz`.
+
 ## Safety
 
 - Keep `EXECUTION_MODE=monitor` until RTDS, CLOB token IDs, balances, and signed-order posting are verified.
