@@ -1,0 +1,17 @@
+{
+  "seriesSlug": "btc-updown-5m",
+  "title": "Polymarket BTC 5m",
+  "roundDurationSeconds": 300,
+  "decisionLeadSeconds": 30,
+  "avoidExpirySeconds": 30,
+  "staticRound": {
+    "eventSlug": "btc-5m-example",
+    "title": "BTC 5m example round",
+    "startAt": "2027-01-01T00:00:00.000Z",
+    "endAt": "2027-01-01T00:05:00.000Z",
+    "strike": 100000,
+    "yesTokenId": "",
+    "noTokenId": "",
+    "sourceUrl": "https://polymarket.com"
+  }
+}

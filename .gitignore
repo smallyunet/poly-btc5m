@@ -1,0 +1,14 @@
+node_modules/
+dist/
+build/
+coverage/
+.env
+.env.*
+!.env.example
+runs/
+data/
+*.log
+.DS_Store
+apps/web/dist/
+apps/api/dist/
+packages/*/dist/

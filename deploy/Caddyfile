@@ -1,0 +1,8 @@
+{$SITE_DOMAIN} {
+	encode zstd gzip
+
+	reverse_proxy api:8788 {
+		header_up X-Forwarded-Proto {scheme}
+		header_up X-Forwarded-Host {host}
+	}
+}

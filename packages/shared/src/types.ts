@@ -1,0 +1,240 @@
+export type ExecutionMode = 'monitor' | 'live';
+
+export type TradeSide = 'BUY' | 'SELL';
+
+export type RoundPhase = 'observing' | 'decision' | 'posting' | 'monitoring' | 'settling' | 'settled';
+
+export type Regime = 'CHOP' | 'TREND' | 'LOW_ACTIVITY' | 'UNKNOWN';
+
+export type StrategyId = 'BTC5M_DUAL_45' | 'BTC5M_SINGLE_EXIT';
+
+export type BotRuntimeStatus = {
+  status: 'running' | 'degraded';
+  executionMode: ExecutionMode;
+  startedAt: string;
+  lastTickAt?: string;
+  nextTickAt?: string;
+  tickIntervalMs: number;
+  version: string;
+  dockerReady: boolean;
+};
+
+export type BtcRoundConfig = {
+  eventSlug: string;
+  title?: string;
+  startAt: string;
+  endAt: string;
+  strike: number;
+  yesTokenId: string;
+  noTokenId: string;
+  sourceUrl?: string;
+  imageUrl?: string;
+};
+
+export type BtcMarketConfig = {
+  seriesSlug: string;
+  title: string;
+  roundDurationSeconds: number;
+  decisionLeadSeconds: number;
+  avoidExpirySeconds: number;
+  staticRound?: BtcRoundConfig;
+};
+
+export type PriceTick = {
+  price: number;
+  source: 'rtds' | 'manual' | 'simulated';
+  receivedAt: string;
+};
+
+export type OrderBookLevel = {
+  price: number;
+  size: number;
+};
+
+export type OrderBookQuote = {
+  tokenId: string;
+  bestBid: number | null;
+  bestAsk: number | null;
+  midpoint: number | null;
+  spread: number | null;
+  bidDepth: number;
+  askDepth: number;
+  imbalance: number | null;
+  updatedAt: string;
+  source: 'mock' | 'clob' | 'ws';
+  bids?: OrderBookLevel[];
+  asks?: OrderBookLevel[];
+};
+
+export type BtcFeatureSnapshot = {
+  price: number | null;
+  strike: number;
+  cross120s: number;
+  crossFrequency: number;
+  volatility120s: number;
+  drift120s: number;
+  momentum30s: number;
+  samples120s: number;
+  latestCrossAt?: string;
+  source: PriceTick['source'] | 'none';
+  updatedAt: string;
+};
+
+export type RoundSnapshot = {
+  id: string;
+  phase: RoundPhase;
+  eventSlug: string;
+  title?: string;
+  startAt: string;
+  endAt: string;
+  secondsToStart: number;
+  secondsToEnd: number;
+  strike: number;
+  yesTokenId: string;
+  noTokenId: string;
+  sourceUrl?: string;
+  imageUrl?: string;
+};
+
+export type PositionSnapshot = {
+  tokenId: string;
+  label: 'YES' | 'NO';
+  shares: number;
+  avgPrice: number;
+  openedAt?: string;
+  lastTradeAt?: string;
+};
+
+export type StateSnapshot = {
+  id: string;
+  capturedAt: string;
+  round: RoundSnapshot;
+  features: BtcFeatureSnapshot;
+  regime: Regime;
+  orderbooks: OrderBookQuote[];
+  positions: PositionSnapshot[];
+  diagnostics: string[];
+};
+
+export type TradeIntent = {
+  id: string;
+  strategy: StrategyId;
+  roundId: string;
+  tokenId: string;
+  label: 'YES' | 'NO';
+  side: TradeSide;
+  orderType: 'LIMIT';
+  limitPrice: number;
+  shares: number;
+  reason: string;
+  status: 'generated' | 'rejected' | 'executed' | 'failed';
+  ttlSeconds: number;
+  createdAt: string;
+  rejectionReason?: string;
+};
+
+export type StrategyCondition = {
+  label: string;
+  passed: boolean;
+  actual: string;
+};
+
+export type StrategyCheck = {
+  strategy: StrategyId;
+  title: string;
+  status: 'eligible' | 'blocked' | 'not-applicable';
+  summary: string;
+  reason: string;
+  blockers: string[];
+  conditions: StrategyCondition[];
+  amountUsd?: number;
+  limitPrice?: number;
+};
+
+export type StrategyRule = {
+  id: StrategyId;
+  title: string;
+  allocationPct: number;
+  summary: string;
+  entryRules: string[];
+  exitRules: string[];
+};
+
+export type OrderRecord = {
+  id: string;
+  intentId: string;
+  executionKey?: string;
+  clobOrderId?: string;
+  roundId: string;
+  eventSlug: string;
+  tokenId: string;
+  label: 'YES' | 'NO';
+  side: TradeSide;
+  price: number;
+  size: number;
+  status: 'local' | 'posted' | 'partially_filled' | 'filled' | 'cancelled' | 'failed';
+  createdAt: string;
+  updatedAt?: string;
+  filledSize?: number;
+  avgFillPrice?: number;
+  error?: string;
+  rawResponse?: unknown;
+};
+
+export type FillRecord = {
+  id: string;
+  roundId: string;
+  clobOrderId?: string;
+  tokenId: string;
+  label: 'YES' | 'NO';
+  side: TradeSide;
+  price: number;
+  size: number;
+  matchedAt: string;
+  raw?: unknown;
+};
+
+export type SettlementRecord = {
+  id: string;
+  roundId: string;
+  eventSlug: string;
+  resolvedAt: string;
+  winningLabel?: 'YES' | 'NO';
+  yesShares: number;
+  noShares: number;
+  totalCost: number;
+  payout: number;
+  pnl: number;
+  status: 'estimated' | 'settled';
+};
+
+export type RuntimeLogRecord = {
+  id: string;
+  level: 'info' | 'warn' | 'error';
+  source: 'worker' | 'api' | 'execution' | 'market-data' | 'operator';
+  message: string;
+  createdAt: string;
+  details?: unknown;
+};
+
+export type DataFeedStatus = {
+  rtdsConnected: boolean;
+  clobConnected: boolean;
+  lastPriceAt?: string;
+  lastOrderbookAt?: string;
+  priceSamples: number;
+  source: 'live' | 'fallback';
+};
+
+export type DashboardState = {
+  runtime: BotRuntimeStatus;
+  feed: DataFeedStatus;
+  latestSnapshot: StateSnapshot;
+  intents: TradeIntent[];
+  orders: OrderRecord[];
+  fills: FillRecord[];
+  settlements: SettlementRecord[];
+  runtimeLogs: RuntimeLogRecord[];
+  rules: StrategyRule[];
+  strategyChecks: StrategyCheck[];
+};

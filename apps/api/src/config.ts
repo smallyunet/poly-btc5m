@@ -1,0 +1,110 @@
+import 'dotenv/config';
+import fs from 'node:fs';
+import path from 'node:path';
+
+import { btcMarketConfigSchema, type BtcMarketConfig, type ExecutionMode } from '../../../packages/shared/src';
+
+export type AppConfig = {
+  port: number;
+  dashboardInternalApiKey?: string;
+  executionMode: ExecutionMode;
+  clobApiUrl: string;
+  chainId: number;
+  ownerPrivateKey?: string;
+  depositWallet?: string;
+  tickIntervalMs: number;
+  runtimeStatePath: string;
+  rtdsWsUrl?: string;
+  clobWsUrl?: string;
+  staticBtcPrice?: number;
+  dualLimitPrice: number;
+  orderSharesPerSide: number;
+  minOrderShares: number;
+  maxOrderbookAgeSeconds: number;
+  minCross120s: number;
+  minVolatility120s: number;
+  maxAbsDrift120s: number;
+  maxAbsMomentum30s: number;
+  singleFillGraceSeconds: number;
+  marketConfig: BtcMarketConfig;
+};
+
+export function loadConfig(): AppConfig {
+  return {
+    port: Number(process.env.PORT || 8788),
+    dashboardInternalApiKey: process.env.DASHBOARD_INTERNAL_API_KEY,
+    executionMode: parseExecutionMode(process.env.EXECUTION_MODE),
+    clobApiUrl: process.env.POLYMARKET_CLOB_API_URL || 'https://clob.polymarket.com',
+    chainId: Number(process.env.POLYMARKET_CHAIN_ID || 137),
+    ownerPrivateKey: process.env.OWNER_PRIVATE_KEY,
+    depositWallet: process.env.POLYMARKET_DEPOSIT_WALLET,
+    tickIntervalMs: parsePositiveInteger(process.env.BOT_TICK_MS, 2_000),
+    runtimeStatePath: process.env.RUNTIME_STATE_PATH || path.resolve(process.cwd(), 'data/runtime-state.json'),
+    rtdsWsUrl: optionalString(process.env.POLYMARKET_RTDS_WS_URL),
+    clobWsUrl: optionalString(process.env.POLYMARKET_CLOB_WS_URL),
+    staticBtcPrice: optionalNumber(process.env.STATIC_BTC_PRICE),
+    dualLimitPrice: numberEnv('DUAL_LIMIT_PRICE', 0.45),
+    orderSharesPerSide: numberEnv('ORDER_SHARES_PER_SIDE', 10),
+    minOrderShares: numberEnv('MIN_ORDER_SHARES', 5),
+    maxOrderbookAgeSeconds: numberEnv('MAX_ORDERBOOK_AGE_SECONDS', 5),
+    minCross120s: numberEnv('MIN_CROSS_120S', 2),
+    minVolatility120s: numberEnv('MIN_VOLATILITY_120S', 12),
+    maxAbsDrift120s: numberEnv('MAX_ABS_DRIFT_120S', 40),
+    maxAbsMomentum30s: numberEnv('MAX_ABS_MOMENTUM_30S', 28),
+    singleFillGraceSeconds: numberEnv('SINGLE_FILL_GRACE_SECONDS', 75),
+    marketConfig: loadMarketConfig(),
+  };
+}
+
+function loadMarketConfig(): BtcMarketConfig {
+  const configPath = process.env.MARKET_CONFIG_PATH || path.resolve(process.cwd(), 'configs/btc5m.example.json');
+  if (fs.existsSync(configPath)) {
+    const parsed = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    return btcMarketConfigSchema.parse(parsed);
+  }
+
+  const now = Date.now();
+  const roundDurationMs = 5 * 60 * 1000;
+  const start = Math.ceil(now / roundDurationMs) * roundDurationMs;
+  const strike = numberEnv('STATIC_ROUND_STRIKE', 100_000);
+  return btcMarketConfigSchema.parse({
+    seriesSlug: process.env.MARKET_SERIES_SLUG || 'btc-updown-5m',
+    title: process.env.MARKET_TITLE || 'Polymarket BTC 5m',
+    roundDurationSeconds: 300,
+    decisionLeadSeconds: 30,
+    avoidExpirySeconds: 30,
+    staticRound: {
+      eventSlug: process.env.MARKET_EVENT_SLUG || `btc-5m-${start}`,
+      title: process.env.MARKET_ROUND_TITLE || 'Static BTC 5m round',
+      startAt: process.env.MARKET_START_AT || new Date(start).toISOString(),
+      endAt: process.env.MARKET_END_AT || new Date(start + roundDurationMs).toISOString(),
+      strike,
+      yesTokenId: process.env.MARKET_YES_TOKEN_ID || '',
+      noTokenId: process.env.MARKET_NO_TOKEN_ID || '',
+      sourceUrl: process.env.MARKET_SOURCE_URL,
+    },
+  });
+}
+
+function parseExecutionMode(value: string | undefined): ExecutionMode {
+  return value === 'live' ? 'live' : 'monitor';
+}
+
+function parsePositiveInteger(value: string | undefined, fallback: number): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback;
+}
+
+function numberEnv(name: string, fallback: number): number {
+  const parsed = Number(process.env[name]);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function optionalNumber(value: string | undefined): number | undefined {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function optionalString(value: string | undefined): string | undefined {
+  return value?.trim() || undefined;
+}

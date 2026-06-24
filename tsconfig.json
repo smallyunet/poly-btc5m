@@ -1,0 +1,31 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "lib": ["ES2022", "DOM"],
+    "jsx": "react-jsx",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "rootDir": ".",
+    "outDir": "dist",
+    "types": ["node"]
+  },
+  "include": [
+    "apps/api/src/config.ts",
+    "apps/api/src/execution.ts",
+    "apps/api/src/main.ts",
+    "apps/api/src/marketData.ts",
+    "apps/api/src/runtime.ts",
+    "apps/api/src/server.ts",
+    "apps/api/src/store.ts",
+    "packages/shared/src/**/*.ts",
+    "packages/strategy/src/**/*.ts",
+    "packages/polymarket/src/client.ts",
+    "packages/polymarket/src/index.ts"
+  ],
+  "exclude": ["node_modules", "dist", "apps/web"]
+}
