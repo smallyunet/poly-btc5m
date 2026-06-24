@@ -247,5 +247,7 @@ function isOrderRecordLike(value: unknown): value is OrderRecord {
 function isFillRecordLike(value: unknown): value is FillRecord {
   if (!value || typeof value !== 'object') return false;
   const item = value as Partial<FillRecord>;
-  return typeof item.id === 'string' && typeof item.roundId === 'string' && typeof item.tokenId === 'string';
+  if (typeof item.id !== 'string' || typeof item.roundId !== 'string' || typeof item.tokenId !== 'string') return false;
+  const raw = item.raw as { trader_side?: unknown; maker_orders?: unknown } | undefined;
+  return !(String(raw?.trader_side || '').toUpperCase() === 'MAKER' && Array.isArray(raw?.maker_orders) && !item.clobOrderId);
 }

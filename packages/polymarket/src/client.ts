@@ -112,14 +112,40 @@ export class PolymarketAdapter {
     const client = await this.authenticatedClient();
     const trades = await client.getTrades(params.tokenId ? { asset_id: params.tokenId } : undefined, true);
     if (!Array.isArray(trades)) return [];
-    return trades
-      .map((trade: any): FillRecord | null => {
-        const tokenId = String(trade.asset_id || trade.token_id || '');
-        const label = params.tokenLabels.get(tokenId);
-        const price = finiteNumber(trade.price);
-        const size = finiteNumber(trade.size);
-        if (!label || price == null || size == null || size <= 0) return null;
-        return {
+    const makerAddress = this.config.depositWallet?.trim().toLowerCase();
+    return trades.flatMap((trade: any): FillRecord[] => {
+      if (String(trade.trader_side || '').toUpperCase() === 'MAKER' && Array.isArray(trade.maker_orders)) {
+        return trade.maker_orders
+          .map((makerOrder: any, index: number): FillRecord | null => {
+            if (makerAddress && String(makerOrder.maker_address || '').toLowerCase() !== makerAddress) return null;
+            const tokenId = String(makerOrder.asset_id || makerOrder.token_id || '');
+            const label = params.tokenLabels.get(tokenId);
+            const price = finiteNumber(makerOrder.price);
+            const size = finiteNumber(makerOrder.matched_amount ?? makerOrder.size);
+            if (!label || price == null || size == null || size <= 0) return null;
+            const clobOrderId = typeof makerOrder.order_id === 'string' ? makerOrder.order_id : undefined;
+            return {
+              id: String(`${trade.id || trade.transaction_hash || trade.match_time || Date.now()}:${clobOrderId || index}:${size}`),
+              roundId: params.roundId,
+              clobOrderId,
+              tokenId,
+              label,
+              side: String(makerOrder.side || '').toUpperCase() === 'SELL' ? 'SELL' : 'BUY',
+              price,
+              size,
+              matchedAt: typeof trade.match_time === 'string' ? trade.match_time : new Date().toISOString(),
+              raw: { trade, makerOrder },
+            };
+          })
+          .filter((item: FillRecord | null): item is FillRecord => Boolean(item));
+      }
+
+      const tokenId = String(trade.asset_id || trade.token_id || '');
+      const label = params.tokenLabels.get(tokenId);
+      const price = finiteNumber(trade.price);
+      const size = finiteNumber(trade.size);
+      if (!label || price == null || size == null || size <= 0) return [];
+      return [{
           id: String(trade.id || `${tokenId}-${trade.match_time || Date.now()}`),
           roundId: params.roundId,
           clobOrderId: typeof trade.order_id === 'string' ? trade.order_id : undefined,
@@ -130,9 +156,8 @@ export class PolymarketAdapter {
           size,
           matchedAt: typeof trade.match_time === 'string' ? trade.match_time : new Date().toISOString(),
           raw: trade,
-        };
-      })
-      .filter((item): item is FillRecord => Boolean(item));
+      }];
+    });
   }
 
   async getCurrentPositions(tokenLabels: Map<string, 'YES' | 'NO'>): Promise<PositionSnapshot[]> {
