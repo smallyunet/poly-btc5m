@@ -67,7 +67,7 @@ BOT_TICK_MS=2000
 MAX_ORDERBOOK_AGE_SECONDS=5
 ```
 
-BTC price has no HTTP/manual/simulated fallback. If RTDS is not connected or no `btcusdt` tick has arrived, the regime remains `UNKNOWN` and entry orders are blocked.
+BTC price has no HTTP/manual/simulated fallback. The worker subscribes to the RTDS `crypto_prices` stream and only accepts `btcusdt` updates. If RTDS is not connected or no `btcusdt` tick has arrived, the regime remains `UNKNOWN` and entry orders are blocked.
 Orderbook price also has no REST fallback. If the CLOB market websocket is not connected or YES/NO books are missing/stale, entry orders are blocked.
 
 Strategy thresholds:

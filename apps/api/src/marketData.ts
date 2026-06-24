@@ -92,7 +92,6 @@ export class MarketDataService {
             {
               topic: 'crypto_prices',
               type: 'update',
-              filters: 'btcusdt',
             },
           ],
         }));
