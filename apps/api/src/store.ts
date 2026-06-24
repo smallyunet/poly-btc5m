@@ -21,7 +21,7 @@ type PersistedRuntimeState = {
 export class InMemoryStore {
   private runtime: BotRuntimeStatus;
   private latestSnapshot: StateSnapshot | null = null;
-  private latestFeed: DataFeedStatus = { rtdsConnected: false, clobConnected: false, priceSamples: 0, source: 'fallback' };
+  private latestFeed: DataFeedStatus = { rtdsConnected: false, clobConnected: false, priceSamples: 0, source: 'unavailable' };
   private intents: TradeIntent[] = [];
   private orders: OrderRecord[] = [];
   private fills: FillRecord[] = [];

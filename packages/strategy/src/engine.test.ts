@@ -74,7 +74,7 @@ function baseSnapshot(features: Partial<StateSnapshot['features']>): StateSnapsh
       drift120s: 0,
       momentum30s: 0,
       samples120s: 0,
-      source: 'simulated',
+      source: 'rtds',
       updatedAt: now,
       ...features,
     },
@@ -99,6 +99,6 @@ function quote(tokenId: string): StateSnapshot['orderbooks'][number] {
     askDepth: 100,
     imbalance: 0,
     updatedAt: new Date().toISOString(),
-    source: 'clob',
+    source: 'ws',
   };
 }

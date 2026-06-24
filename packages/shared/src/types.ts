@@ -42,7 +42,7 @@ export type BtcMarketConfig = {
 
 export type PriceTick = {
   price: number;
-  source: 'rtds' | 'manual' | 'simulated';
+  source: 'rtds';
   receivedAt: string;
 };
 
@@ -61,7 +61,7 @@ export type OrderBookQuote = {
   askDepth: number;
   imbalance: number | null;
   updatedAt: string;
-  source: 'mock' | 'clob' | 'ws';
+  source: 'mock' | 'ws';
   bids?: OrderBookLevel[];
   asks?: OrderBookLevel[];
 };
@@ -223,7 +223,7 @@ export type DataFeedStatus = {
   lastPriceAt?: string;
   lastOrderbookAt?: string;
   priceSamples: number;
-  source: 'live' | 'fallback';
+  source: 'live' | 'unavailable';
 };
 
 export type DashboardState = {

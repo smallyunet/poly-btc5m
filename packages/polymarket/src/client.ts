@@ -43,15 +43,6 @@ async function importClobClient(): Promise<ClobModule> {
 export class PolymarketAdapter {
   constructor(private readonly config: PolymarketClientConfig) {}
 
-  async getOrderBookQuote(tokenId: string): Promise<OrderBookQuote> {
-    if (!tokenId.trim()) return this.mockQuote(tokenId);
-
-    const { ClobClient } = await importClobClient();
-    const client = new ClobClient({ host: this.config.clobApiUrl, chain: this.config.chainId });
-    const book = await client.getOrderBook(tokenId);
-    return quoteFromBook(tokenId, book, 'clob');
-  }
-
   async executeLimitIntent(intent: TradeIntent, options: { execute: boolean }): Promise<LimitOrderResult> {
     if (!options.execute) {
       return { ok: true, price: intent.limitPrice, size: roundDownShares(intent.shares), raw: { dryRun: true, intent } };
@@ -209,23 +200,9 @@ export class PolymarketAdapter {
     throw new Error('Failed to resolve Polymarket CLOB API credentials.');
   }
 
-  private mockQuote(tokenId: string): OrderBookQuote {
-    return {
-      tokenId,
-      bestBid: null,
-      bestAsk: null,
-      midpoint: null,
-      spread: null,
-      bidDepth: 0,
-      askDepth: 0,
-      imbalance: null,
-      updatedAt: new Date().toISOString(),
-      source: 'mock',
-    };
-  }
 }
 
-export function quoteFromBook(tokenId: string, book: any, source: 'clob' | 'ws'): OrderBookQuote {
+export function quoteFromBook(tokenId: string, book: any, source: 'ws'): OrderBookQuote {
   const bids = normalizeLevels(book?.bids).sort((a, b) => b.price - a.price);
   const asks = normalizeLevels(book?.asks).sort((a, b) => a.price - b.price);
   const bestBid = bids[0]?.price ?? null;

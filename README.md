@@ -37,8 +37,8 @@ The default mode is `EXECUTION_MODE=monitor`. In monitor mode the worker records
 The worker runs every `BOT_TICK_MS` and produces one `DashboardState` snapshot:
 
 - Builds the current/static BTC 5m round from `configs/btc5m.example.json`.
-- Maintains recent BTC price samples from `POLYMARKET_RTDS_WS_URL`, or simulated/manual fallback data.
-- Refreshes YES/NO CLOB orderbooks from websocket when configured, with REST CLOB snapshots as fallback.
+- Maintains recent BTC price samples only from Polymarket RTDS over `wss://ws-live-data.polymarket.com`.
+- Maintains YES/NO CLOB orderbooks only from the Polymarket CLOB market websocket.
 - Computes `cross120s`, `volatility120s`, `drift120s`, and `momentum30s`.
 - Classifies the round regime.
 - Generates paired 45c entry intents during the pre-round decision window when the regime is `CHOP`.
@@ -61,11 +61,14 @@ MARKET_NO_TOKEN_ID=...
 Recommended live feed settings:
 
 ```dotenv
-POLYMARKET_RTDS_WS_URL=
-POLYMARKET_CLOB_WS_URL=
+POLYMARKET_RTDS_WS_URL=wss://ws-live-data.polymarket.com
+POLYMARKET_CLOB_WS_URL=wss://ws-subscriptions-clob.polymarket.com/ws/market
 BOT_TICK_MS=2000
 MAX_ORDERBOOK_AGE_SECONDS=5
 ```
+
+BTC price has no HTTP/manual/simulated fallback. If RTDS is not connected or no `btcusdt` tick has arrived, the regime remains `UNKNOWN` and entry orders are blocked.
+Orderbook price also has no REST fallback. If the CLOB market websocket is not connected or YES/NO books are missing/stale, entry orders are blocked.
 
 Strategy thresholds:
 

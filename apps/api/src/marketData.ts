@@ -1,5 +1,5 @@
 import type { BtcFeatureSnapshot, BtcRoundConfig, DataFeedStatus, OrderBookQuote, PriceTick } from '../../../packages/shared/src';
-import { quoteFromBook, type PolymarketAdapter } from '../../../packages/polymarket/src';
+import { quoteFromBook } from '../../../packages/polymarket/src';
 import type { AppConfig } from './config';
 import type { InMemoryStore } from './store';
 
@@ -18,38 +18,19 @@ export class MarketDataService {
   constructor(
     private readonly config: AppConfig,
     private readonly store: InMemoryStore,
-    private readonly adapter: PolymarketAdapter,
   ) {}
 
   start(round: BtcRoundConfig): void {
     this.connectRtds();
     this.connectClob(round);
-    if (this.config.staticBtcPrice != null) {
-      this.recordPrice(this.config.staticBtcPrice, 'manual');
-    }
   }
 
-  async refreshOrderbooks(round: BtcRoundConfig): Promise<OrderBookQuote[]> {
+  refreshOrderbooks(round: BtcRoundConfig): OrderBookQuote[] {
     const tokenIds = [round.yesTokenId, round.noTokenId].filter(Boolean);
-    for (const tokenId of tokenIds) {
-      const current = this.orderbooks.get(tokenId);
-      const ageMs = current ? Date.now() - new Date(current.updatedAt).getTime() : Number.POSITIVE_INFINITY;
-      if (current && ageMs < this.config.maxOrderbookAgeSeconds * 1000) continue;
-      try {
-        this.orderbooks.set(tokenId, await this.adapter.getOrderBookQuote(tokenId));
-      } catch (error) {
-        this.store.recordRuntimeLog({
-          level: 'warn',
-          source: 'market-data',
-          message: `Orderbook refresh failed for ${tokenId}: ${error instanceof Error ? error.message : String(error)}`,
-        });
-      }
-    }
     return tokenIds.map((tokenId) => this.orderbooks.get(tokenId)).filter((item): item is OrderBookQuote => Boolean(item));
   }
 
   features(round: BtcRoundConfig): BtcFeatureSnapshot {
-    this.seedSimulatedPriceIfNeeded(round);
     const now = Date.now();
     const ticks = this.priceTicks.filter((tick) => now - new Date(tick.receivedAt).getTime() <= 120_000);
     const latest = ticks.at(-1);
@@ -96,12 +77,12 @@ export class MarketDataService {
       lastPriceAt: latestPrice?.receivedAt,
       lastOrderbookAt: latestBook?.updatedAt,
       priceSamples: this.priceTicks.length,
-      source: this.rtdsConnected || this.clobConnected ? 'live' : 'fallback',
+      source: this.rtdsConnected ? 'live' : 'unavailable',
     };
   }
 
   private connectRtds(): void {
-    if (!this.config.rtdsWsUrl || this.rtds) return;
+    if (this.rtds) return;
     if (typeof WebSocket === 'undefined') {
       this.store.recordRuntimeLog({ level: 'warn', source: 'market-data', message: 'Global WebSocket is unavailable; RTDS listener is disabled.' });
       return;
@@ -112,6 +93,16 @@ export class MarketDataService {
       ws.addEventListener('open', () => {
         this.rtdsConnected = true;
         this.store.recordRuntimeLog({ level: 'info', source: 'market-data', message: 'RTDS websocket connected.' });
+        ws.send(JSON.stringify({
+          action: 'subscribe',
+          subscriptions: [
+            {
+              topic: 'crypto_prices',
+              type: 'update',
+              filters: 'btcusdt',
+            },
+          ],
+        }));
       });
       ws.addEventListener('message', (event) => this.handlePriceMessage(event.data));
       ws.addEventListener('close', () => {
@@ -122,13 +113,17 @@ export class MarketDataService {
       ws.addEventListener('error', () => {
         this.rtdsConnected = false;
       });
+      const ping = setInterval(() => {
+        if (ws.readyState === OPEN) ws.send('PING');
+      }, 5_000);
+      ws.addEventListener('close', () => clearInterval(ping));
     } catch (error) {
       this.store.recordRuntimeLog({ level: 'warn', source: 'market-data', message: `RTDS websocket failed: ${error instanceof Error ? error.message : String(error)}` });
     }
   }
 
   private connectClob(round: BtcRoundConfig): void {
-    if (!this.config.clobWsUrl || this.clob) return;
+    if (this.clob) return;
     if (typeof WebSocket === 'undefined') return;
     const tokenIds = [round.yesTokenId, round.noTokenId].filter(Boolean);
     if (!tokenIds.length) return;
@@ -139,7 +134,11 @@ export class MarketDataService {
         this.clobConnected = true;
         this.store.recordRuntimeLog({ level: 'info', source: 'market-data', message: 'CLOB websocket connected.' });
         if (ws.readyState === OPEN) {
-          ws.send(JSON.stringify({ type: 'market', assets_ids: tokenIds }));
+          ws.send(JSON.stringify({
+            type: 'market',
+            assets_ids: tokenIds,
+            custom_feature_enabled: true,
+          }));
         }
       });
       ws.addEventListener('message', (event) => this.handleOrderbookMessage(event.data));
@@ -159,11 +158,12 @@ export class MarketDataService {
   private handlePriceMessage(data: unknown): void {
     try {
       const parsed = JSON.parse(String(data));
-      const price = findNumber(parsed, ['price', 'mid', 'midpoint', 'btc', 'value']);
+      const symbol = String(parsed?.payload?.symbol || parsed?.symbol || '').toLowerCase();
+      if (symbol && symbol !== 'btcusdt' && symbol !== 'btc/usd') return;
+      const price = findNumber(parsed, ['value']);
       if (price != null) this.recordPrice(price, 'rtds');
     } catch {
-      const price = Number(data);
-      if (Number.isFinite(price)) this.recordPrice(price, 'rtds');
+      // RTDS price frames are JSON. Ignore non-JSON frames such as server pongs.
     }
   }
 
@@ -173,12 +173,45 @@ export class MarketDataService {
       const messages = Array.isArray(parsed) ? parsed : [parsed];
       for (const message of messages) {
         const tokenId = String(message.asset_id || message.token_id || message.tokenId || '');
-        if (!tokenId) continue;
-        this.orderbooks.set(tokenId, quoteFromBook(tokenId, message, 'ws'));
+        if (tokenId && Array.isArray(message.bids) && Array.isArray(message.asks)) {
+          this.orderbooks.set(tokenId, quoteFromBook(tokenId, message, 'ws'));
+          continue;
+        }
+        if (tokenId && message.event_type === 'best_bid_ask') {
+          this.upsertTopQuote(tokenId, message.best_bid, message.best_ask, message.spread);
+          continue;
+        }
+        if (message.event_type === 'price_change' && Array.isArray(message.price_changes)) {
+          for (const change of message.price_changes) {
+            const changedTokenId = String(change.asset_id || '');
+            if (changedTokenId) this.upsertTopQuote(changedTokenId, change.best_bid, change.best_ask);
+          }
+        }
       }
     } catch {
-      // Ignore malformed websocket frames; the REST refresh path remains authoritative.
+      // Ignore malformed websocket frames; stale or missing books block strategy entry.
     }
+  }
+
+  private upsertTopQuote(tokenId: string, bestBidRaw: unknown, bestAskRaw: unknown, spreadRaw?: unknown): void {
+    const current = this.orderbooks.get(tokenId);
+    const bestBid = finiteNumber(bestBidRaw);
+    const bestAsk = finiteNumber(bestAskRaw);
+    const spread = finiteNumber(spreadRaw) ?? (bestBid != null && bestAsk != null ? bestAsk - bestBid : null);
+    this.orderbooks.set(tokenId, {
+      tokenId,
+      bestBid,
+      bestAsk,
+      midpoint: bestBid != null && bestAsk != null ? (bestBid + bestAsk) / 2 : null,
+      spread,
+      bidDepth: current?.bidDepth ?? 0,
+      askDepth: current?.askDepth ?? 0,
+      imbalance: current?.imbalance ?? null,
+      updatedAt: new Date().toISOString(),
+      source: 'ws',
+      bids: current?.bids,
+      asks: current?.asks,
+    });
   }
 
   private recordPrice(price: number, source: PriceTick['source']): void {
@@ -190,14 +223,6 @@ export class MarketDataService {
     }
   }
 
-  private seedSimulatedPriceIfNeeded(round: BtcRoundConfig): void {
-    const latest = this.priceTicks.at(-1);
-    if (latest && Date.now() - new Date(latest.receivedAt).getTime() < 4_000) return;
-    const base = this.config.staticBtcPrice ?? round.strike;
-    const t = Date.now() / 1000;
-    const price = base + Math.sin(t / 7) * 18 + Math.sin(t / 17) * 9;
-    this.recordPrice(price, 'simulated');
-  }
 }
 
 function stddev(values: number[]): number {
@@ -220,4 +245,9 @@ function findNumber(value: any, keys: string[]): number | null {
     }
   }
   return null;
+}
+
+function finiteNumber(value: unknown): number | null {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
 }

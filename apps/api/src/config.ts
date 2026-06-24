@@ -14,9 +14,8 @@ export type AppConfig = {
   depositWallet?: string;
   tickIntervalMs: number;
   runtimeStatePath: string;
-  rtdsWsUrl?: string;
-  clobWsUrl?: string;
-  staticBtcPrice?: number;
+  rtdsWsUrl: string;
+  clobWsUrl: string;
   dualLimitPrice: number;
   orderSharesPerSide: number;
   minOrderShares: number;
@@ -40,9 +39,8 @@ export function loadConfig(): AppConfig {
     depositWallet: process.env.POLYMARKET_DEPOSIT_WALLET,
     tickIntervalMs: parsePositiveInteger(process.env.BOT_TICK_MS, 2_000),
     runtimeStatePath: process.env.RUNTIME_STATE_PATH || path.resolve(process.cwd(), 'data/runtime-state.json'),
-    rtdsWsUrl: optionalString(process.env.POLYMARKET_RTDS_WS_URL),
-    clobWsUrl: optionalString(process.env.POLYMARKET_CLOB_WS_URL),
-    staticBtcPrice: optionalNumber(process.env.STATIC_BTC_PRICE),
+    rtdsWsUrl: rtdsWsUrl(process.env.POLYMARKET_RTDS_WS_URL),
+    clobWsUrl: clobWsUrl(process.env.POLYMARKET_CLOB_WS_URL),
     dualLimitPrice: numberEnv('DUAL_LIMIT_PRICE', 0.45),
     orderSharesPerSide: numberEnv('ORDER_SHARES_PER_SIDE', 10),
     minOrderShares: numberEnv('MIN_ORDER_SHARES', 5),
@@ -100,11 +98,18 @@ function numberEnv(name: string, fallback: number): number {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-function optionalNumber(value: string | undefined): number | undefined {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : undefined;
-}
-
 function optionalString(value: string | undefined): string | undefined {
   return value?.trim() || undefined;
+}
+
+function rtdsWsUrl(value: string | undefined): string {
+  const url = value?.trim() || 'wss://ws-live-data.polymarket.com';
+  if (!url.startsWith('wss://')) throw new Error('POLYMARKET_RTDS_WS_URL must be a wss:// URL.');
+  return url;
+}
+
+function clobWsUrl(value: string | undefined): string {
+  const url = value?.trim() || 'wss://ws-subscriptions-clob.polymarket.com/ws/market';
+  if (!url.startsWith('wss://')) throw new Error('POLYMARKET_CLOB_WS_URL must be a wss:// URL.');
+  return url;
 }

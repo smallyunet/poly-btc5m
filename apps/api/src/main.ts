@@ -14,7 +14,7 @@ async function main() {
     ownerPrivateKey: config.ownerPrivateKey,
     depositWallet: config.depositWallet,
   });
-  const data = new MarketDataService(config, store, adapter);
+  const data = new MarketDataService(config, store);
   data.start(currentRound(config));
 
   let tickRunning = false;

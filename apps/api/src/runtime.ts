@@ -47,7 +47,7 @@ export function currentRound(appConfig: AppConfig): BtcRoundConfig {
   const durationMs = appConfig.marketConfig.roundDurationSeconds * 1000;
   const now = Date.now();
   const start = Math.floor(now / durationMs) * durationMs;
-  const strike = appConfig.staticBtcPrice || 100_000;
+  const strike = numberFromEnv('STATIC_ROUND_STRIKE', 100_000);
   return {
     eventSlug: `${appConfig.marketConfig.seriesSlug}-${start}`,
     title: `${appConfig.marketConfig.title} ${new Date(start).toISOString()}`,
@@ -151,4 +151,9 @@ function riskConfig(appConfig: AppConfig, dryRun: boolean): StrategyRiskConfig {
 
 function sum(values: number[]): number {
   return values.reduce((total, value) => total + value, 0);
+}
+
+function numberFromEnv(name: string, fallback: number): number {
+  const parsed = Number(process.env[name]);
+  return Number.isFinite(parsed) ? parsed : fallback;
 }
