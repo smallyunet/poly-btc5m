@@ -4,11 +4,19 @@ import { PolymarketAdapter } from '../../../packages/polymarket/src';
 import type { AppConfig } from './config';
 import { executeLiveIntents } from './execution';
 import type { MarketDataService } from './marketData';
+import type { Btc5mRoundDiscovery } from './roundDiscovery';
 import type { InMemoryStore } from './store';
 
-export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, data: MarketDataService, adapter: PolymarketAdapter): Promise<StateSnapshot> {
+export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, data: MarketDataService, adapter: PolymarketAdapter, discovery: Btc5mRoundDiscovery): Promise<StateSnapshot> {
   const diagnostics: string[] = [];
-  const round = currentRound(appConfig);
+  const discovered = await discovery.discover({
+    trackedRoundSlug: store.trackedRoundSlug(),
+    latestPrice: data.latestPrice(),
+    persistedStrike: (roundId) => store.getRoundStrike(roundId),
+  });
+  diagnostics.push(...discovered.diagnostics);
+  const round = captureOpeningStrike(discovered.round, store, data.latestPrice());
+  data.syncClobRound(round);
   const orderbooks = await data.refreshOrderbooks(round);
   const features = data.features(round);
   const roundSnapshot = roundToSnapshot(appConfig, round);
@@ -16,7 +24,7 @@ export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, dat
     [round.yesTokenId, 'YES'],
     [round.noTokenId, 'NO'],
   ]);
-  const positions = await loadPositions(adapter, tokenLabels, diagnostics);
+  const positions = await loadPositions(appConfig, adapter, tokenLabels, diagnostics);
   const baseSnapshot: StateSnapshot = {
     id: `snapshot-${Date.now()}`,
     capturedAt: new Date().toISOString(),
@@ -42,21 +50,13 @@ export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, dat
   return finalSnapshot;
 }
 
-export function currentRound(appConfig: AppConfig): BtcRoundConfig {
-  if (appConfig.marketConfig.staticRound) return appConfig.marketConfig.staticRound;
-  const durationMs = appConfig.marketConfig.roundDurationSeconds * 1000;
-  const now = Date.now();
-  const start = Math.floor(now / durationMs) * durationMs;
-  const strike = appConfig.marketConfig.strike ?? numberFromEnv('STATIC_ROUND_STRIKE', 100_000);
-  return {
-    eventSlug: `${appConfig.marketConfig.seriesSlug}-${start}`,
-    title: `${appConfig.marketConfig.title} ${new Date(start).toISOString()}`,
-    startAt: new Date(start).toISOString(),
-    endAt: new Date(start + durationMs).toISOString(),
-    strike,
-    yesTokenId: appConfig.marketConfig.yesTokenId || '',
-    noTokenId: appConfig.marketConfig.noTokenId || '',
-  };
+function captureOpeningStrike(round: BtcRoundConfig, store: InMemoryStore, latestPrice: number | null): BtcRoundConfig {
+  const persisted = store.getRoundStrike(round.eventSlug);
+  if (persisted) return { ...round, strike: persisted };
+  const startMs = new Date(round.startAt).getTime();
+  if (Date.now() < startMs || latestPrice == null || !Number.isFinite(latestPrice) || latestPrice <= 0) return round;
+  store.recordRoundStrike(round.eventSlug, latestPrice);
+  return { ...round, strike: latestPrice };
 }
 
 function roundToSnapshot(appConfig: AppConfig, round: BtcRoundConfig): RoundSnapshot {
@@ -89,7 +89,11 @@ function roundPhase(now: number, start: number, end: number, decisionLeadSeconds
   return 'settled';
 }
 
-async function loadPositions(adapter: PolymarketAdapter, tokenLabels: Map<string, 'YES' | 'NO'>, diagnostics: string[]): Promise<PositionSnapshot[]> {
+async function loadPositions(appConfig: AppConfig, adapter: PolymarketAdapter, tokenLabels: Map<string, 'YES' | 'NO'>, diagnostics: string[]): Promise<PositionSnapshot[]> {
+  if (!appConfig.depositWallet?.trim()) {
+    if (appConfig.executionMode === 'live') diagnostics.push('Position reads require POLYMARKET_DEPOSIT_WALLET.');
+    return [];
+  }
   try {
     return await adapter.getCurrentPositions(tokenLabels);
   } catch (error) {
@@ -151,9 +155,4 @@ function riskConfig(appConfig: AppConfig, dryRun: boolean): StrategyRiskConfig {
 
 function sum(values: number[]): number {
   return values.reduce((total, value) => total + value, 0);
-}
-
-function numberFromEnv(name: string, fallback: number): number {
-  const parsed = Number(process.env[name]);
-  return Number.isFinite(parsed) ? parsed : fallback;
 }

@@ -36,7 +36,7 @@ The default mode is `EXECUTION_MODE=monitor`. In monitor mode the worker records
 
 The worker runs every `BOT_TICK_MS` and produces one `DashboardState` snapshot:
 
-- Builds the current/static BTC 5m round from `configs/btc5m.example.json`.
+- Discovers the next BTC 5m round from deterministic `btc-updown-5m-<roundStartSec>` slugs and Gamma `/markets/slug/:slug`.
 - Maintains recent BTC price samples only from Polymarket RTDS over `wss://ws-live-data.polymarket.com`.
 - Maintains YES/NO CLOB orderbooks only from the Polymarket CLOB market websocket.
 - Computes `cross120s`, `volatility120s`, `drift120s`, and `momentum30s`.
@@ -54,8 +54,6 @@ Required for real trading:
 EXECUTION_MODE=live
 POLYMARKET_DEPOSIT_WALLET=0x...
 OWNER_PRIVATE_KEY=...
-MARKET_YES_TOKEN_ID=...
-MARKET_NO_TOKEN_ID=...
 ```
 
 Recommended live feed settings:
@@ -63,12 +61,15 @@ Recommended live feed settings:
 ```dotenv
 POLYMARKET_RTDS_WS_URL=wss://ws-live-data.polymarket.com
 POLYMARKET_CLOB_WS_URL=wss://ws-subscriptions-clob.polymarket.com/ws/market
+POLYMARKET_GAMMA_API_URL=https://gamma-api.polymarket.com
 BOT_TICK_MS=2000
 MAX_ORDERBOOK_AGE_SECONDS=5
 ```
 
 BTC price has no HTTP/manual/simulated fallback. The worker subscribes to the RTDS `crypto_prices` stream and only accepts `btcusdt` updates. If RTDS is not connected or no `btcusdt` tick has arrived, the regime remains `UNKNOWN` and entry orders are blocked.
-Orderbook price also has no REST fallback. If the CLOB market websocket is not connected or YES/NO books are missing/stale, entry orders are blocked.
+Orderbook price also has no REST fallback. The worker discovers the next 5-minute BTC Up/Down market from Gamma, maps `Up` to the local `YES` side and `Down` to the local `NO` side, then subscribes to both token IDs over the CLOB market websocket. If discovery fails, the CLOB websocket is not connected, or books are missing/stale, entry orders are blocked.
+
+The round strike is the BTC price at the beginning of the 5-minute Polymarket range. Before the next round starts, the dashboard shows the latest RTDS BTC price as an estimate. Once the round starts, the first available RTDS BTC price is persisted as that round's opening strike.
 
 Strategy thresholds:
 
@@ -120,7 +121,7 @@ The included local certificate is self-signed for `b.dark20.xyz`. With that cert
 
 ## Safety
 
-- Keep `EXECUTION_MODE=monitor` until RTDS, CLOB token IDs, balances, and signed-order posting are verified.
+- Keep `EXECUTION_MODE=monitor` until RTDS, Gamma round discovery, CLOB token subscriptions, balances, and signed-order posting are verified.
 - Do not commit `.env`, private keys, or deposit-wallet secrets.
 - Do not expose the dashboard publicly without authentication or a private network boundary.
 - Treat local `settlement` rows as estimates until validated against Polymarket final resolution data.

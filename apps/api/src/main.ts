@@ -1,7 +1,8 @@
 import { PolymarketAdapter } from '../../../packages/polymarket/src';
 import { loadConfig } from './config';
 import { MarketDataService } from './marketData';
-import { runBotTick, currentRound } from './runtime';
+import { Btc5mRoundDiscovery } from './roundDiscovery';
+import { runBotTick } from './runtime';
 import { createServer } from './server';
 import { InMemoryStore } from './store';
 
@@ -15,7 +16,8 @@ async function main() {
     depositWallet: config.depositWallet,
   });
   const data = new MarketDataService(config, store);
-  data.start(currentRound(config));
+  const discovery = new Btc5mRoundDiscovery(config);
+  data.start();
 
   let tickRunning = false;
   const tick = async (source: 'initial' | 'scheduled' | 'manual') => {
@@ -25,7 +27,7 @@ async function main() {
     }
     tickRunning = true;
     try {
-      const snapshot = await runBotTick(config, store, data, adapter);
+      const snapshot = await runBotTick(config, store, data, adapter, discovery);
       store.markRunningIfDegraded();
       store.recordRuntimeLog({
         level: snapshot.diagnostics.some((item) => /failed|stale|blocked|error/i.test(item)) ? 'warn' : 'info',

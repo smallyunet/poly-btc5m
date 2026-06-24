@@ -9,6 +9,8 @@ export class MarketDataService {
   private readonly orderbooks = new Map<string, OrderBookQuote>();
   private rtds?: WebSocket;
   private clob?: WebSocket;
+  private clobTokenKey = '';
+  private clobReconnect?: NodeJS.Timeout;
   private rtdsConnected = false;
   private clobConnected = false;
 
@@ -17,9 +19,23 @@ export class MarketDataService {
     private readonly store: InMemoryStore,
   ) {}
 
-  start(round: BtcRoundConfig): void {
+  start(): void {
     this.connectRtds();
-    this.connectClob(round);
+  }
+
+  syncClobRound(round: BtcRoundConfig): void {
+    const tokenIds = [round.yesTokenId, round.noTokenId].filter(Boolean);
+    const nextKey = tokenIds.join('|');
+    if (tokenIds.length < 2) {
+      if (!this.clobTokenKey) return;
+      this.closeClob();
+      this.clobTokenKey = '';
+      return;
+    }
+    if (this.clobTokenKey === nextKey && this.clob) return;
+    this.closeClob();
+    this.clobTokenKey = nextKey;
+    this.connectClob(tokenIds);
   }
 
   refreshOrderbooks(round: BtcRoundConfig): OrderBookQuote[] {
@@ -78,6 +94,10 @@ export class MarketDataService {
     };
   }
 
+  latestPrice(): number | null {
+    return this.priceTicks.at(-1)?.price ?? null;
+  }
+
   private connectRtds(): void {
     if (this.rtds) return;
     try {
@@ -115,9 +135,8 @@ export class MarketDataService {
     }
   }
 
-  private connectClob(round: BtcRoundConfig): void {
+  private connectClob(tokenIds: string[]): void {
     if (this.clob) return;
-    const tokenIds = [round.yesTokenId, round.noTokenId].filter(Boolean);
     if (tokenIds.length < 2) {
       this.store.recordRuntimeLog({ level: 'warn', source: 'market-data', message: 'CLOB websocket is disabled until both YES and NO token IDs are configured.' });
       return;
@@ -140,7 +159,10 @@ export class MarketDataService {
       ws.on('close', () => {
         this.clobConnected = false;
         this.clob = undefined;
-        setTimeout(() => this.connectClob(round), 5_000).unref?.();
+        if (this.clobTokenKey) {
+          this.clobReconnect = setTimeout(() => this.connectClob(this.clobTokenKey.split('|').filter(Boolean)), 5_000);
+          this.clobReconnect.unref?.();
+        }
       });
       ws.on('error', (error) => {
         this.clobConnected = false;
@@ -149,6 +171,22 @@ export class MarketDataService {
     } catch (error) {
       this.store.recordRuntimeLog({ level: 'warn', source: 'market-data', message: `CLOB websocket failed: ${error instanceof Error ? error.message : String(error)}` });
     }
+  }
+
+  private closeClob(): void {
+    if (this.clobReconnect) {
+      clearTimeout(this.clobReconnect);
+      this.clobReconnect = undefined;
+    }
+    if (this.clob) {
+      try {
+        this.clob.close();
+      } catch {
+        // Ignore close errors; the next sync will establish the target subscription.
+      }
+      this.clob = undefined;
+    }
+    this.clobConnected = false;
   }
 
   private handlePriceMessage(data: unknown): void {

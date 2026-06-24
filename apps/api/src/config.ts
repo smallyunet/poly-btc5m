@@ -1,5 +1,4 @@
 import 'dotenv/config';
-import fs from 'node:fs';
 import path from 'node:path';
 
 import { btcMarketConfigSchema, type BtcMarketConfig, type ExecutionMode } from '../../../packages/shared/src';
@@ -9,6 +8,7 @@ export type AppConfig = {
   dashboardInternalApiKey?: string;
   executionMode: ExecutionMode;
   clobApiUrl: string;
+  gammaApiUrl: string;
   chainId: number;
   ownerPrivateKey?: string;
   depositWallet?: string;
@@ -34,6 +34,7 @@ export function loadConfig(): AppConfig {
     dashboardInternalApiKey: process.env.DASHBOARD_INTERNAL_API_KEY,
     executionMode: parseExecutionMode(process.env.EXECUTION_MODE),
     clobApiUrl: process.env.POLYMARKET_CLOB_API_URL || 'https://clob.polymarket.com',
+    gammaApiUrl: process.env.POLYMARKET_GAMMA_API_URL || 'https://gamma-api.polymarket.com',
     chainId: Number(process.env.POLYMARKET_CHAIN_ID || 137),
     ownerPrivateKey: process.env.OWNER_PRIVATE_KEY,
     depositWallet: process.env.POLYMARKET_DEPOSIT_WALLET,
@@ -55,22 +56,12 @@ export function loadConfig(): AppConfig {
 }
 
 function loadMarketConfig(): BtcMarketConfig {
-  const configPath = optionalString(process.env.MARKET_CONFIG_PATH);
-  if (configPath && fs.existsSync(configPath)) {
-    const parsed = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-    return btcMarketConfigSchema.parse(parsed);
-  }
-
-  const strike = numberEnv('STATIC_ROUND_STRIKE', 100_000);
   return btcMarketConfigSchema.parse({
     seriesSlug: process.env.MARKET_SERIES_SLUG || 'btc-updown-5m',
     title: process.env.MARKET_TITLE || 'Polymarket BTC 5m',
     roundDurationSeconds: 300,
     decisionLeadSeconds: 30,
     avoidExpirySeconds: 30,
-    strike,
-    yesTokenId: process.env.MARKET_YES_TOKEN_ID || '',
-    noTokenId: process.env.MARKET_NO_TOKEN_ID || '',
   });
 }
 
@@ -86,10 +77,6 @@ function parsePositiveInteger(value: string | undefined, fallback: number): numb
 function numberEnv(name: string, fallback: number): number {
   const parsed = Number(process.env[name]);
   return Number.isFinite(parsed) ? parsed : fallback;
-}
-
-function optionalString(value: string | undefined): string | undefined {
-  return value?.trim() || undefined;
 }
 
 function rtdsWsUrl(value: string | undefined): string {
