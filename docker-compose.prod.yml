@@ -9,8 +9,11 @@ services:
       NODE_ENV: production
       PORT: 8788
       WEB_DIST_DIR: /app/dist/apps/web
+      RUNTIME_STATE_PATH: /app/data/runtime-state.json
     expose:
       - "8788"
+    volumes:
+      - ./data:/app/data
 
   caddy:
     image: caddy:2.10-alpine

@@ -110,6 +110,14 @@ If `ssh a` logs into the target server:
 
 Production uses Caddy as the public reverse proxy in front of the API/dashboard container. Defaults are `HTTP_PORT=8088` and `HTTPS_PORT=8444` so this project can run on the same server as `poly-elon` without taking 80/443.
 
+Runtime state is persisted on the server under:
+
+```text
+~/apps/poly-btc5m/data/runtime-state.json
+```
+
+`docker-compose.prod.yml` bind-mounts `./data` into the API container and overrides `RUNTIME_STATE_PATH` to `/app/data/runtime-state.json`. The deploy script creates `data/` and excludes it from `rsync --delete`, so order intents, posted orders, fills, settlements, and captured round strikes survive container rebuilds and redeploys.
+
 The repository expects a certificate at:
 
 ```text
