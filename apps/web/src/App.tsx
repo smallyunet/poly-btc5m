@@ -29,6 +29,25 @@ function shortenTokenId(id: string): string {
   return `${id.slice(0, 8)}...${id.slice(-8)}`;
 }
 
+function outcomeLabel(label: 'YES' | 'NO'): string {
+  return label === 'YES' ? 'UP' : 'DOWN';
+}
+
+function outcomeTone(label: 'YES' | 'NO'): 'good' | 'bad' {
+  return label === 'YES' ? 'good' : 'bad';
+}
+
+function formatEtTime(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'n/a';
+  return `${date.toLocaleTimeString('en-US', {
+    timeZone: 'America/New_York',
+    hour: 'numeric',
+    minute: '2-digit',
+    second: '2-digit',
+  })} ET`;
+}
+
 export function App() {
   const [state, setState] = React.useState<DashboardState | null>(null);
   const [error, setError] = React.useState<string | null>(null);
@@ -111,17 +130,26 @@ export function App() {
 
   const snapshot = state.latestSnapshot;
   const eligible = state.strategyChecks.filter((check) => check.status === 'eligible').length;
-  const activeOrders = state.orders.filter((order) => order.status === 'posted' || order.status === 'local' || order.status === 'partially_filled').length;
+  const activeOrders = state.orders.filter((order) => (
+    order.status === 'posted'
+    || order.status === 'partially_filled'
+    || (state.runtime.executionMode === 'monitor' && order.status === 'local')
+  )).length;
   const pnl = state.settlements.reduce((sum, item) => sum + item.pnl, 0);
 
   // Time progress bar calculation
   const secondsToEnd = snapshot.round.secondsToEnd;
+  const secondsToStart = snapshot.round.secondsToStart;
   const totalRoundDuration = 300; // 5 minutes
-  const remainingPct = Math.min(100, Math.max(0, (secondsToEnd / totalRoundDuration) * 100));
+  const isRoundStarted = secondsToStart <= 0;
+  const roundElapsedSeconds = isRoundStarted ? totalRoundDuration - Math.max(0, secondsToEnd) : 0;
+  const progressPct = Math.min(100, Math.max(0, (roundElapsedSeconds / totalRoundDuration) * 100));
   let progressColorClass = 'safe';
-  if (secondsToEnd < 30) {
+  if (!isRoundStarted && secondsToStart <= 30) {
+    progressColorClass = 'warning';
+  } else if (isRoundStarted && secondsToEnd < 30) {
     progressColorClass = 'danger';
-  } else if (secondsToEnd <= 120) {
+  } else if (isRoundStarted && secondsToEnd <= 120) {
     progressColorClass = 'warning';
   }
 
@@ -137,10 +165,14 @@ export function App() {
   const gaugePct = priceDiff != null ? Math.min(95, Math.max(5, 50 + (priceDiff / rangeDelta) * 50)) : 50;
 
   // Round phase detail text logic (prevents negative countdowns once started)
-  const isRoundStarted = snapshot.round.secondsToStart <= 0;
   const roundPhaseDetail = isRoundStarted
     ? `${formatSeconds(secondsToEnd)} remaining`
-    : `${formatSeconds(snapshot.round.secondsToStart)} to start`;
+    : `${formatSeconds(secondsToStart)} to start`;
+  const timelineDetail = isRoundStarted ? `${formatSeconds(secondsToEnd)} remaining` : `${formatSeconds(secondsToStart)} to start`;
+  const strikeLabel = snapshot.round.strikeStatus === 'locked' ? 'Opening Strike' : 'Estimated Open';
+  const terminalGaugeStatus = snapshot.round.strikeStatus === 'locked'
+    ? (isBtcAboveStrike ? 'BTC >= OPEN (UP WINS)' : 'BTC < OPEN (DOWN WINS)')
+    : 'PRE-ROUND OPEN ESTIMATE';
 
   return (
     <Shell>
@@ -242,7 +274,7 @@ export function App() {
                     <div className="gaugeHeader">
                       <span>Live Tracker</span>
                       <strong className={isBtcAboveStrike ? 'pass' : 'fail'} style={{ fontSize: '13px' }}>
-                        {isBtcAboveStrike ? 'BTC ≥ STRIKE (YES WINS)' : 'BTC < STRIKE (NO WINS)'}
+                        {terminalGaugeStatus}
                       </strong>
                     </div>
                     <div className="gaugeTrack">
@@ -254,11 +286,11 @@ export function App() {
                       <div className={`gaugePointer ${isBtcAboveStrike ? 'above' : 'below'}`} style={{ left: `${gaugePct}%` }}></div>
                     </div>
                     <div className="gaugeLabels">
-                      <span className="gaugeSideLabel NO">NO ZONE (Below)</span>
+                      <span className="gaugeSideLabel NO">DOWN ZONE (Below)</span>
                       <span className="gaugeCenterLabel" style={{ fontSize: '12px', fontWeight: 500 }}>
-                        Strike: <strong style={{ color: 'var(--text-primary)' }}>${formatNumber(strikePrice, 2)}</strong> | Price: <strong style={{ color: 'var(--text-primary)' }}>${formatNumber(btcPrice, 2)}</strong> ({priceDiff >= 0 ? '+' : ''}{priceDiff.toFixed(2)} USD)
+                        {strikeLabel}: <strong style={{ color: 'var(--text-primary)' }}>${formatNumber(strikePrice, 2)}</strong> | Price: <strong style={{ color: 'var(--text-primary)' }}>${formatNumber(btcPrice, 2)}</strong> ({priceDiff >= 0 ? '+' : ''}{priceDiff.toFixed(2)} USD)
                       </span>
-                      <span className="gaugeSideLabel YES">YES ZONE (Above)</span>
+                      <span className="gaugeSideLabel YES">UP ZONE (Above)</span>
                     </div>
                   </div>
                 </div>
@@ -284,8 +316,8 @@ export function App() {
                       return (
                         <div key={pos.tokenId} className={`positionCard ${pos.label}`}>
                           <div className="posToken">
-                            <div className="posTokenName">{pos.label} Token</div>
-                            <div className="posTokenSide">{pos.label} Shares</div>
+                            <div className="posTokenName">{outcomeLabel(pos.label)} Token</div>
+                            <div className="posTokenSide">{outcomeLabel(pos.label)} Shares</div>
                           </div>
                           <div className="posStats">
                             <span>Shares / Avg Entry</span>
@@ -304,6 +336,11 @@ export function App() {
                         </div>
                       );
                     })
+                  ) : snapshot.positionReadStatus === 'disabled' ? (
+                    <div className="empty" style={{ minHeight: '100px', background: 'rgba(0, 0, 0, 0.008)', border: '1px dashed var(--border-color)', borderRadius: '10px' }}>
+                      <Info size={20} style={{ color: 'var(--text-muted)' }} />
+                      <p className="emptyText">Position reads disabled until a deposit wallet is configured</p>
+                    </div>
                   ) : (
                     <div className="empty" style={{ minHeight: '100px', background: 'rgba(0, 0, 0, 0.008)', border: '1px dashed var(--border-color)', borderRadius: '10px' }}>
                       <Info size={20} style={{ color: 'var(--text-muted)' }} />
@@ -351,10 +388,10 @@ export function App() {
                 <div className="progressBarContainer">
                   <div className="progressBarLabel">
                     <span>Phase: <strong style={{ color: 'var(--text-primary)' }}>{snapshot.round.phase.toUpperCase()}</strong></span>
-                    <span>{formatSeconds(secondsToEnd)} remaining</span>
+                    <span>{timelineDetail}</span>
                   </div>
                   <div className="progressTrack">
-                    <div className={`progressFill ${progressColorClass}`} style={{ width: `${remainingPct}%` }}></div>
+                    <div className={`progressFill ${progressColorClass}`} style={{ width: `${progressPct}%` }}></div>
                   </div>
                 </div>
               </div>
@@ -365,23 +402,27 @@ export function App() {
                 <div className="metrics">
                   <div className="metricRow">
                     <span className="metricLabel">Round ID</span>
-                    <span className="metricValue">{snapshot.id}</span>
+                    <span className="metricValue">{snapshot.round.id}</span>
+                  </div>
+                  <div className="metricRow">
+                    <span className="metricLabel">Snapshot ID</span>
+                    <span className="metricValue" style={{ fontSize: '11px' }}>{snapshot.id}</span>
                   </div>
                   <div className="metricRow">
                     <span className="metricLabel">Event Slug</span>
                     <span className="metricValue" style={{ fontSize: '11px' }}>{snapshot.round.eventSlug}</span>
                   </div>
                   <div className="metricRow">
-                    <span className="metricLabel">Strike Price</span>
+                    <span className="metricLabel">{strikeLabel}</span>
                     <span className="metricValue">${formatNumber(snapshot.round.strike, 2)}</span>
                   </div>
                   <div className="metricRow">
                     <span className="metricLabel">Start Time</span>
-                    <span className="metricValue">{new Date(snapshot.round.startAt).toLocaleTimeString()}</span>
+                    <span className="metricValue">{formatEtTime(snapshot.round.startAt)}</span>
                   </div>
                   <div className="metricRow">
                     <span className="metricLabel">End Time</span>
-                    <span className="metricValue">{new Date(snapshot.round.endAt).toLocaleTimeString()}</span>
+                    <span className="metricValue">{formatEtTime(snapshot.round.endAt)}</span>
                   </div>
                 </div>
               </div>
@@ -439,7 +480,7 @@ export function App() {
         {activeTab === 'orderbooks' && (
           <div className="panel">
             <h2>Polymarket CLOB Order Books</h2>
-            <OrderbookTable quotes={snapshot.orderbooks} />
+            <OrderbookTable quotes={snapshot.orderbooks} yesTokenId={snapshot.round.yesTokenId} noTokenId={snapshot.round.noTokenId} />
           </div>
         )}
 
@@ -450,12 +491,12 @@ export function App() {
             <div className="panel">
               <h2>Active Orders & Intent History</h2>
               {state.orders.length > 0 ? (
-                <DataTable headers={['Time', 'Round ID', 'Label', 'Side', 'Price', 'Size', 'Status', 'Polymarket CLOB Order ID']}>
+                <DataTable headers={['Time (ET)', 'Round ID', 'Outcome', 'Side', 'Price', 'Size', 'Status', 'Polymarket CLOB Order ID']}>
                   {state.orders.slice(0, 100).map((order) => (
                     <tr key={order.id}>
-                      <td className="mono">{new Date(order.createdAt).toLocaleTimeString()}</td>
+                      <td className="mono">{formatEtTime(order.createdAt)}</td>
                       <td className="mono" style={{ fontSize: '11px' }}>{order.roundId}</td>
-                      <td><Badge tone={order.label === 'YES' ? 'good' : 'bad'}>{order.label}</Badge></td>
+                      <td><Badge tone={outcomeTone(order.label)}>{outcomeLabel(order.label)}</Badge></td>
                       <td>
                         <strong style={{ color: order.side === 'BUY' ? 'var(--color-success)' : 'var(--color-danger)' }}>
                           {order.side}
@@ -485,14 +526,14 @@ export function App() {
             <div className="panel">
               <h2>Trade Fills & Settlement History</h2>
               {(state.fills.length > 0 || state.settlements.length > 0) ? (
-                <DataTable headers={['Record Type', 'Timestamp', 'Round ID', 'Details', 'Position/Winner', 'Price/Cost', 'Size/PnL']}>
+                <DataTable headers={['Record Type', 'Time (ET)', 'Round ID', 'Details', 'Position/Winner', 'Price/Cost', 'Size/PnL']}>
                   {/* Fills list */}
                   {state.fills.slice(0, 50).map((fill) => (
                     <tr key={`fill-${fill.id}`}>
                       <td><Badge tone="neutral">FILL</Badge></td>
-                      <td className="mono">{new Date(fill.matchedAt).toLocaleTimeString()}</td>
+                      <td className="mono">{formatEtTime(fill.matchedAt)}</td>
                       <td className="mono" style={{ fontSize: '11px' }}>{fill.roundId}</td>
-                      <td>{fill.label} Match</td>
+                      <td>{outcomeLabel(fill.label)} Match</td>
                       <td>
                         <strong style={{ color: fill.side === 'BUY' ? 'var(--color-success)' : 'var(--color-danger)' }}>
                           {fill.side}
@@ -506,12 +547,12 @@ export function App() {
                   {state.settlements.slice(0, 50).map((settlement) => (
                     <tr key={`settlement-${settlement.id}`}>
                       <td><Badge tone="good">SETTLEMENT</Badge></td>
-                      <td className="mono">{new Date(settlement.resolvedAt).toLocaleTimeString()}</td>
+                      <td className="mono">{formatEtTime(settlement.resolvedAt)}</td>
                       <td className="mono" style={{ fontSize: '11px' }}>{settlement.roundId}</td>
                       <td>{settlement.status.toUpperCase()}</td>
                       <td>
                         <Badge tone={settlement.winningLabel === 'YES' ? 'good' : settlement.winningLabel === 'NO' ? 'bad' : 'neutral'}>
-                          {settlement.winningLabel || 'pending'}
+                          {settlement.winningLabel ? outcomeLabel(settlement.winningLabel) : 'pending'}
                         </Badge>
                       </td>
                       <td className="mono">{formatMoney(settlement.totalCost)}</td>
@@ -625,7 +666,7 @@ export function App() {
                 {filteredLogs.length > 0 ? (
                   filteredLogs.map((log) => (
                     <div key={log.id} className={`consoleLogLine ${log.level}`}>
-                      <span className="logTime">{new Date(log.createdAt).toLocaleTimeString()}</span>
+                      <span className="logTime">{formatEtTime(log.createdAt)}</span>
                       <span className="logSource">[{log.source}]</span>
                       <span className={`logLevelTag ${log.level}`}>{log.level}</span>
                       <span className="logMessage">{log.message}</span>
@@ -678,19 +719,21 @@ function Digest({
   );
 }
 
-function OrderbookTable({ quotes }: { quotes: OrderBookQuote[] }) {
+function OrderbookTable({ quotes, yesTokenId, noTokenId }: { quotes: OrderBookQuote[]; yesTokenId: string; noTokenId: string }) {
   // Scale depths relative to max depths found in the quotes list
   const maxBidDepth = Math.max(...quotes.map((q) => q.bidDepth), 1);
   const maxAskDepth = Math.max(...quotes.map((q) => q.askDepth), 1);
 
   return (
-    <DataTable headers={['Token ID', 'Data Source', 'Best Bid', 'Best Ask', 'Midpoint', 'Spread', 'Bid Liquidity (Depth)', 'Ask Liquidity (Depth)', 'Last Updated']}>
+    <DataTable headers={['Outcome', 'Token ID', 'Data Source', 'Best Bid', 'Best Ask', 'Midpoint', 'Spread', 'Bid Liquidity (Depth)', 'Ask Liquidity (Depth)', 'Last Updated (ET)']}>
       {quotes.map((quote) => {
         const bidPct = (quote.bidDepth / maxBidDepth) * 80; // max 80% width
         const askPct = (quote.askDepth / maxAskDepth) * 80;
+        const label = quote.tokenId === yesTokenId ? 'YES' : quote.tokenId === noTokenId ? 'NO' : null;
         
         return (
           <tr key={quote.tokenId}>
+            <td>{label ? <Badge tone={outcomeTone(label)}>{outcomeLabel(label)}</Badge> : '-'}</td>
             <td className="mono" style={{ fontSize: '11px' }} title={quote.tokenId}>{shortenTokenId(quote.tokenId)}</td>
             <td><Badge tone={quote.source === 'ws' ? 'good' : 'neutral'}>{quote.source.toUpperCase()}</Badge></td>
             <td className="mono" style={{ color: 'var(--color-success)', fontWeight: 600 }}>
@@ -712,7 +755,7 @@ function OrderbookTable({ quotes }: { quotes: OrderBookQuote[] }) {
               <span style={{ position: 'relative', zIndex: 1 }}>{quote.askDepth.toFixed(2)}</span>
             </td>
             
-            <td className="mono">{new Date(quote.updatedAt).toLocaleTimeString()}</td>
+            <td className="mono">{formatEtTime(quote.updatedAt)}</td>
           </tr>
         );
       })}

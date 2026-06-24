@@ -62,6 +62,7 @@ function baseSnapshot(features: Partial<StateSnapshot['features']>): StateSnapsh
       secondsToStart: 20,
       secondsToEnd: 320,
       strike: 100_000,
+      strikeStatus: 'locked',
       yesTokenId: 'yes',
       noTokenId: 'no',
     },
@@ -84,6 +85,7 @@ function baseSnapshot(features: Partial<StateSnapshot['features']>): StateSnapsh
       quote('no'),
     ],
     positions: [],
+    positionReadStatus: 'enabled',
     diagnostics: [],
   };
 }

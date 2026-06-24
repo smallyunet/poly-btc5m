@@ -93,6 +93,7 @@ export type RoundSnapshot = {
   secondsToStart: number;
   secondsToEnd: number;
   strike: number;
+  strikeStatus: 'estimated' | 'locked';
   yesTokenId: string;
   noTokenId: string;
   sourceUrl?: string;
@@ -116,6 +117,7 @@ export type StateSnapshot = {
   regime: Regime;
   orderbooks: OrderBookQuote[];
   positions: PositionSnapshot[];
+  positionReadStatus: 'enabled' | 'disabled';
   diagnostics: string[];
 };
 

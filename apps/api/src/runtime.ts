@@ -19,7 +19,7 @@ export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, dat
   data.syncClobRound(round);
   const orderbooks = await data.refreshOrderbooks(round);
   const features = data.features(round);
-  const roundSnapshot = roundToSnapshot(appConfig, round);
+  const roundSnapshot = roundToSnapshot(appConfig, store, round);
   const tokenLabels = new Map<string, 'YES' | 'NO'>([
     [round.yesTokenId, 'YES'],
     [round.noTokenId, 'NO'],
@@ -33,6 +33,7 @@ export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, dat
     regime: 'UNKNOWN',
     orderbooks,
     positions,
+    positionReadStatus: appConfig.depositWallet?.trim() ? 'enabled' : 'disabled',
     diagnostics,
   };
   const risk = riskConfig(appConfig, store.getRuntime().executionMode !== 'live');
@@ -59,7 +60,7 @@ function captureOpeningStrike(round: BtcRoundConfig, store: InMemoryStore, lates
   return { ...round, strike: latestPrice };
 }
 
-function roundToSnapshot(appConfig: AppConfig, round: BtcRoundConfig): RoundSnapshot {
+function roundToSnapshot(appConfig: AppConfig, store: InMemoryStore, round: BtcRoundConfig): RoundSnapshot {
   const now = Date.now();
   const start = new Date(round.startAt).getTime();
   const end = new Date(round.endAt).getTime();
@@ -73,6 +74,7 @@ function roundToSnapshot(appConfig: AppConfig, round: BtcRoundConfig): RoundSnap
     secondsToStart: (start - now) / 1000,
     secondsToEnd: (end - now) / 1000,
     strike: round.strike,
+    strikeStatus: store.getRoundStrike(round.eventSlug) ? 'locked' : 'estimated',
     yesTokenId: round.yesTokenId,
     noTokenId: round.noTokenId,
     sourceUrl: round.sourceUrl,
