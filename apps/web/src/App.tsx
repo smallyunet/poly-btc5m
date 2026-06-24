@@ -22,6 +22,13 @@ import { formatMoney, formatNumber, formatSeconds, modeLabel } from './lib/forma
 
 type TabType = 'terminal' | 'orderbooks' | 'activity' | 'strategy' | 'logs';
 
+// Helper to shorten long crypto addresses/token IDs
+function shortenTokenId(id: string): string {
+  if (!id) return '-';
+  if (id.length <= 16) return id;
+  return `${id.slice(0, 8)}...${id.slice(-8)}`;
+}
+
 export function App() {
   const [state, setState] = React.useState<DashboardState | null>(null);
   const [error, setError] = React.useState<string | null>(null);
@@ -34,6 +41,9 @@ export function App() {
   const [logSearch, setLogSearch] = React.useState('');
   const [logLevel, setLogLevel] = React.useState<string>('all');
   const [logSource, setLogSource] = React.useState<string>('all');
+
+  // Ref for auto-scrolling the log console
+  const consoleRef = React.useRef<HTMLDivElement>(null);
 
   const load = React.useCallback(async (silent = false) => {
     try {
@@ -66,6 +76,13 @@ export function App() {
       return matchesSearch && matchesLevel && matchesSource;
     });
   }, [state?.runtimeLogs, logSearch, logLevel, logSource]);
+
+  // Auto-scroll log console to bottom when new logs arrive
+  React.useEffect(() => {
+    if (consoleRef.current && activeTab === 'logs') {
+      consoleRef.current.scrollTop = consoleRef.current.scrollHeight;
+    }
+  }, [filteredLogs, activeTab]);
 
   if (error) {
     return (
@@ -118,6 +135,12 @@ export function App() {
   // We center it at the strike, and range represents +/- delta.
   const rangeDelta = priceDiff != null ? Math.max(100, Math.abs(priceDiff) * 1.6) : 100;
   const gaugePct = priceDiff != null ? Math.min(95, Math.max(5, 50 + (priceDiff / rangeDelta) * 50)) : 50;
+
+  // Round phase detail text logic (prevents negative countdowns once started)
+  const isRoundStarted = snapshot.round.secondsToStart <= 0;
+  const roundPhaseDetail = isRoundStarted
+    ? `${formatSeconds(secondsToEnd)} remaining`
+    : `${formatSeconds(snapshot.round.secondsToStart)} to start`;
 
   return (
     <Shell>
@@ -178,7 +201,7 @@ export function App() {
           icon={<Timer size={16} />} 
           label="Round Phase" 
           value={snapshot.round.phase.toUpperCase()} 
-          detail={`${formatSeconds(snapshot.round.secondsToStart)} to start`} 
+          detail={roundPhaseDetail} 
           tone={snapshot.round.phase === 'decision' || snapshot.round.phase === 'posting' ? 'warn' : 'neutral'} 
         />
         <Digest 
@@ -282,7 +305,7 @@ export function App() {
                       );
                     })
                   ) : (
-                    <div className="empty" style={{ minHeight: '100px', background: 'rgba(255, 255, 255, 0.01)', border: '1px dashed var(--border-color)', borderRadius: '10px' }}>
+                    <div className="empty" style={{ minHeight: '100px', background: 'rgba(0, 0, 0, 0.008)', border: '1px dashed var(--border-color)', borderRadius: '10px' }}>
                       <Info size={20} style={{ color: 'var(--text-muted)' }} />
                       <p className="emptyText">No active token positions held in this round</p>
                     </div>
@@ -445,7 +468,9 @@ export function App() {
                           {order.status}
                         </Badge>
                       </td>
-                      <td className="mono" style={{ fontSize: '11px' }}>{order.clobOrderId || '-'}</td>
+                      <td className="mono" style={{ fontSize: '11px' }} title={order.clobOrderId || ''}>
+                        {order.clobOrderId ? shortenTokenId(order.clobOrderId) : '-'}
+                      </td>
                     </tr>
                   ))}
                 </DataTable>
@@ -596,7 +621,7 @@ export function App() {
               </div>
 
               {/* Console log box */}
-              <div className="consoleWindow">
+              <div className="consoleWindow" ref={consoleRef}>
                 {filteredLogs.length > 0 ? (
                   filteredLogs.map((log) => (
                     <div key={log.id} className={`consoleLogLine ${log.level}`}>
@@ -643,6 +668,9 @@ function Digest({
       <div className="digestHeader">
         {icon}
         <span>{label}</span>
+        {(tone === 'good' || tone === 'warn' || tone === 'bad') && (
+          <span className={`liveDot ${tone}`} style={{ marginLeft: 'auto' }}></span>
+        )}
       </div>
       <strong className="digestValue">{value}</strong>
       <em className="digestDetail">{detail}</em>
@@ -663,7 +691,7 @@ function OrderbookTable({ quotes }: { quotes: OrderBookQuote[] }) {
         
         return (
           <tr key={quote.tokenId}>
-            <td className="mono" style={{ fontSize: '11px' }}>{quote.tokenId || '-'}</td>
+            <td className="mono" style={{ fontSize: '11px' }} title={quote.tokenId}>{shortenTokenId(quote.tokenId)}</td>
             <td><Badge tone={quote.source === 'ws' ? 'good' : 'neutral'}>{quote.source.toUpperCase()}</Badge></td>
             <td className="mono" style={{ color: 'var(--color-success)', fontWeight: 600 }}>
               {quote.bestBid == null ? '-' : quote.bestBid.toFixed(3)}
