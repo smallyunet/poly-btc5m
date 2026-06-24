@@ -20,5 +20,8 @@ export const btcMarketConfigSchema = z.object({
   roundDurationSeconds: z.number().int().positive().default(300),
   decisionLeadSeconds: z.number().int().positive().default(30),
   avoidExpirySeconds: z.number().int().nonnegative().default(30),
+  strike: z.number().positive().optional(),
+  yesTokenId: z.string().optional(),
+  noTokenId: z.string().optional(),
   staticRound: btcRoundConfigSchema.optional(),
 });

@@ -55,15 +55,12 @@ export function loadConfig(): AppConfig {
 }
 
 function loadMarketConfig(): BtcMarketConfig {
-  const configPath = process.env.MARKET_CONFIG_PATH || path.resolve(process.cwd(), 'configs/btc5m.example.json');
-  if (fs.existsSync(configPath)) {
+  const configPath = optionalString(process.env.MARKET_CONFIG_PATH);
+  if (configPath && fs.existsSync(configPath)) {
     const parsed = JSON.parse(fs.readFileSync(configPath, 'utf8'));
     return btcMarketConfigSchema.parse(parsed);
   }
 
-  const now = Date.now();
-  const roundDurationMs = 5 * 60 * 1000;
-  const start = Math.ceil(now / roundDurationMs) * roundDurationMs;
   const strike = numberEnv('STATIC_ROUND_STRIKE', 100_000);
   return btcMarketConfigSchema.parse({
     seriesSlug: process.env.MARKET_SERIES_SLUG || 'btc-updown-5m',
@@ -71,16 +68,9 @@ function loadMarketConfig(): BtcMarketConfig {
     roundDurationSeconds: 300,
     decisionLeadSeconds: 30,
     avoidExpirySeconds: 30,
-    staticRound: {
-      eventSlug: process.env.MARKET_EVENT_SLUG || `btc-5m-${start}`,
-      title: process.env.MARKET_ROUND_TITLE || 'Static BTC 5m round',
-      startAt: process.env.MARKET_START_AT || new Date(start).toISOString(),
-      endAt: process.env.MARKET_END_AT || new Date(start + roundDurationMs).toISOString(),
-      strike,
-      yesTokenId: process.env.MARKET_YES_TOKEN_ID || '',
-      noTokenId: process.env.MARKET_NO_TOKEN_ID || '',
-      sourceUrl: process.env.MARKET_SOURCE_URL,
-    },
+    strike,
+    yesTokenId: process.env.MARKET_YES_TOKEN_ID || '',
+    noTokenId: process.env.MARKET_NO_TOKEN_ID || '',
   });
 }
 

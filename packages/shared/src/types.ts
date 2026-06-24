@@ -37,6 +37,9 @@ export type BtcMarketConfig = {
   roundDurationSeconds: number;
   decisionLeadSeconds: number;
   avoidExpirySeconds: number;
+  strike?: number;
+  yesTokenId?: string;
+  noTokenId?: string;
   staticRound?: BtcRoundConfig;
 };
 

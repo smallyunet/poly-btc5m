@@ -1,17 +1,14 @@
+import WebSocket from 'ws';
 import type { BtcFeatureSnapshot, BtcRoundConfig, DataFeedStatus, OrderBookQuote, PriceTick } from '../../../packages/shared/src';
 import { quoteFromBook } from '../../../packages/polymarket/src';
 import type { AppConfig } from './config';
 import type { InMemoryStore } from './store';
 
-type WsLike = WebSocket & { readyState: number };
-
-const OPEN = 1;
-
 export class MarketDataService {
   private readonly priceTicks: PriceTick[] = [];
   private readonly orderbooks = new Map<string, OrderBookQuote>();
-  private rtds?: WsLike;
-  private clob?: WsLike;
+  private rtds?: WebSocket;
+  private clob?: WebSocket;
   private rtdsConnected = false;
   private clobConnected = false;
 
@@ -83,14 +80,10 @@ export class MarketDataService {
 
   private connectRtds(): void {
     if (this.rtds) return;
-    if (typeof WebSocket === 'undefined') {
-      this.store.recordRuntimeLog({ level: 'warn', source: 'market-data', message: 'Global WebSocket is unavailable; RTDS listener is disabled.' });
-      return;
-    }
     try {
-      const ws = new WebSocket(this.config.rtdsWsUrl) as WsLike;
+      const ws = new WebSocket(this.config.rtdsWsUrl);
       this.rtds = ws;
-      ws.addEventListener('open', () => {
+      ws.on('open', () => {
         this.rtdsConnected = true;
         this.store.recordRuntimeLog({ level: 'info', source: 'market-data', message: 'RTDS websocket connected.' });
         ws.send(JSON.stringify({
@@ -104,19 +97,20 @@ export class MarketDataService {
           ],
         }));
       });
-      ws.addEventListener('message', (event) => this.handlePriceMessage(event.data));
-      ws.addEventListener('close', () => {
+      ws.on('message', (data) => this.handlePriceMessage(data.toString()));
+      ws.on('close', () => {
         this.rtdsConnected = false;
         this.rtds = undefined;
         setTimeout(() => this.connectRtds(), 5_000).unref?.();
       });
-      ws.addEventListener('error', () => {
+      ws.on('error', (error) => {
         this.rtdsConnected = false;
+        this.store.recordRuntimeLog({ level: 'warn', source: 'market-data', message: `RTDS websocket error: ${error.message}` });
       });
       const ping = setInterval(() => {
-        if (ws.readyState === OPEN) ws.send('PING');
+        if (ws.readyState === WebSocket.OPEN) ws.send('PING');
       }, 5_000);
-      ws.addEventListener('close', () => clearInterval(ping));
+      ws.on('close', () => clearInterval(ping));
     } catch (error) {
       this.store.recordRuntimeLog({ level: 'warn', source: 'market-data', message: `RTDS websocket failed: ${error instanceof Error ? error.message : String(error)}` });
     }
@@ -124,16 +118,18 @@ export class MarketDataService {
 
   private connectClob(round: BtcRoundConfig): void {
     if (this.clob) return;
-    if (typeof WebSocket === 'undefined') return;
     const tokenIds = [round.yesTokenId, round.noTokenId].filter(Boolean);
-    if (!tokenIds.length) return;
+    if (tokenIds.length < 2) {
+      this.store.recordRuntimeLog({ level: 'warn', source: 'market-data', message: 'CLOB websocket is disabled until both YES and NO token IDs are configured.' });
+      return;
+    }
     try {
-      const ws = new WebSocket(this.config.clobWsUrl) as WsLike;
+      const ws = new WebSocket(this.config.clobWsUrl);
       this.clob = ws;
-      ws.addEventListener('open', () => {
+      ws.on('open', () => {
         this.clobConnected = true;
         this.store.recordRuntimeLog({ level: 'info', source: 'market-data', message: 'CLOB websocket connected.' });
-        if (ws.readyState === OPEN) {
+        if (ws.readyState === WebSocket.OPEN) {
           ws.send(JSON.stringify({
             type: 'market',
             assets_ids: tokenIds,
@@ -141,14 +137,15 @@ export class MarketDataService {
           }));
         }
       });
-      ws.addEventListener('message', (event) => this.handleOrderbookMessage(event.data));
-      ws.addEventListener('close', () => {
+      ws.on('message', (data) => this.handleOrderbookMessage(data.toString()));
+      ws.on('close', () => {
         this.clobConnected = false;
         this.clob = undefined;
         setTimeout(() => this.connectClob(round), 5_000).unref?.();
       });
-      ws.addEventListener('error', () => {
+      ws.on('error', (error) => {
         this.clobConnected = false;
+        this.store.recordRuntimeLog({ level: 'warn', source: 'market-data', message: `CLOB websocket error: ${error.message}` });
       });
     } catch (error) {
       this.store.recordRuntimeLog({ level: 'warn', source: 'market-data', message: `CLOB websocket failed: ${error instanceof Error ? error.message : String(error)}` });

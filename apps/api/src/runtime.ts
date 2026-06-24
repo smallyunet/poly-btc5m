@@ -47,15 +47,15 @@ export function currentRound(appConfig: AppConfig): BtcRoundConfig {
   const durationMs = appConfig.marketConfig.roundDurationSeconds * 1000;
   const now = Date.now();
   const start = Math.floor(now / durationMs) * durationMs;
-  const strike = numberFromEnv('STATIC_ROUND_STRIKE', 100_000);
+  const strike = appConfig.marketConfig.strike ?? numberFromEnv('STATIC_ROUND_STRIKE', 100_000);
   return {
     eventSlug: `${appConfig.marketConfig.seriesSlug}-${start}`,
     title: `${appConfig.marketConfig.title} ${new Date(start).toISOString()}`,
     startAt: new Date(start).toISOString(),
     endAt: new Date(start + durationMs).toISOString(),
     strike,
-    yesTokenId: '',
-    noTokenId: '',
+    yesTokenId: appConfig.marketConfig.yesTokenId || '',
+    noTokenId: appConfig.marketConfig.noTokenId || '',
   };
 }
 
