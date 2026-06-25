@@ -43,6 +43,7 @@ type RoundExecutionSummary = {
   unfilledOrders: number;
   unfilledShares: number;
   settlementPnl?: number;
+  settlementStatus?: DashboardState['settlements'][number]['status'];
 };
 
 const ROUND_PAGE_SIZE = 20;
@@ -157,18 +158,15 @@ function formatSubmittedLeg(label: string, shares: number, price?: number): stri
   return `${label} ${formatShares(shares)} @ $${price.toFixed(3)}`;
 }
 
-function matchedFillShares(order: DashboardOrder, fills: DashboardFill[]): number {
-  const exact = order.clobOrderId
-    ? fills.filter((fill) => fill.clobOrderId === order.clobOrderId)
-    : [];
-  const candidates = exact.length
-    ? exact
-    : fills.filter((fill) => (
-      fill.roundId === order.roundId
-      && fill.tokenId === order.tokenId
-      && fill.side === order.side
-    ));
-  return sumShares(candidates.map((fill) => fill.size));
+function orderFilledShares(order: DashboardOrder, fills: DashboardFill[]): number {
+  if (order.filledSize != null) return order.filledSize;
+  if (order.status === 'filled') return order.size;
+  if (!order.clobOrderId) return 0;
+  return sumShares(fills.filter((fill) => fill.clobOrderId === order.clobOrderId).map((fill) => fill.size));
+}
+
+function orderMarketTitle(order: DashboardOrder): string {
+  return order.marketTitle || derivedRoundTitle(order.roundId);
 }
 
 function buildRoundExecutionSummaries(state: DashboardState): RoundExecutionSummary[] {
@@ -192,8 +190,12 @@ function buildRoundExecutionSummaries(state: DashboardState): RoundExecutionSumm
   return [...byRound.entries()].map(([roundId, record]) => {
     const yesBuyOrders = record.orders.filter((order) => order.label === 'YES' && order.side === 'BUY');
     const noBuyOrders = record.orders.filter((order) => order.label === 'NO' && order.side === 'BUY');
-    const unfilledByOrder = record.orders.map((order) => Math.max(0, order.size - matchedFillShares(order, record.fills)));
+    const unfilledByOrder = record.orders.map((order) => Math.max(0, order.size - orderFilledShares(order, record.fills)));
     const metadataSource = record.orders[0] || record.fills[0] || record.settlements[0];
+    const settlement = [...record.settlements].sort((a, b) => {
+      if (a.status !== b.status) return a.status === 'settled' ? -1 : 1;
+      return toSortTime(b.resolvedAt) - toSortTime(a.resolvedAt);
+    })[0];
     const latestTime = Math.max(
       ...record.orders.map((order) => toSortTime(order.createdAt)),
       ...record.fills.map((fill) => toSortTime(fill.matchedAt)),
@@ -219,7 +221,8 @@ function buildRoundExecutionSummaries(state: DashboardState): RoundExecutionSumm
       filledSellNo: sumShares(record.fills.filter((fill) => fill.label === 'NO' && fill.side === 'SELL').map((fill) => fill.size)),
       unfilledOrders: unfilledByOrder.filter((shares) => shares > 0.01).length,
       unfilledShares: sumShares(unfilledByOrder),
-      settlementPnl: record.settlements[0]?.pnl,
+      settlementPnl: settlement?.pnl,
+      settlementStatus: settlement?.status,
     };
   }).sort((a, b) => b.latestTime - a.latestTime);
 }
@@ -885,6 +888,7 @@ export function App() {
                             </td>
                             <td className={`mono ${round.settlementPnl == null ? '' : round.settlementPnl >= 0 ? 'pass' : 'fail'}`}>
                               {round.settlementPnl == null ? '-' : `${round.settlementPnl >= 0 ? '+' : ''}${formatMoney(round.settlementPnl)}`}
+                              {round.settlementStatus && <span className="mutedInline"> {round.settlementStatus}</span>}
                             </td>
                           </tr>
                         );
@@ -908,10 +912,13 @@ export function App() {
               {activitySubTab === 'orders' && (
                 state.orders.length > 0 ? (
                   <>
-                    <DataTable headers={['Time (ET)', 'Round ID', 'Outcome', 'Side', 'Price', 'Size', 'Status', 'Polymarket CLOB Order ID']}>
+                    <DataTable headers={['Time (ET)', 'Market', 'Round ID', 'Outcome', 'Side', 'Price', 'Size', 'Status', 'Polymarket CLOB Order ID']}>
                       {ordersPagination.pageRows.map((order) => (
                         <tr key={order.id}>
                           <td className="mono">{formatEtTime(order.createdAt)}</td>
+                          <td>
+                            <span className="marketTitle">{orderMarketTitle(order)}</span>
+                          </td>
                           <td className="mono" style={{ fontSize: '11px' }}>{order.roundId}</td>
                           <td><Badge tone={outcomeTone(order.label)}>{outcomeLabel(order.label)}</Badge></td>
                           <td>
