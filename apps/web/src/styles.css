@@ -602,6 +602,47 @@ td.mono {
   color: var(--text-primary);
 }
 
+.marketCell {
+  display: grid;
+  grid-template-columns: 34px minmax(220px, 1fr);
+  gap: 10px;
+  align-items: center;
+  min-width: 300px;
+}
+
+.marketThumb {
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  object-fit: cover;
+  border: 1px solid var(--border-color);
+  background: #ffffff;
+}
+
+.marketThumbFallback {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #f97316;
+  color: #ffffff;
+  font-size: 20px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+}
+
+.marketTitle {
+  color: var(--text-primary);
+  font-weight: 600;
+  font-size: 13px;
+  line-height: 1.3;
+}
+
+.mutedInline {
+  color: var(--text-muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
 .paginationBar {
   display: flex;
   justify-content: space-between;

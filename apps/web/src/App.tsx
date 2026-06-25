@@ -24,7 +24,28 @@ type TabType = 'terminal' | 'orderbooks' | 'activity' | 'strategy' | 'logs';
 type ActivityRecord =
   | { id: string; type: 'fill'; time: string; sortTime: number; fill: DashboardState['fills'][number] }
   | { id: string; type: 'settlement'; time: string; sortTime: number; settlement: DashboardState['settlements'][number] };
+type DashboardOrder = DashboardState['orders'][number];
+type DashboardFill = DashboardState['fills'][number];
+type RoundExecutionSummary = {
+  roundId: string;
+  title: string;
+  imageUrl?: string;
+  latestTime: number;
+  orderCount: number;
+  buyOrderCount: number;
+  sellOrderCount: number;
+  orderedYes: number;
+  orderedNo: number;
+  filledBuyYes: number;
+  filledBuyNo: number;
+  filledSellYes: number;
+  filledSellNo: number;
+  unfilledOrders: number;
+  unfilledShares: number;
+  settlementPnl?: number;
+};
 
+const ROUND_PAGE_SIZE = 20;
 const ORDER_PAGE_SIZE = 25;
 const ACTIVITY_PAGE_SIZE = 25;
 const LOG_PAGE_SIZE = 75;
@@ -55,9 +76,105 @@ function formatEtTime(value: string): string {
   })} ET`;
 }
 
+function formatEtRange(startMs: number, durationMs: number): string {
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    month: 'long',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+  const endFormatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    hour: 'numeric',
+    minute: '2-digit',
+    timeZoneName: 'short',
+  });
+  return `${formatter.format(new Date(startMs))}-${endFormatter.format(new Date(startMs + durationMs))}`;
+}
+
+function derivedRoundTitle(roundId: string): string {
+  const match = roundId.match(/btc-updown-5m-(\d+)$/);
+  if (!match) return roundId;
+  const startMs = Number(match[1]) * 1000;
+  if (!Number.isFinite(startMs)) return roundId;
+  return `Bitcoin Up or Down - ${formatEtRange(startMs, 5 * 60_000)}`;
+}
+
 function toSortTime(value: string): number {
   const time = new Date(value).getTime();
   return Number.isFinite(time) ? time : 0;
+}
+
+function formatShares(value: number): string {
+  return value.toFixed(value % 1 === 0 ? 0 : 2);
+}
+
+function sumShares(values: number[]): number {
+  return values.reduce((total, value) => total + value, 0);
+}
+
+function matchedFillShares(order: DashboardOrder, fills: DashboardFill[]): number {
+  const exact = order.clobOrderId
+    ? fills.filter((fill) => fill.clobOrderId === order.clobOrderId)
+    : [];
+  const candidates = exact.length
+    ? exact
+    : fills.filter((fill) => (
+      fill.roundId === order.roundId
+      && fill.tokenId === order.tokenId
+      && fill.side === order.side
+    ));
+  return sumShares(candidates.map((fill) => fill.size));
+}
+
+function buildRoundExecutionSummaries(state: DashboardState): RoundExecutionSummary[] {
+  const byRound = new Map<string, {
+    orders: DashboardOrder[];
+    fills: DashboardFill[];
+    settlements: DashboardState['settlements'];
+  }>();
+  const ensure = (roundId: string) => {
+    const existing = byRound.get(roundId);
+    if (existing) return existing;
+    const created = { orders: [], fills: [], settlements: [] };
+    byRound.set(roundId, created);
+    return created;
+  };
+
+  state.orders.forEach((order) => ensure(order.roundId).orders.push(order));
+  state.fills.forEach((fill) => ensure(fill.roundId).fills.push(fill));
+  state.settlements.forEach((settlement) => ensure(settlement.roundId).settlements.push(settlement));
+
+  return [...byRound.entries()].map(([roundId, record]) => {
+    const unfilledByOrder = record.orders.map((order) => Math.max(0, order.size - matchedFillShares(order, record.fills)));
+    const metadataSource = record.orders[0] || record.fills[0] || record.settlements[0];
+    const latestTime = Math.max(
+      ...record.orders.map((order) => toSortTime(order.createdAt)),
+      ...record.fills.map((fill) => toSortTime(fill.matchedAt)),
+      ...record.settlements.map((settlement) => toSortTime(settlement.resolvedAt)),
+      0,
+    );
+
+    return {
+      roundId,
+      title: metadataSource?.marketTitle || derivedRoundTitle(roundId),
+      imageUrl: metadataSource?.imageUrl,
+      latestTime,
+      orderCount: record.orders.length,
+      buyOrderCount: record.orders.filter((order) => order.side === 'BUY').length,
+      sellOrderCount: record.orders.filter((order) => order.side === 'SELL').length,
+      orderedYes: sumShares(record.orders.filter((order) => order.label === 'YES' && order.side === 'BUY').map((order) => order.size)),
+      orderedNo: sumShares(record.orders.filter((order) => order.label === 'NO' && order.side === 'BUY').map((order) => order.size)),
+      filledBuyYes: sumShares(record.fills.filter((fill) => fill.label === 'YES' && fill.side === 'BUY').map((fill) => fill.size)),
+      filledBuyNo: sumShares(record.fills.filter((fill) => fill.label === 'NO' && fill.side === 'BUY').map((fill) => fill.size)),
+      filledSellYes: sumShares(record.fills.filter((fill) => fill.label === 'YES' && fill.side === 'SELL').map((fill) => fill.size)),
+      filledSellNo: sumShares(record.fills.filter((fill) => fill.label === 'NO' && fill.side === 'SELL').map((fill) => fill.size)),
+      unfilledOrders: unfilledByOrder.filter((shares) => shares > 0.01).length,
+      unfilledShares: sumShares(unfilledByOrder),
+      settlementPnl: record.settlements[0]?.pnl,
+    };
+  }).sort((a, b) => b.latestTime - a.latestTime);
 }
 
 function usePaginatedRows<T>(rows: T[], pageSize: number) {
@@ -145,9 +262,16 @@ export function App() {
     ].sort((a, b) => b.sortTime - a.sortTime);
   }, [state]);
 
+  const roundSummaries = React.useMemo(() => state ? buildRoundExecutionSummaries(state) : [], [state]);
+
+  const roundPagination = usePaginatedRows(roundSummaries, ROUND_PAGE_SIZE);
   const ordersPagination = usePaginatedRows(state?.orders ?? [], ORDER_PAGE_SIZE);
   const activityPagination = usePaginatedRows(activityRecords, ACTIVITY_PAGE_SIZE);
   const logsPagination = usePaginatedRows(filteredLogs, LOG_PAGE_SIZE);
+
+  React.useEffect(() => {
+    roundPagination.setPage(1);
+  }, [roundSummaries.length]);
 
   React.useEffect(() => {
     ordersPagination.setPage(1);
@@ -551,6 +675,72 @@ export function App() {
 
         {activeTab === 'activity' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            {/* Per-round execution summary */}
+            <div className="panel">
+              <h2>
+                Round Execution Summary
+                <span className="panelSubTitle">{roundSummaries.length} rounds</span>
+              </h2>
+              {roundSummaries.length > 0 ? (
+                <>
+                  <DataTable headers={['Market', 'Round ID', 'Orders', 'Ordered Buy Shares', 'Filled Buy Shares', 'Filled Sell Shares', 'Unfilled', 'Settlement PnL']}>
+                    {roundPagination.pageRows.map((round) => {
+                      const hasUnfilled = round.unfilledOrders > 0;
+                      const hasPairedFill = round.filledBuyYes > 0 && round.filledBuyNo > 0;
+                      return (
+                        <tr key={round.roundId}>
+                          <td>
+                            <div className="marketCell">
+                              {round.imageUrl ? (
+                                <img src={round.imageUrl} alt="" className="marketThumb" />
+                              ) : (
+                                <span className="marketThumb marketThumbFallback">₿</span>
+                              )}
+                              <span className="marketTitle">{round.title}</span>
+                            </div>
+                          </td>
+                          <td className="mono" style={{ fontSize: '11px' }}>{round.roundId}</td>
+                          <td>
+                            <span className="mono">{round.orderCount}</span>
+                            <span className="mutedInline"> {round.buyOrderCount} buy / {round.sellOrderCount} sell</span>
+                          </td>
+                          <td className="mono">
+                            UP {formatShares(round.orderedYes)} / DOWN {formatShares(round.orderedNo)}
+                          </td>
+                          <td className="mono">
+                            UP {formatShares(round.filledBuyYes)} / DOWN {formatShares(round.filledBuyNo)}
+                            {' '}
+                            <Badge tone={hasPairedFill ? 'good' : 'warn'}>{hasPairedFill ? 'paired' : 'single'}</Badge>
+                          </td>
+                          <td className="mono">
+                            UP {formatShares(round.filledSellYes)} / DOWN {formatShares(round.filledSellNo)}
+                          </td>
+                          <td>
+                            <Badge tone={hasUnfilled ? 'warn' : 'good'}>
+                              {hasUnfilled ? `${round.unfilledOrders} orders / ${formatShares(round.unfilledShares)} shares` : 'none'}
+                            </Badge>
+                          </td>
+                          <td className={`mono ${round.settlementPnl == null ? '' : round.settlementPnl >= 0 ? 'pass' : 'fail'}`}>
+                            {round.settlementPnl == null ? '-' : `${round.settlementPnl >= 0 ? '+' : ''}${formatMoney(round.settlementPnl)}`}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </DataTable>
+                  <PaginationControls
+                    page={roundPagination.page}
+                    totalPages={roundPagination.totalPages}
+                    totalRows={roundSummaries.length}
+                    pageSize={ROUND_PAGE_SIZE}
+                    onPageChange={roundPagination.setPage}
+                  />
+                </>
+              ) : (
+                <div className="empty" style={{ minHeight: '150px' }}>
+                  <p className="emptyText">No round execution records found</p>
+                </div>
+              )}
+            </div>
             
             {/* Active / Recent Orders */}
             <div className="panel">

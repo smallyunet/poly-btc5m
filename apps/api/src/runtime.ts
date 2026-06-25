@@ -109,7 +109,13 @@ async function loadPositions(appConfig: AppConfig, adapter: PolymarketAdapter, t
 async function reconcileFills(adapter: PolymarketAdapter, store: InMemoryStore, round: RoundSnapshot, tokenLabels: Map<string, 'YES' | 'NO'>, diagnostics: string[]): Promise<void> {
   if (!tokenLabels.size) return;
   try {
-    const fills = await adapter.getRecentFills({ roundId: round.id, eventSlug: round.eventSlug, tokenLabels });
+    const fills = await adapter.getRecentFills({
+      roundId: round.id,
+      eventSlug: round.eventSlug,
+      tokenLabels,
+      marketTitle: round.title,
+      imageUrl: round.imageUrl,
+    });
     store.recordFills(fills);
   } catch (error) {
     if (store.getRuntime().executionMode === 'live') diagnostics.push(`Fill reconciliation failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -129,6 +135,8 @@ function maybeRecordEstimatedSettlement(store: InMemoryStore, snapshot: StateSna
     id: `settlement-${snapshot.round.id}`,
     roundId: snapshot.round.id,
     eventSlug: snapshot.round.eventSlug,
+    marketTitle: snapshot.round.title,
+    imageUrl: snapshot.round.imageUrl,
     resolvedAt: snapshot.capturedAt,
     winningLabel,
     yesShares,

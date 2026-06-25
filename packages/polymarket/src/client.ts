@@ -108,7 +108,7 @@ export class PolymarketAdapter {
     return Number(readBalanceRaw(response)) / 1_000_000;
   }
 
-  async getRecentFills(params: { roundId: string; eventSlug: string; tokenLabels: Map<string, 'YES' | 'NO'>; tokenId?: string }): Promise<FillRecord[]> {
+  async getRecentFills(params: { roundId: string; eventSlug: string; tokenLabels: Map<string, 'YES' | 'NO'>; tokenId?: string; marketTitle?: string; imageUrl?: string }): Promise<FillRecord[]> {
     const client = await this.authenticatedClient();
     const trades = await client.getTrades(params.tokenId ? { asset_id: params.tokenId } : undefined, true);
     if (!Array.isArray(trades)) return [];
@@ -127,6 +127,9 @@ export class PolymarketAdapter {
             return {
               id: String(`${trade.id || trade.transaction_hash || trade.match_time || Date.now()}:${clobOrderId || index}:${size}`),
               roundId: params.roundId,
+              eventSlug: params.eventSlug,
+              marketTitle: params.marketTitle,
+              imageUrl: params.imageUrl,
               clobOrderId,
               tokenId,
               label,
@@ -148,6 +151,9 @@ export class PolymarketAdapter {
       return [{
           id: String(trade.id || `${tokenId}-${trade.match_time || Date.now()}`),
           roundId: params.roundId,
+          eventSlug: params.eventSlug,
+          marketTitle: params.marketTitle,
+          imageUrl: params.imageUrl,
           clobOrderId: typeof trade.order_id === 'string' ? trade.order_id : undefined,
           tokenId,
           label,

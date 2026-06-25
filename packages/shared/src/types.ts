@@ -172,6 +172,8 @@ export type OrderRecord = {
   clobOrderId?: string;
   roundId: string;
   eventSlug: string;
+  marketTitle?: string;
+  imageUrl?: string;
   tokenId: string;
   label: 'YES' | 'NO';
   side: TradeSide;
@@ -189,6 +191,9 @@ export type OrderRecord = {
 export type FillRecord = {
   id: string;
   roundId: string;
+  eventSlug?: string;
+  marketTitle?: string;
+  imageUrl?: string;
   clobOrderId?: string;
   tokenId: string;
   label: 'YES' | 'NO';
@@ -203,6 +208,8 @@ export type SettlementRecord = {
   id: string;
   roundId: string;
   eventSlug: string;
+  marketTitle?: string;
+  imageUrl?: string;
   resolvedAt: string;
   winningLabel?: 'YES' | 'NO';
   yesShares: number;
