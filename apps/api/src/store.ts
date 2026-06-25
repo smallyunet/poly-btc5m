@@ -4,6 +4,11 @@ import path from 'node:path';
 import { STRATEGY_RULES } from '../../../packages/strategy/src';
 import type { BotRuntimeStatus, DashboardState, DataFeedStatus, ExecutionMode, FillRecord, OrderRecord, RuntimeLogRecord, SettlementRecord, StateSnapshot, StrategyCheck, TradeIntent } from '../../../packages/shared/src';
 
+type OpenOrderLike = {
+  id: string;
+  tokenId: string;
+};
+
 type StoreOptions = {
   persistencePath?: string | false;
   maxRecords?: number;
@@ -114,8 +119,12 @@ export class InMemoryStore {
 
   recordSettlement(settlement: SettlementRecord): void {
     const existing = this.settlements.findIndex((item) => item.id === settlement.id);
-    if (existing >= 0) this.settlements[existing] = settlement;
-    else this.settlements = [settlement, ...this.settlements].slice(0, this.maxRecords);
+    if (existing >= 0) {
+      if (this.settlements[existing].status === 'settled' && settlement.status === 'estimated') return;
+      this.settlements[existing] = settlement;
+    } else {
+      this.settlements = [settlement, ...this.settlements].slice(0, this.maxRecords);
+    }
     this.persistState();
   }
 
@@ -143,6 +152,59 @@ export class InMemoryStore {
 
   roundOrders(roundId: string): OrderRecord[] {
     return this.orders.filter((order) => order.roundId === roundId);
+  }
+
+  ordersNeedingReconciliation(limit = 200): OrderRecord[] {
+    return this.orders
+      .filter((order) => order.status === 'posted' || order.status === 'partially_filled')
+      .sort((a, b) => toTime(b.createdAt) - toTime(a.createdAt))
+      .slice(0, limit);
+  }
+
+  roundsNeedingSettlement(limit = 50): Array<{ roundId: string; eventSlug: string; marketTitle?: string; imageUrl?: string; strike?: number }> {
+    const settled = new Set(this.settlements.map((settlement) => settlement.roundId));
+    const byRound = new Map<string, { roundId: string; eventSlug: string; marketTitle?: string; imageUrl?: string; latestTime: number; strike?: number }>();
+    for (const fill of this.fills) {
+      if (settled.has(fill.roundId) || !isRoundEnded(fill.roundId, Date.now(), 0)) continue;
+      const existing = byRound.get(fill.roundId);
+      const latestTime = Math.max(existing?.latestTime ?? 0, toTime(fill.matchedAt));
+      byRound.set(fill.roundId, {
+        roundId: fill.roundId,
+        eventSlug: fill.eventSlug || fill.roundId,
+        marketTitle: fill.marketTitle || existing?.marketTitle,
+        imageUrl: fill.imageUrl || existing?.imageUrl,
+        latestTime,
+        strike: this.roundStrikes.get(fill.roundId),
+      });
+    }
+    return [...byRound.values()]
+      .sort((a, b) => b.latestTime - a.latestTime)
+      .slice(0, limit)
+      .map(({ latestTime: _latestTime, ...round }) => round);
+  }
+
+  reconcileOpenOrderStatuses(openOrders: OpenOrderLike[]): number {
+    const openOrderIds = new Set(openOrders.map((order) => order.id).filter(Boolean));
+    const openTokenIds = new Set(openOrders.map((order) => order.tokenId).filter(Boolean));
+    let updated = 0;
+    this.orders = this.orders.map((order) => {
+      if (order.status !== 'posted' && order.status !== 'partially_filled') return order;
+      if (order.clobOrderId && openOrderIds.has(order.clobOrderId)) return order;
+      if (!order.clobOrderId && openTokenIds.has(order.tokenId)) return order;
+      if (!isRoundEnded(order.roundId, Date.now(), 60_000)) return order;
+      const fills = matchingOrderFills(order, this.fills);
+      const filledSize = sum(fills.map((fill) => fill.size));
+      if (filledSize >= order.size - 0.01) return order;
+      updated += 1;
+      return {
+        ...order,
+        status: 'cancelled',
+        filledSize: filledSize > 0 ? filledSize : order.filledSize,
+        updatedAt: new Date().toISOString(),
+      };
+    });
+    if (updated) this.persistState();
+    return updated;
   }
 
   getRoundStrike(roundId: string): number | undefined {
@@ -285,4 +347,22 @@ function matchingOrderFills(order: OrderRecord, fills: FillRecord[]): FillRecord
 
 function sum(values: number[]): number {
   return values.reduce((total, value) => total + value, 0);
+}
+
+function isRoundEnded(roundId: string, nowMs: number, graceMs: number): boolean {
+  const startMs = roundStartMs(roundId);
+  if (startMs == null) return false;
+  return nowMs >= startMs + 5 * 60_000 + graceMs;
+}
+
+function roundStartMs(roundId: string): number | null {
+  const match = roundId.match(/btc-updown-5m-(\d+)$/);
+  const parsed = Number(match?.[1]);
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  return parsed * 1000;
+}
+
+function toTime(value: string): number {
+  const time = new Date(value).getTime();
+  return Number.isFinite(time) ? time : 0;
 }

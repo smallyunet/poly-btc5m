@@ -1,6 +1,6 @@
 import type { BtcRoundConfig, PositionSnapshot, RoundPhase, RoundSnapshot, SettlementRecord, StateSnapshot } from '../../../packages/shared/src';
 import { classifyRegime, evaluateEntry, type StrategyRiskConfig } from '../../../packages/strategy/src';
-import { PolymarketAdapter } from '../../../packages/polymarket/src';
+import { PolymarketAdapter, type FillTarget } from '../../../packages/polymarket/src';
 import type { AppConfig } from './config';
 import { executeLiveIntents } from './execution';
 import type { MarketDataService } from './marketData';
@@ -42,6 +42,8 @@ export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, dat
   store.recordIntents([...intents, ...entry.rejected]);
   const executionDiagnostics = await executeLiveIntents({ appConfig, adapter, store, snapshot, intents, risk });
   await reconcileFills(adapter, store, roundSnapshot, tokenLabels, diagnostics);
+  await reconcileTrackedOrders(adapter, store, diagnostics);
+  await reconcileSettlements(appConfig, store, diagnostics);
   maybeRecordEstimatedSettlement(store, snapshot);
   const finalSnapshot = { ...snapshot, diagnostics: [...diagnostics, ...entry.diagnostics, ...executionDiagnostics] };
   store.recordSnapshot(finalSnapshot, data.status());
@@ -118,6 +120,70 @@ async function reconcileFills(adapter: PolymarketAdapter, store: InMemoryStore, 
   }
 }
 
+async function reconcileTrackedOrders(adapter: PolymarketAdapter, store: InMemoryStore, diagnostics: string[]): Promise<void> {
+  const orders = store.ordersNeedingReconciliation();
+  if (!orders.length) return;
+  try {
+    const targets: FillTarget[] = orders.map((order) => ({
+      roundId: order.roundId,
+      eventSlug: order.eventSlug,
+      marketTitle: order.marketTitle,
+      imageUrl: order.imageUrl,
+      tokenId: order.tokenId,
+      label: order.label,
+      clobOrderId: order.clobOrderId,
+    }));
+    const fills = await adapter.getRecentFillsForTargets(targets);
+    store.recordFills(fills);
+
+    const openOrders = await adapter.getOpenOrders();
+    const cancelled = store.reconcileOpenOrderStatuses(openOrders);
+    if (cancelled) {
+      store.recordRuntimeLog({
+        level: 'info',
+        source: 'execution',
+        message: `Reconciled ${cancelled} stale Polymarket orders as no longer open.`,
+      });
+    }
+  } catch (error) {
+    if (store.getRuntime().executionMode === 'live') diagnostics.push(`Order reconciliation failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+async function reconcileSettlements(appConfig: AppConfig, store: InMemoryStore, diagnostics: string[]): Promise<void> {
+  const rounds = store.roundsNeedingSettlement();
+  if (!rounds.length) return;
+  for (const round of rounds) {
+    try {
+      const winningLabel = await resolvedWinningLabel(appConfig, round.eventSlug);
+      if (!winningLabel) continue;
+      const fills = store.roundFills(round.roundId);
+      const yesShares = sum(fills.filter((fill) => fill.label === 'YES' && fill.side === 'BUY').map((fill) => fill.size));
+      const noShares = sum(fills.filter((fill) => fill.label === 'NO' && fill.side === 'BUY').map((fill) => fill.size));
+      const totalCost = sum(fills.filter((fill) => fill.side === 'BUY').map((fill) => fill.price * fill.size));
+      const payout = winningLabel === 'YES' ? yesShares : noShares;
+      const settlement: SettlementRecord = {
+        id: `settlement-${round.roundId}`,
+        roundId: round.roundId,
+        eventSlug: round.eventSlug,
+        marketTitle: round.marketTitle,
+        imageUrl: round.imageUrl,
+        resolvedAt: new Date().toISOString(),
+        winningLabel,
+        yesShares,
+        noShares,
+        totalCost,
+        payout,
+        pnl: payout - totalCost,
+        status: 'settled',
+      };
+      store.recordSettlement(settlement);
+    } catch (error) {
+      if (store.getRuntime().executionMode === 'live') diagnostics.push(`Settlement reconciliation failed for ${round.roundId}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+}
+
 function maybeRecordEstimatedSettlement(store: InMemoryStore, snapshot: StateSnapshot): void {
   if (snapshot.round.phase !== 'settled') return;
   const fills = store.roundFills(snapshot.round.id);
@@ -145,6 +211,23 @@ function maybeRecordEstimatedSettlement(store: InMemoryStore, snapshot: StateSna
   store.recordSettlement(settlement);
 }
 
+async function resolvedWinningLabel(appConfig: AppConfig, eventSlug: string): Promise<'YES' | 'NO' | null> {
+  const url = new URL(`/markets/slug/${encodeURIComponent(eventSlug)}`, appConfig.gammaApiUrl.replace(/\/+$/, '') + '/');
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`Gamma market returned ${response.status}`);
+  const market = await response.json() as Record<string, unknown>;
+  if (market.closed !== true) return null;
+  const outcomes = parseStringArray(market.outcomes).map((item) => item.toLowerCase());
+  const prices = parseStringArray(market.outcomePrices).map(Number);
+  const upIndex = outcomes.indexOf('up');
+  const downIndex = outcomes.indexOf('down');
+  const upPrice = upIndex >= 0 ? prices[upIndex] : undefined;
+  const downPrice = downIndex >= 0 ? prices[downIndex] : undefined;
+  if (upPrice === 1) return 'YES';
+  if (downPrice === 1) return 'NO';
+  return null;
+}
+
 function riskConfig(appConfig: AppConfig, dryRun: boolean): StrategyRiskConfig {
   return {
     dryRun,
@@ -170,4 +253,16 @@ function riskConfig(appConfig: AppConfig, dryRun: boolean): StrategyRiskConfig {
 
 function sum(values: number[]): number {
   return values.reduce((total, value) => total + value, 0);
+}
+
+function parseStringArray(value: unknown): string[] {
+  if (Array.isArray(value)) return value.map((item) => String(item ?? '').trim()).filter(Boolean);
+  if (typeof value !== 'string') return [];
+  try {
+    const parsed = JSON.parse(value);
+    if (Array.isArray(parsed)) return parsed.map((item) => String(item ?? '').trim()).filter(Boolean);
+  } catch {
+    return value.split(',').map((item) => item.trim()).filter(Boolean);
+  }
+  return [];
 }

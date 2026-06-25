@@ -1,5 +1,5 @@
 import { Wallet } from '@ethersproject/wallet';
-import type { FillRecord, OrderBookLevel, OrderBookQuote, PositionSnapshot, TradeIntent } from '../../shared/src';
+import type { FillRecord, OrderBookLevel, OrderBookQuote, OrderRecord, PositionSnapshot, TradeIntent } from '../../shared/src';
 
 const POLYMARKET_DATA_API_URL = 'https://data-api.polymarket.com';
 
@@ -29,6 +29,8 @@ export type OpenOrderSummary = {
   status: string;
   raw: unknown;
 };
+
+export type FillTarget = Pick<OrderRecord, 'roundId' | 'eventSlug' | 'marketTitle' | 'imageUrl' | 'tokenId' | 'label' | 'clobOrderId'>;
 
 type ClobModule = {
   ClobClient: new (params: Record<string, unknown>) => any;
@@ -80,9 +82,9 @@ export class PolymarketAdapter {
     const orders = await client.getOpenOrders(params.tokenId ? { asset_id: params.tokenId } : undefined, true);
     if (!Array.isArray(orders)) return [];
     return orders.map((order: any) => ({
-      id: String(order.id || order.orderID || ''),
-      tokenId: String(order.asset_id || order.token_id || ''),
-      side: String(order.side || ''),
+      id: String(order.id || order.orderID || order.orderId || order.order_id || ''),
+      tokenId: String(order.asset_id || order.token_id || order.tokenID || order.tokenId || ''),
+      side: String(order.side || '').toUpperCase(),
       price: finiteNumber(order.price),
       size: finiteNumber(order.original_size ?? order.size),
       status: String(order.status || ''),
@@ -157,6 +159,73 @@ export class PolymarketAdapter {
           clobOrderId: typeof trade.order_id === 'string' ? trade.order_id : undefined,
           tokenId,
           label,
+          side: String(trade.side || '').toUpperCase() === 'SELL' ? 'SELL' : 'BUY',
+          price,
+          size,
+          matchedAt: typeof trade.match_time === 'string' ? trade.match_time : new Date().toISOString(),
+          raw: trade,
+      }];
+    });
+  }
+
+  async getRecentFillsForTargets(targets: FillTarget[]): Promise<FillRecord[]> {
+    const uniqueTargets = dedupeTargets(targets);
+    if (!uniqueTargets.length) return [];
+    const client = await this.authenticatedClient();
+    const trades = await client.getTrades(undefined, true);
+    if (!Array.isArray(trades)) return [];
+
+    const targetByOrderId = new Map(uniqueTargets.map((target) => [target.clobOrderId, target]).filter((entry): entry is [string, FillTarget] => Boolean(entry[0])));
+    const targetByTokenId = new Map(uniqueTargets.map((target) => [target.tokenId, target]));
+    const makerAddress = this.config.depositWallet?.trim().toLowerCase();
+
+    return trades.flatMap((trade: any): FillRecord[] => {
+      if (String(trade.trader_side || '').toUpperCase() === 'MAKER' && Array.isArray(trade.maker_orders)) {
+        return trade.maker_orders
+          .map((makerOrder: any, index: number): FillRecord | null => {
+            if (makerAddress && String(makerOrder.maker_address || '').toLowerCase() !== makerAddress) return null;
+            const tokenId = String(makerOrder.asset_id || makerOrder.token_id || '');
+            const clobOrderId = typeof makerOrder.order_id === 'string' ? makerOrder.order_id : undefined;
+            const target = (clobOrderId && targetByOrderId.get(clobOrderId)) || targetByTokenId.get(tokenId);
+            if (!target) return null;
+            const price = finiteNumber(makerOrder.price);
+            const size = finiteNumber(makerOrder.matched_amount ?? makerOrder.size);
+            if (price == null || size == null || size <= 0) return null;
+            return {
+              id: String(`${trade.id || trade.transaction_hash || trade.match_time || Date.now()}:${clobOrderId || index}:${size}`),
+              roundId: target.roundId,
+              eventSlug: target.eventSlug,
+              marketTitle: target.marketTitle,
+              imageUrl: target.imageUrl,
+              clobOrderId,
+              tokenId,
+              label: target.label,
+              side: String(makerOrder.side || '').toUpperCase() === 'SELL' ? 'SELL' : 'BUY',
+              price,
+              size,
+              matchedAt: typeof trade.match_time === 'string' ? trade.match_time : new Date().toISOString(),
+              raw: { trade, makerOrder },
+            };
+          })
+          .filter((item: FillRecord | null): item is FillRecord => Boolean(item));
+      }
+
+      const tokenId = String(trade.asset_id || trade.token_id || '');
+      const clobOrderId = typeof trade.order_id === 'string' ? trade.order_id : undefined;
+      const target = (clobOrderId && targetByOrderId.get(clobOrderId)) || targetByTokenId.get(tokenId);
+      if (!target) return [];
+      const price = finiteNumber(trade.price);
+      const size = finiteNumber(trade.size);
+      if (price == null || size == null || size <= 0) return [];
+      return [{
+          id: String(trade.id || `${tokenId}-${trade.match_time || Date.now()}`),
+          roundId: target.roundId,
+          eventSlug: target.eventSlug,
+          marketTitle: target.marketTitle,
+          imageUrl: target.imageUrl,
+          clobOrderId,
+          tokenId,
+          label: target.label,
           side: String(trade.side || '').toUpperCase() === 'SELL' ? 'SELL' : 'BUY',
           price,
           size,
@@ -279,6 +348,16 @@ function roundShares(value: number): number {
 function finiteNumber(value: unknown): number | null {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function dedupeTargets(targets: FillTarget[]): FillTarget[] {
+  const seen = new Set<string>();
+  return targets.filter((target) => {
+    const key = target.clobOrderId || `${target.roundId}:${target.tokenId}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return Boolean(target.tokenId);
+  });
 }
 
 function orderError(posted: any): string | undefined {
