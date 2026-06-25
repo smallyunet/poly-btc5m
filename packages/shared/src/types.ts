@@ -113,9 +113,11 @@ export type RoundSnapshot = {
 
 export type PositionSnapshot = {
   tokenId: string;
-  label: 'YES' | 'NO';
+  label: 'YES' | 'NO' | 'UNKNOWN';
+  title?: string;
   shares: number;
   avgPrice: number;
+  currentPrice?: number;
   openedAt?: string;
   lastTradeAt?: string;
 };

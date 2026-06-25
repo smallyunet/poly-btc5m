@@ -251,14 +251,18 @@ export class PolymarketAdapter {
     return page
       .map((position: any): PositionSnapshot | null => {
         const tokenId = String(position.asset || position.tokenId || position.token_id || '');
-        const label = tokenLabels.get(tokenId);
+        const label = tokenLabels.get(tokenId) || positionLabel(position);
         const shares = finiteNumber(position.size ?? position.balance);
-        if (!label || shares == null || shares <= 0) return null;
+        if (!tokenId || shares == null || shares <= 0) return null;
         return {
           tokenId,
           label,
+          title: typeof position.title === 'string' ? position.title : typeof position.market === 'string' ? position.market : undefined,
           shares: roundShares(shares),
           avgPrice: finiteNumber(position.avgPrice ?? position.avg_price) ?? 0,
+          currentPrice: finiteNumber(position.curPrice ?? position.currentPrice ?? position.price) ?? undefined,
+          openedAt: typeof position.createdAt === 'string' ? position.createdAt : undefined,
+          lastTradeAt: typeof position.lastTradeAt === 'string' ? position.lastTradeAt : undefined,
         };
       })
       .filter((item): item is PositionSnapshot => Boolean(item));
@@ -358,6 +362,13 @@ function dedupeTargets(targets: FillTarget[]): FillTarget[] {
     seen.add(key);
     return Boolean(target.tokenId);
   });
+}
+
+function positionLabel(position: Record<string, unknown>): PositionSnapshot['label'] {
+  const raw = String(position.outcome || position.outcomeName || '').trim().toLowerCase();
+  if (raw === 'up') return 'YES';
+  if (raw === 'down') return 'NO';
+  return 'UNKNOWN';
 }
 
 function orderError(posted: any): string | undefined {

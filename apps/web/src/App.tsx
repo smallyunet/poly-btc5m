@@ -75,11 +75,13 @@ function shortenTokenId(id: string): string {
   return `${id.slice(0, 8)}...${id.slice(-8)}`;
 }
 
-function outcomeLabel(label: 'YES' | 'NO'): string {
+function outcomeLabel(label: 'YES' | 'NO' | 'UNKNOWN'): string {
+  if (label === 'UNKNOWN') return 'UNKNOWN';
   return label === 'YES' ? 'UP' : 'DOWN';
 }
 
-function outcomeTone(label: 'YES' | 'NO'): 'good' | 'bad' {
+function outcomeTone(label: 'YES' | 'NO' | 'UNKNOWN'): 'good' | 'bad' | 'neutral' {
+  if (label === 'UNKNOWN') return 'neutral';
   return label === 'YES' ? 'good' : 'bad';
 }
 
@@ -243,6 +245,8 @@ export function App() {
   const [state, setState] = React.useState<DashboardState | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [refreshing, setRefreshing] = React.useState(false);
+  const [autoRefreshing, setAutoRefreshing] = React.useState(false);
+  const [lastRefreshAt, setLastRefreshAt] = React.useState<string | null>(null);
   
   // Navigation Tab State
   const [activeTab, setActiveTab] = React.useState<TabType>(() => tabFromUrl());
@@ -258,13 +262,16 @@ export function App() {
 
   const load = React.useCallback(async (silent = false) => {
     try {
-      if (!silent) setRefreshing(true);
+      if (silent) setAutoRefreshing(true);
+      else setRefreshing(true);
       setError(null);
       setState(await api<DashboardState>('/api/state'));
+      setLastRefreshAt(new Date().toISOString());
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
-      if (!silent) setRefreshing(false);
+      if (silent) setAutoRefreshing(false);
+      else setRefreshing(false);
     }
   }, []);
 
@@ -452,6 +459,11 @@ export function App() {
         </nav>
 
         <div className="actions">
+          <div className="refreshStatus" title="All dashboard panels refresh from /api/state on the same polling cycle.">
+            <RefreshCw size={13} className={autoRefreshing ? 'spin' : ''} />
+            <span>{autoRefreshing ? 'Updating' : `Auto ${Math.round(DASHBOARD_REFRESH_MS / 1000)}s`}</span>
+            <strong>{lastRefreshAt ? formatEtTime(lastRefreshAt) : 'pending'}</strong>
+          </div>
           <button type="button" onClick={() => load()} disabled={refreshing}>
             <RefreshCw size={14} className={refreshing ? 'spin' : ''} />
             {refreshing ? 'Refreshing' : 'Refresh'}
@@ -597,7 +609,7 @@ export function App() {
                     snapshot.positions.map((pos) => {
                       const quote = snapshot.orderbooks.find((q) => q.tokenId === pos.tokenId);
                       // Estimate current market price from orderbook midpoint or best bid/ask
-                      const currentPrice = quote?.midpoint ?? (
+                      const currentPrice = pos.currentPrice ?? quote?.midpoint ?? (
                         (quote?.bestBid != null && quote?.bestAsk != null) 
                           ? (quote.bestBid + quote.bestAsk) / 2 
                           : pos.avgPrice
@@ -609,7 +621,7 @@ export function App() {
                       return (
                         <div key={pos.tokenId} className={`positionCard ${pos.label}`}>
                           <div className="posToken">
-                            <div className="posTokenName">{outcomeLabel(pos.label)} Token</div>
+                            <div className="posTokenName">{pos.title || `${outcomeLabel(pos.label)} Token`}</div>
                             <div className="posTokenSide">{outcomeLabel(pos.label)} Shares</div>
                           </div>
                           <div className="posStats">
