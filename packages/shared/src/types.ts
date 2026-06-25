@@ -77,6 +77,17 @@ export type BtcFeatureSnapshot = {
   volatility120s: number;
   drift120s: number;
   momentum30s: number;
+  range120s: number;
+  range300s: number;
+  rangeBps120s: number;
+  rangeBps300s: number;
+  upExcursionBps120s: number;
+  downExcursionBps120s: number;
+  minBiExcursionBps120s: number;
+  driftRatio120s: number;
+  momentumRatio30s: number;
+  rangePercentile120s: number | null;
+  chopScore: number;
   samples120s: number;
   latestCrossAt?: string;
   source: PriceTick['source'] | 'none';

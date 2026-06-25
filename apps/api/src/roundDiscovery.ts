@@ -38,19 +38,11 @@ export class Btc5mRoundDiscovery {
   constructor(private readonly config: AppConfig) {}
 
   async discover(params: {
-    trackedRoundSlug?: string | null;
     latestPrice?: number | null;
     persistedStrike?: (roundId: string) => number | undefined;
   } = {}): Promise<DiscoveryResult> {
     const diagnostics: string[] = [];
     const nowSec = Math.floor(Date.now() / 1000);
-    const trackedRound = params.trackedRoundSlug ? await this.marketFromSlug(params.trackedRoundSlug) : null;
-    if (trackedRound && isUsableMarket(trackedRound.market)) {
-      const round = this.marketToRound(trackedRound.market, params.latestPrice, params.persistedStrike);
-      diagnostics.push(`Tracking existing round ${round.eventSlug} because it has local orders or fills.`);
-      return { round, diagnostics };
-    }
-
     const nextRoundStartSec = Math.floor(nowSec / ROUND_DURATION_SECONDS) * ROUND_DURATION_SECONDS + ROUND_DURATION_SECONDS;
     const candidates = upcomingRoundWindow(nextRoundStartSec, 6);
     for (const candidate of candidates) {

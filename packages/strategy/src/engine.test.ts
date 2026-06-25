@@ -11,11 +11,13 @@ const risk: StrategyRiskConfig = {
   minOrderShares: 5,
   maxOrderbookAgeSeconds: 5,
   minCross120s: 2,
-  minVolatility120s: 12,
   maxAbsDrift120s: 40,
   maxAbsMomentum30s: 28,
-  singleFillGraceSeconds: 75,
-  minSingleExitBid: 0.3,
+  minChopScore: 70,
+  minRangeBps120s: 3,
+  minBiExcursionBps120s: 1,
+  maxDriftRatio120s: 0.45,
+  maxMomentumRatio30s: 0.55,
   entryOrderTtlSeconds: 30,
 };
 
@@ -25,13 +27,18 @@ test('classifies a high-cross low-drift path as CHOP', () => {
     volatility120s: 18,
     drift120s: 5,
     momentum30s: 3,
+    rangeBps120s: 6,
+    minBiExcursionBps120s: 2,
+    driftRatio120s: 0.2,
+    momentumRatio30s: 0.12,
+    chopScore: 84,
     samples120s: 20,
   });
   assert.equal(classifyRegime(snapshot, risk), 'CHOP');
 });
 
 test('blocks entry outside the decision window', () => {
-  const snapshot = { ...baseSnapshot({ cross120s: 3, volatility120s: 18, drift120s: 5, momentum30s: 3, samples120s: 20 }), regime: 'CHOP' as const };
+  const snapshot = { ...baseSnapshot(chopFeatures()), regime: 'CHOP' as const };
   snapshot.round.secondsToStart = 120;
   const result = evaluateEntry(snapshot, risk);
   assert.equal(result.intents.length, 0);
@@ -40,7 +47,7 @@ test('blocks entry outside the decision window', () => {
 });
 
 test('generates paired YES and NO intents in a fresh CHOP decision window', () => {
-  const snapshot = { ...baseSnapshot({ cross120s: 3, volatility120s: 18, drift120s: 5, momentum30s: 3, samples120s: 20 }), regime: 'CHOP' as const };
+  const snapshot = { ...baseSnapshot(chopFeatures()), regime: 'CHOP' as const };
   const result = evaluateEntry(snapshot, risk);
   assert.equal(result.intents.length, 2);
   assert.deepEqual(result.intents.map((intent) => intent.label).sort(), ['NO', 'YES']);
@@ -48,41 +55,15 @@ test('generates paired YES and NO intents in a fresh CHOP decision window', () =
   assert.equal(result.intents[0].shares, 10);
 });
 
-test('keeps single-sided exposure during the grace window', () => {
-  const snapshot = exitSnapshot({ momentum30s: -30, drift120s: -50 });
-  const result = evaluateExit(snapshot, [position('YES')], risk, {
-    orders: [order('YES', new Date().toISOString())],
-  });
-  assert.equal(result.intents.length, 0);
-});
-
-test('does not sell single-sided YES exposure when trend is favorable', () => {
-  const snapshot = exitSnapshot({ momentum30s: 30, drift120s: 50 });
-  const result = evaluateExit(snapshot, [position('YES')], risk, {
-    orders: [order('YES', secondsAgo(90))],
-  });
-  assert.equal(result.intents.length, 0);
-});
-
-test('sells single-sided YES exposure when trend is unfavorable after grace', () => {
+test('does not generate sell intents for single-sided exposure', () => {
   const snapshot = exitSnapshot({ momentum30s: -30, drift120s: -50 });
   const result = evaluateExit(snapshot, [position('YES')], risk, {
     orders: [order('YES', secondsAgo(90))],
   });
-  assert.equal(result.intents.length, 1);
-  assert.equal(result.intents[0].side, 'SELL');
-  assert.equal(result.intents[0].shares, 5);
-});
-
-test('blocks single-sided exit when bid is below configured minimum', () => {
-  const snapshot = exitSnapshot({ momentum30s: -30, drift120s: -50 });
-  snapshot.orderbooks = [quote('yes', 0.12), quote('no')];
-  const result = evaluateExit(snapshot, [position('YES')], risk, {
-    orders: [order('YES', secondsAgo(90))],
-  });
   assert.equal(result.intents.length, 0);
-  assert.equal(result.rejected.length, 1);
-  assert.match(result.rejected[0].rejectionReason || '', /EXIT_BID_TOO_LOW/);
+  assert.equal(result.rejected.length, 0);
+  assert.equal(result.checks[0].status, 'not-applicable');
+  assert.match(result.checks[0].reason, /No add, exit, or rebalance/);
 });
 
 test('does not sell only because the data source is unavailable', () => {
@@ -120,6 +101,17 @@ function baseSnapshot(features: Partial<StateSnapshot['features']>): StateSnapsh
       volatility120s: 0,
       drift120s: 0,
       momentum30s: 0,
+      range120s: 0,
+      range300s: 0,
+      rangeBps120s: 0,
+      rangeBps300s: 0,
+      upExcursionBps120s: 0,
+      downExcursionBps120s: 0,
+      minBiExcursionBps120s: 0,
+      driftRatio120s: 1,
+      momentumRatio30s: 1,
+      rangePercentile120s: null,
+      chopScore: 0,
       samples120s: 0,
       source: 'rtds',
       updatedAt: now,
@@ -133,6 +125,27 @@ function baseSnapshot(features: Partial<StateSnapshot['features']>): StateSnapsh
     positions: [],
     positionReadStatus: 'enabled',
     diagnostics: [],
+  };
+}
+
+function chopFeatures(): Partial<StateSnapshot['features']> {
+  return {
+    cross120s: 3,
+    volatility120s: 18,
+    drift120s: 5,
+    momentum30s: 3,
+    range120s: 60,
+    range300s: 90,
+    rangeBps120s: 6,
+    rangeBps300s: 9,
+    upExcursionBps120s: 3,
+    downExcursionBps120s: 2,
+    minBiExcursionBps120s: 2,
+    driftRatio120s: 0.2,
+    momentumRatio30s: 0.12,
+    rangePercentile120s: 0.6,
+    chopScore: 84,
+    samples120s: 20,
   };
 }
 

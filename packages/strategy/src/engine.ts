@@ -7,11 +7,13 @@ export type StrategyRiskConfig = {
   minOrderShares: number;
   maxOrderbookAgeSeconds: number;
   minCross120s: number;
-  minVolatility120s: number;
   maxAbsDrift120s: number;
   maxAbsMomentum30s: number;
-  singleFillGraceSeconds: number;
-  minSingleExitBid: number;
+  minChopScore: number;
+  minRangeBps120s: number;
+  minBiExcursionBps120s: number;
+  maxDriftRatio120s: number;
+  maxMomentumRatio30s: number;
   entryOrderTtlSeconds: number;
 };
 
@@ -33,10 +35,14 @@ const makeId = (prefix: string) => `${prefix}-${Date.now()}-${Math.random().toSt
 export function classifyRegime(snapshot: StateSnapshot, config: StrategyRiskConfig): StateSnapshot['regime'] {
   const f = snapshot.features;
   if (f.price == null || f.samples120s < 8) return 'UNKNOWN';
-  if (f.cross120s >= config.minCross120s && f.volatility120s >= config.minVolatility120s && Math.abs(f.drift120s) <= config.maxAbsDrift120s && Math.abs(f.momentum30s) <= config.maxAbsMomentum30s) {
+  const rangeReady = f.rangeBps120s >= config.minRangeBps120s;
+  const twoSided = f.minBiExcursionBps120s >= config.minBiExcursionBps120s;
+  const driftControlled = f.driftRatio120s <= config.maxDriftRatio120s;
+  const momentumControlled = f.momentumRatio30s <= config.maxMomentumRatio30s;
+  if (f.chopScore >= config.minChopScore && f.cross120s >= config.minCross120s && rangeReady && twoSided && driftControlled && momentumControlled) {
     return 'CHOP';
   }
-  if (f.cross120s === 0 && (Math.abs(f.drift120s) > config.maxAbsDrift120s || Math.abs(f.momentum30s) > config.maxAbsMomentum30s)) {
+  if (f.cross120s === 0 && (!driftControlled || !momentumControlled || Math.abs(f.drift120s) > config.maxAbsDrift120s || Math.abs(f.momentum30s) > config.maxAbsMomentum30s)) {
     return 'TREND';
   }
   return 'LOW_ACTIVITY';
@@ -50,12 +56,12 @@ export function evaluateEntry(snapshot: StateSnapshot, config: StrategyRiskConfi
   const inDecisionWindow = snapshot.round.secondsToStart <= config.entryOrderTtlSeconds && snapshot.round.secondsToStart >= 0;
   const yesQuote = quoteFor(snapshot, snapshot.round.yesTokenId);
   const noQuote = quoteFor(snapshot, snapshot.round.noTokenId);
-  const booksFresh = freshQuote(yesQuote, config) && freshQuote(noQuote, config);
+  const booksTradable = buyQuoteReady(yesQuote, config) && buyQuoteReady(noQuote, config);
   const shares = roundShares(config.orderSharesPerSide);
 
   if (!inDecisionWindow) reasons.push('NOT_IN_DECISION_WINDOW');
   if (snapshot.regime !== 'CHOP') reasons.push(`REGIME_${snapshot.regime}`);
-  if (!booksFresh) reasons.push('ORDERBOOK_STALE_OR_MISSING');
+  if (!booksTradable) reasons.push('ORDERBOOK_NOT_TRADABLE');
   if (shares < config.minOrderShares) reasons.push('ORDER_SHARES_TOO_SMALL');
   if (config.dualLimitPrice <= 0 || config.dualLimitPrice >= 1) reasons.push('INVALID_DUAL_LIMIT_PRICE');
 
@@ -82,12 +88,14 @@ export function evaluateEntry(snapshot: StateSnapshot, config: StrategyRiskConfi
     conditions: [
       condition('Decision window', inDecisionWindow, `${snapshot.round.secondsToStart.toFixed(1)}s to start`),
       condition('Regime is CHOP', snapshot.regime === 'CHOP', snapshot.regime),
+      condition('CHOP score threshold', snapshot.features.chopScore >= config.minChopScore, `${snapshot.features.chopScore.toFixed(1)} / ${config.minChopScore}`),
       condition('cross_120s threshold', snapshot.features.cross120s >= config.minCross120s, `${snapshot.features.cross120s} / ${config.minCross120s}`),
-      condition('volatility_120s threshold', snapshot.features.volatility120s >= config.minVolatility120s, `${snapshot.features.volatility120s.toFixed(2)} / ${config.minVolatility120s}`),
-      condition('drift_120s capped', Math.abs(snapshot.features.drift120s) <= config.maxAbsDrift120s, `${snapshot.features.drift120s.toFixed(2)} / ${config.maxAbsDrift120s}`),
-      condition('momentum_30s capped', Math.abs(snapshot.features.momentum30s) <= config.maxAbsMomentum30s, `${snapshot.features.momentum30s.toFixed(2)} / ${config.maxAbsMomentum30s}`),
-      condition('YES book fresh', freshQuote(yesQuote, config), quoteAgeLabel(yesQuote)),
-      condition('NO book fresh', freshQuote(noQuote, config), quoteAgeLabel(noQuote)),
+      condition('range_120s sufficient', snapshot.features.rangeBps120s >= config.minRangeBps120s, `${snapshot.features.rangeBps120s.toFixed(2)}bps / ${config.minRangeBps120s}`),
+      condition('two-sided excursion', snapshot.features.minBiExcursionBps120s >= config.minBiExcursionBps120s, `${snapshot.features.minBiExcursionBps120s.toFixed(2)}bps / ${config.minBiExcursionBps120s}`),
+      condition('drift ratio capped', snapshot.features.driftRatio120s <= config.maxDriftRatio120s, `${snapshot.features.driftRatio120s.toFixed(2)} / ${config.maxDriftRatio120s}`),
+      condition('momentum ratio capped', snapshot.features.momentumRatio30s <= config.maxMomentumRatio30s, `${snapshot.features.momentumRatio30s.toFixed(2)} / ${config.maxMomentumRatio30s}`),
+      condition('YES book tradable', buyQuoteReady(yesQuote, config), quoteAgeLabel(yesQuote)),
+      condition('NO book tradable', buyQuoteReady(noQuote, config), quoteAgeLabel(noQuote)),
       condition('Shares per side', shares >= config.minOrderShares, `${shares.toFixed(2)} / min ${config.minOrderShares}`),
     ],
   }];
@@ -99,53 +107,19 @@ export function evaluateExit(snapshot: StateSnapshot, positions: PositionSnapsho
   const intents: TradeIntent[] = [];
   const rejected: TradeIntent[] = [];
   const diagnostics: string[] = [];
-  const yes = positions.find((item) => item.label === 'YES' && item.shares > 0);
-  const no = positions.find((item) => item.label === 'NO' && item.shares > 0);
-  const paired = Math.min(yes?.shares || 0, no?.shares || 0);
-  const unpaired = [yes, no]
-    .filter((item): item is PositionSnapshot => Boolean(item && item.shares - paired > 0.01))
-    .map((position) => ({ position, unpairedShares: roundShares(position.shares - paired) }));
-
-  for (const { position, unpairedShares } of unpaired) {
-    const quote = quoteFor(snapshot, position.tokenId);
-    const ageSeconds = exposureAgeSeconds(snapshot, position, context);
-    const inGrace = ageSeconds == null || ageSeconds < config.singleFillGraceSeconds;
-    const oppositeOpen = hasOppositeOpenBuyOrder(snapshot, position, context.orders || []);
-    const nearExpiry = snapshot.round.secondsToEnd <= 30;
-    const unfavorableTrend = isUnfavorableTrend(snapshot, position);
-    const shouldExit = !inGrace && (!oppositeOpen || nearExpiry) && (unfavorableTrend || nearExpiry);
-
-    if (!shouldExit) continue;
-    if (!quote?.bestBid) {
-      rejected.push(reject(exitIntent(snapshot, position, 0, unpairedShares), 'NO_EXIT_BID'));
-      continue;
-    }
-    if (quote.bestBid < config.minSingleExitBid) {
-      rejected.push(reject(exitIntent(snapshot, position, quote.bestBid, unpairedShares), `EXIT_BID_TOO_LOW:${quote.bestBid.toFixed(3)}<${config.minSingleExitBid.toFixed(3)}`));
-      continue;
-    }
-    intents.push(exitIntent(snapshot, position, quote.bestBid, unpairedShares));
-  }
-
-  const hasExitTrigger = unpaired.some(({ position }) => isUnfavorableTrend(snapshot, position) || snapshot.round.secondsToEnd <= 30);
-  const hasOppositeOpen = unpaired.some(({ position }) => hasOppositeOpenBuyOrder(snapshot, position, context.orders || []));
-  const youngestAge = minDefined(unpaired.map(({ position }) => exposureAgeSeconds(snapshot, position, context)));
-  const gracePassed = youngestAge != null && youngestAge >= config.singleFillGraceSeconds;
-  const bidBlocks = rejected.filter((item) => (item.rejectionReason || '').includes('EXIT_BID_TOO_LOW')).length;
+  const activePositions = positions.filter((item) => item.shares > 0).length;
 
   const checks: StrategyCheck[] = [{
     strategy: 'BTC5M_SINGLE_EXIT',
-    title: 'BTC 5m Single-Side Exit',
-    status: unpaired.length ? (intents.length ? 'eligible' : 'blocked') : 'not-applicable',
-    summary: 'Conservatively exit unpaired exposure only after grace, missing opposite fill, and an adverse trend or expiry risk.',
-    reason: unpaired.length ? (intents.length ? 'Single-sided exposure qualifies for risk exit.' : 'Single-sided exposure exists, but exit guardrails are still blocking.') : 'No single-sided exposure.',
-    blockers: rejected.map((item) => item.rejectionReason || 'REJECTED'),
+    title: 'BTC 5m Settlement-Only After Start',
+    status: 'not-applicable',
+    summary: 'Sell-side exits are disabled; after round start the bot only reconciles fills and records settlement estimates.',
+    reason: 'No add, exit, or rebalance actions are generated after round start.',
+    blockers: [],
     conditions: [
-      condition('Single-sided exposure exists', unpaired.length > 0, `${unpaired.length}`),
-      condition('Grace window passed', gracePassed, youngestAge == null ? 'unknown' : `${youngestAge.toFixed(1)}s / ${config.singleFillGraceSeconds}s`),
-      condition('Opposite open order absent', !hasOppositeOpen, hasOppositeOpen ? 'waiting for opposite fill' : 'none'),
-      condition('Adverse trend or expiry risk', hasExitTrigger, snapshot.round.secondsToEnd <= 30 ? `${snapshot.round.secondsToEnd.toFixed(1)}s to end` : `${snapshot.regime}, momentum ${snapshot.features.momentum30s.toFixed(2)}, drift ${snapshot.features.drift120s.toFixed(2)}`),
-      condition('Minimum exit bid', bidBlocks === 0, `${config.minSingleExitBid.toFixed(3)} min`),
+      condition('Sell-side exits disabled', true, 'settlement-only'),
+      condition('Active positions observed', true, `${activePositions}`),
+      condition('Trade generation after start', true, 'disabled'),
     ],
   }];
 
@@ -170,67 +144,6 @@ function makeIntent(snapshot: StateSnapshot, label: 'YES' | 'NO', tokenId: strin
   };
 }
 
-function exitIntent(snapshot: StateSnapshot, position: PositionSnapshot, bid: number, shares: number): TradeIntent {
-  return {
-    id: makeId('exit'),
-    strategy: 'BTC5M_SINGLE_EXIT',
-    roundId: snapshot.round.id,
-    tokenId: position.tokenId,
-    label: position.label,
-    side: 'SELL',
-    orderType: 'LIMIT',
-    limitPrice: bid,
-    shares: roundShares(shares),
-    reason: `Unpaired ${position.label} exposure met conservative exit guardrails.`,
-    status: 'generated',
-    ttlSeconds: 20,
-    createdAt: nowIso(),
-  };
-}
-
-function exposureAgeSeconds(snapshot: StateSnapshot, position: PositionSnapshot, context: ExitEvaluationContext): number | null {
-  const timestamps = [
-    ...(context.fills || [])
-      .filter((fill) => fill.roundId === snapshot.round.id && fill.label === position.label && fill.side === 'BUY')
-      .map((fill) => toTime(fill.matchedAt)),
-    ...(context.orders || [])
-      .filter((order) => order.roundId === snapshot.round.id && order.label === position.label && order.side === 'BUY')
-      .map((order) => toTime(order.createdAt)),
-  ].filter((time): time is number => time != null);
-  if (!timestamps.length) return null;
-  return Math.max(0, (Date.now() - Math.min(...timestamps)) / 1000);
-}
-
-function hasOppositeOpenBuyOrder(snapshot: StateSnapshot, position: PositionSnapshot, orders: OrderRecord[]): boolean {
-  const opposite = position.label === 'YES' ? 'NO' : 'YES';
-  return orders.some((order) => (
-    order.roundId === snapshot.round.id
-    && order.label === opposite
-    && order.side === 'BUY'
-    && (order.status === 'local' || order.status === 'posted' || order.status === 'partially_filled')
-  ));
-}
-
-function isUnfavorableTrend(snapshot: StateSnapshot, position: PositionSnapshot): boolean {
-  if (snapshot.regime !== 'TREND') return false;
-  const momentum = snapshot.features.momentum30s;
-  const drift = snapshot.features.drift120s;
-  const bearish = momentum < -0.000001 || drift < -0.000001;
-  const bullish = momentum > 0.000001 || drift > 0.000001;
-  return position.label === 'YES' ? bearish : bullish;
-}
-
-function toTime(value: string | undefined): number | null {
-  if (!value) return null;
-  const time = new Date(value).getTime();
-  return Number.isFinite(time) ? time : null;
-}
-
-function minDefined(values: Array<number | null>): number | null {
-  const defined = values.filter((value): value is number => value != null);
-  return defined.length ? Math.min(...defined) : null;
-}
-
 function reject(base: TradeIntent, reason: string): TradeIntent {
   return { ...base, status: 'rejected', rejectionReason: reason };
 }
@@ -245,10 +158,15 @@ function freshQuote(quote: OrderBookQuote | undefined, config: StrategyRiskConfi
   return Number.isFinite(ageMs) && ageMs <= config.maxOrderbookAgeSeconds * 1000;
 }
 
+function buyQuoteReady(quote: OrderBookQuote | undefined, config: StrategyRiskConfig): boolean {
+  return freshQuote(quote, config) && quote?.bestAsk != null;
+}
+
 function quoteAgeLabel(quote: OrderBookQuote | undefined): string {
   if (!quote) return 'missing';
   const ageSeconds = (Date.now() - new Date(quote.updatedAt).getTime()) / 1000;
-  return `${quote.source}, ${Number.isFinite(ageSeconds) ? ageSeconds.toFixed(1) : 'unknown'}s old`;
+  const ask = quote.bestAsk == null ? ', ask missing' : '';
+  return `${quote.source}, ${Number.isFinite(ageSeconds) ? ageSeconds.toFixed(1) : 'unknown'}s old${ask}`;
 }
 
 function condition(label: string, passed: boolean, actual: string): StrategyCondition {

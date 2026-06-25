@@ -321,6 +321,24 @@ export function App() {
 
   const snapshot = state.latestSnapshot;
   const eligible = state.strategyChecks.filter((check) => check.status === 'eligible').length;
+  const entryCheck = state.strategyChecks.find((check) => check.strategy === 'BTC5M_DUAL_45');
+  const entryConditions = entryCheck?.conditions || [];
+  const conditionByLabel = (label: string) => entryConditions.find((condition) => condition.label === label);
+  const failedEntryConditions = entryConditions.filter((condition) => !condition.passed);
+  const btcDecisionConditions = [
+    'CHOP score threshold',
+    'cross_120s threshold',
+    'range_120s sufficient',
+    'two-sided excursion',
+    'drift ratio capped',
+    'momentum ratio capped',
+  ].map(conditionByLabel).filter((condition): condition is StrategyCheck['conditions'][number] => Boolean(condition));
+  const orderbookDecisionConditions = [
+    'YES book tradable',
+    'NO book tradable',
+  ].map(conditionByLabel).filter((condition): condition is StrategyCheck['conditions'][number] => Boolean(condition));
+  const btcDecisionPassed = btcDecisionConditions.length > 0 && btcDecisionConditions.every((condition) => condition.passed);
+  const orderbookDecisionPassed = orderbookDecisionConditions.length > 0 && orderbookDecisionConditions.every((condition) => condition.passed);
   const activeOrders = state.orders.filter((order) => (
     order.status === 'posted'
     || order.status === 'partially_filled'
@@ -364,6 +382,11 @@ export function App() {
   const terminalGaugeStatus = snapshot.round.strikeStatus === 'locked'
     ? (isBtcAboveStrike ? 'BTC >= OPEN (UP WINS)' : 'BTC < OPEN (DOWN WINS)')
     : 'PRE-ROUND OPEN ESTIMATE';
+  const buyPolicyStatus = !isRoundStarted ? 'PRE-START BUY WINDOW' : 'BUY BLOCKED AFTER START';
+  const buyPolicyTone = !isRoundStarted ? 'good' : 'bad';
+  const entryStatusTone = entryCheck?.status === 'eligible' ? 'good' : entryCheck?.status === 'blocked' ? 'bad' : 'neutral';
+  const entryStatusLabel = entryCheck?.status || 'not-loaded';
+  const topBlockers = failedEntryConditions.slice(0, 4).map((condition) => condition.label).join(', ') || 'none';
 
   return (
     <Shell>
@@ -431,7 +454,7 @@ export function App() {
           icon={<TrendingUp size={16} />} 
           label="Market Regime" 
           value={snapshot.regime} 
-          detail={`${eligible} eligible checks`} 
+          detail={`Score ${formatNumber(snapshot.features.chopScore, 1)} / ${eligible} eligible`}
           tone={snapshot.regime === 'CHOP' ? 'good' : snapshot.regime === 'TREND' ? 'bad' : 'neutral'} 
         />
         <Digest 
@@ -456,6 +479,47 @@ export function App() {
           <div className="grid">
             {/* Left Column (Main widgets) */}
             <div className="span-8" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <div className="decisionPanel">
+                <div className="decisionHeader">
+                  <div>
+                    <span className="decisionKicker">Next Round Pre-Start Decision</span>
+                    <strong>{entryCheck?.title || 'BTC 5m Dual 45c Pre-Round'}</strong>
+                  </div>
+                  <Badge tone={entryStatusTone}>{entryStatusLabel}</Badge>
+                </div>
+                <div className="decisionGrid">
+                  <DecisionMetric
+                    label="BUY Policy"
+                    value={buyPolicyStatus}
+                    detail={!isRoundStarted ? `${formatSeconds(secondsToStart)} before start; no expiry set` : 'execution rejects all trade intents'}
+                    tone={buyPolicyTone}
+                  />
+                  <DecisionMetric
+                    label="BTC Dynamic Score"
+                    value={formatNumber(snapshot.features.chopScore, 1)}
+                    detail={`range ${formatNumber(snapshot.features.rangeBps120s, 2)}bps / two-sided ${formatNumber(snapshot.features.minBiExcursionBps120s, 2)}bps`}
+                    tone={btcDecisionPassed ? 'good' : 'bad'}
+                  />
+                  <DecisionMetric
+                    label="Orderbook Role"
+                    value={orderbookDecisionPassed ? 'TRADABLE' : 'NOT TRADABLE'}
+                    detail="live/fresh token books with buy ask only"
+                    tone={orderbookDecisionPassed ? 'good' : 'bad'}
+                  />
+                  <DecisionMetric
+                    label="Post-Start Actions"
+                    value="SETTLEMENT ONLY"
+                    detail="no add, no exit, no rebalance after start"
+                    tone="neutral"
+                  />
+                  <DecisionMetric
+                    label="Current Blockers"
+                    value={failedEntryConditions.length ? String(failedEntryConditions.length) : '0'}
+                    detail={topBlockers}
+                    tone={failedEntryConditions.length ? 'warn' : 'good'}
+                  />
+                </div>
+              </div>
               
               {/* BTC Price vs Strike Visualizer */}
               {btcPrice != null && strikePrice != null && priceDiff != null && (
@@ -635,6 +699,22 @@ export function App() {
                     <span className="metricValue">{snapshot.features.cross120s}</span>
                   </div>
                   <div className="metricRow">
+                    <span className="metricLabel">CHOP Score</span>
+                    <span className="metricValue">{formatNumber(snapshot.features.chopScore, 1)}</span>
+                  </div>
+                  <div className="metricRow">
+                    <span className="metricLabel">Range (120s)</span>
+                    <span className="metricValue">{formatNumber(snapshot.features.range120s, 2)} / {formatNumber(snapshot.features.rangeBps120s, 2)}bps</span>
+                  </div>
+                  <div className="metricRow">
+                    <span className="metricLabel">Range (300s)</span>
+                    <span className="metricValue">{formatNumber(snapshot.features.range300s, 2)} / {formatNumber(snapshot.features.rangeBps300s, 2)}bps</span>
+                  </div>
+                  <div className="metricRow">
+                    <span className="metricLabel">Two-Sided Excursion</span>
+                    <span className="metricValue">{formatNumber(snapshot.features.minBiExcursionBps120s, 2)}bps</span>
+                  </div>
+                  <div className="metricRow">
                     <span className="metricLabel">Volatility (120s)</span>
                     <span className="metricValue">{formatNumber(snapshot.features.volatility120s, 2)}</span>
                   </div>
@@ -645,6 +725,14 @@ export function App() {
                   <div className="metricRow">
                     <span className="metricLabel">Momentum (30s)</span>
                     <span className="metricValue">{formatNumber(snapshot.features.momentum30s, 2)}</span>
+                  </div>
+                  <div className="metricRow">
+                    <span className="metricLabel">Drift / Momentum Ratio</span>
+                    <span className="metricValue">{formatNumber(snapshot.features.driftRatio120s, 2)} / {formatNumber(snapshot.features.momentumRatio30s, 2)}</span>
+                  </div>
+                  <div className="metricRow">
+                    <span className="metricLabel">Range Percentile</span>
+                    <span className="metricValue">{snapshot.features.rangePercentile120s == null ? '-' : formatNumber(snapshot.features.rangePercentile120s * 100, 1) + '%'}</span>
                   </div>
                 </div>
               </div>
@@ -963,6 +1051,26 @@ function Digest({
       </div>
       <strong className="digestValue">{value}</strong>
       <em className="digestDetail">{detail}</em>
+    </div>
+  );
+}
+
+function DecisionMetric({
+  label,
+  value,
+  detail,
+  tone,
+}: {
+  label: string;
+  value: string;
+  detail: string;
+  tone: 'good' | 'warn' | 'bad' | 'neutral';
+}) {
+  return (
+    <div className={`decisionMetric ${tone}`}>
+      <span>{label}</span>
+      <strong>{value}</strong>
+      <em>{detail}</em>
     </div>
   );
 }

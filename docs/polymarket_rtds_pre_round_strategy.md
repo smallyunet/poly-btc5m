@@ -13,14 +13,17 @@ It predicts the **next 5-minute round regime** (CHOP vs TREND) using RTDS data, 
 ### 1.1 BTC Price Feed (Polymarket RTDS WebSocket)
 - BTC mid price
 - micro-momentum
-- volatility
+- realized range
+- two-sided excursion around strike
+- drift and momentum ratios
+- dynamic CHOP score
 - cross events vs strike
 
 ### 1.2 Orderbook Feed (CLOB WebSocket)
 - YES/NO bid/ask
-- spread
-- depth
-- imbalance
+- live/fresh book validation
+- token correctness
+- buyable ask presence
 
 ---
 
@@ -52,9 +55,11 @@ Cross is used for regime prediction, NOT execution timing.
 ### CHOP Regime (Trade)
 
 Conditions:
-- cross_120s ≥ 2
-- high volatility
-- low directional drift
+- CHOP score passes threshold
+- cross_120s passes threshold
+- realized range is sufficient in bps
+- two-sided excursion around strike is sufficient
+- drift and momentum ratios are capped
 
 Interpretation:
 → Market likely to oscillate around strike
@@ -88,9 +93,10 @@ Conditions:
 Enable strategy ONLY IF:
 
 - Regime = CHOP
-- cross_frequency > threshold
-- volatility sufficient
-- no strong momentum
+- BTC path score passes threshold
+- range and two-sided excursion are sufficient
+- no strong drift or momentum by ratio
+- next-round YES/NO orderbooks are live, fresh, and buyable
 
 Otherwise: DO NOT TRADE
 
@@ -106,6 +112,8 @@ Place limit orders:
 - NO @ 0.45
 
 No further directional decision is made.
+No exchange-level expiration is attached to the limit orders.
+After round start, the bot does not add, exit, rebalance, or post any new trade intent.
 
 ---
 
@@ -126,12 +134,12 @@ No further directional decision is made.
 
 ## 8. Position Management
 
-After first fill:
+After round start:
 
-- Wait 30–90 seconds
-- If opposite side fills → lock profit
-- If trend detected → exit exposure
-- If chop persists → wait for second fill
+- Do not add to either side
+- Do not sell or exit single-sided exposure
+- Do not rebalance
+- Reconcile fills and wait for settlement
 
 ---
 
@@ -140,7 +148,7 @@ After first fill:
 - No trading in TREND regime
 - No trading in zero-cross environments
 - No trading in low volatility regimes
-- Avoid last 30s pre-expiry trading
+- Reject all trading after round start
 - Limit exposure per round
 
 ---

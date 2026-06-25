@@ -22,12 +22,13 @@ export type AppConfig = {
   minOrderShares: number;
   maxOrderbookAgeSeconds: number;
   minCross120s: number;
-  minVolatility120s: number;
   maxAbsDrift120s: number;
   maxAbsMomentum30s: number;
-  singleFillGraceSeconds: number;
-  minSingleExitBid: number;
-  enableSingleExitStrategy: boolean;
+  minChopScore: number;
+  minRangeBps120s: number;
+  minBiExcursionBps120s: number;
+  maxDriftRatio120s: number;
+  maxMomentumRatio30s: number;
   marketConfig: BtcMarketConfig;
 };
 
@@ -51,12 +52,13 @@ export function loadConfig(): AppConfig {
     minOrderShares: numberEnv('MIN_ORDER_SHARES', 5),
     maxOrderbookAgeSeconds: numberEnv('MAX_ORDERBOOK_AGE_SECONDS', 5),
     minCross120s: numberEnv('MIN_CROSS_120S', 2),
-    minVolatility120s: numberEnv('MIN_VOLATILITY_120S', 12),
     maxAbsDrift120s: numberEnv('MAX_ABS_DRIFT_120S', 40),
     maxAbsMomentum30s: numberEnv('MAX_ABS_MOMENTUM_30S', 28),
-    singleFillGraceSeconds: numberEnv('SINGLE_FILL_GRACE_SECONDS', 75),
-    minSingleExitBid: numberEnv('MIN_SINGLE_EXIT_BID', 0.3),
-    enableSingleExitStrategy: booleanEnv('ENABLE_SINGLE_EXIT_STRATEGY', true),
+    minChopScore: numberEnv('MIN_CHOP_SCORE', 70),
+    minRangeBps120s: numberEnv('MIN_RANGE_BPS_120S', 3),
+    minBiExcursionBps120s: numberEnv('MIN_BI_EXCURSION_BPS_120S', 1),
+    maxDriftRatio120s: numberEnv('MAX_DRIFT_RATIO_120S', 0.45),
+    maxMomentumRatio30s: numberEnv('MAX_MOMENTUM_RATIO_30S', 0.55),
     marketConfig: loadMarketConfig(),
   };
 }
@@ -83,14 +85,6 @@ function parsePositiveInteger(value: string | undefined, fallback: number): numb
 function numberEnv(name: string, fallback: number): number {
   const parsed = Number(process.env[name]);
   return Number.isFinite(parsed) ? parsed : fallback;
-}
-
-function booleanEnv(name: string, fallback: boolean): boolean {
-  const raw = process.env[name]?.trim().toLowerCase();
-  if (!raw) return fallback;
-  if (['1', 'true', 'yes', 'on'].includes(raw)) return true;
-  if (['0', 'false', 'no', 'off'].includes(raw)) return false;
-  return fallback;
 }
 
 function rtdsWsUrl(value: string | undefined): string {

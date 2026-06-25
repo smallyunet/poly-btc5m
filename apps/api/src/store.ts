@@ -153,17 +153,6 @@ export class InMemoryStore {
     this.persistState();
   }
 
-  trackedRoundSlug(now = Date.now()): string | null {
-    const slugs = [...this.orders, ...this.fills]
-      .map((item) => item.roundId)
-      .filter((roundId) => roundId.startsWith('btc-updown-5m-'));
-    const active = slugs
-      .map((roundId) => ({ roundId, startMs: roundStartMs(roundId) }))
-      .filter((item) => item.startMs != null && item.startMs + 300_000 > now)
-      .sort((a, b) => (a.startMs || 0) - (b.startMs || 0))[0];
-    return active?.roundId || null;
-  }
-
   recordRuntimeLog(log: Omit<RuntimeLogRecord, 'id' | 'createdAt'> & { createdAt?: string }): RuntimeLogRecord {
     const record: RuntimeLogRecord = {
       id: `log-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
@@ -227,13 +216,6 @@ export class InMemoryStore {
       console.warn('[store] failed to persist runtime state', error);
     }
   }
-}
-
-function roundStartMs(roundId: string): number | null {
-  const match = roundId.match(/btc-updown-5m-(\d+)$/);
-  if (!match) return null;
-  const seconds = Number(match[1]);
-  return Number.isFinite(seconds) ? seconds * 1000 : null;
 }
 
 function isTradeIntentLike(value: unknown): value is TradeIntent {

@@ -5,8 +5,6 @@ import type { AppConfig } from './config';
 import type { InMemoryStore } from './store';
 
 const FAILED_ORDER_COOLDOWN_MS = 5 * 60_000;
-const MIN_CLOB_SELL_SHARES = 5;
-
 export type ExecuteIntentsParams = {
   appConfig: AppConfig;
   adapter: PolymarketAdapter;
@@ -104,6 +102,8 @@ async function executionGate(params: ExecuteIntentsParams, intent: TradeIntent):
   const reject = (reason: string, recordFailure = false): GateResult => ({ ok: false, executionKey, reason, recordFailure });
 
   if (!roundTokens(params.snapshot).has(intent.tokenId)) return reject('TOKEN_NOT_IN_ROUND');
+  if (intent.side === 'SELL') return reject('SELL_DISABLED_SETTLEMENT_ONLY');
+  if (Date.now() >= new Date(params.snapshot.round.startAt).getTime()) return reject('ROUND_ALREADY_STARTED');
   if (params.snapshot.round.secondsToEnd <= params.appConfig.marketConfig.avoidExpirySeconds) return reject('ROUND_EXPIRY_TOO_CLOSE');
   if (!params.appConfig.ownerPrivateKey?.trim()) return reject('OWNER_PRIVATE_KEY_MISSING', true);
   if (!params.appConfig.depositWallet?.trim()) return reject('POLYMARKET_DEPOSIT_WALLET_MISSING', true);
@@ -126,17 +126,6 @@ async function executionGate(params: ExecuteIntentsParams, intent: TradeIntent):
     if (matching) return reject('PM_OPEN_ORDER_EXISTS');
   } catch (error) {
     return reject(`PM_OPEN_ORDER_CHECK_FAILED: ${error instanceof Error ? error.message : String(error)}`, true);
-  }
-
-  if (intent.side === 'SELL') {
-    const shares = roundDownShares(intent.shares);
-    if (shares < MIN_CLOB_SELL_SHARES) return reject(`SELL_SIZE_BELOW_MINIMUM: requested ${shares}, minimum ${MIN_CLOB_SELL_SHARES}`);
-    try {
-      const available = await params.adapter.getAvailableShares(intent.tokenId);
-      if (available + 0.000001 < shares) return reject(`SELL_BALANCE_TOO_LOW: available ${available}, requested ${shares}`);
-    } catch (error) {
-      params.store.recordRuntimeLog({ level: 'warn', source: 'execution', message: `SELL balance check unavailable: ${error instanceof Error ? error.message : String(error)}` });
-    }
   }
 
   return { ok: true, executionKey };

@@ -46,6 +46,7 @@ export class MarketDataService {
   features(round: BtcRoundConfig): BtcFeatureSnapshot {
     const now = Date.now();
     const ticks = this.priceTicks.filter((tick) => now - new Date(tick.receivedAt).getTime() <= 120_000);
+    const ticks300s = this.priceTicks.filter((tick) => now - new Date(tick.receivedAt).getTime() <= 300_000);
     const latest = ticks.at(-1);
     const samples120s = ticks.length;
     let cross120s = 0;
@@ -59,12 +60,34 @@ export class MarketDataService {
       }
     }
     const prices = ticks.map((tick) => tick.price);
+    const prices300s = ticks300s.map((tick) => tick.price);
     const first = prices[0];
     const last = prices.at(-1);
     const volatility120s = prices.length > 1 ? stddev(prices) : 0;
     const drift120s = first != null && last != null ? last - first : 0;
     const thirtyAgo = ticks.find((tick) => now - new Date(tick.receivedAt).getTime() <= 30_000);
     const momentum30s = thirtyAgo && latest ? latest.price - thirtyAgo.price : 0;
+    const range120s = range(prices);
+    const range300s = range(prices300s);
+    const denominator = latest?.price && latest.price > 0 ? latest.price : round.strike;
+    const rangeBps120s = bps(range120s, denominator);
+    const rangeBps300s = bps(range300s, denominator);
+    const upExcursion = prices.length ? Math.max(0, ...prices.map((price) => price - round.strike)) : 0;
+    const downExcursion = prices.length ? Math.max(0, ...prices.map((price) => round.strike - price)) : 0;
+    const upExcursionBps120s = bps(upExcursion, denominator);
+    const downExcursionBps120s = bps(downExcursion, denominator);
+    const minBiExcursionBps120s = Math.min(upExcursionBps120s, downExcursionBps120s);
+    const driftRatio120s = range120s > 0 ? Math.abs(drift120s) / range120s : 1;
+    const momentumRatio30s = range120s > 0 ? Math.abs(momentum30s) / range120s : 1;
+    const rangePercentile120s = rollingRangePercentile(this.priceTicks, now, 120_000);
+    const chopScore = scoreChop({
+      cross120s,
+      rangeBps120s,
+      minBiExcursionBps120s,
+      driftRatio120s,
+      momentumRatio30s,
+      rangePercentile120s,
+    });
 
     return {
       price: latest?.price ?? null,
@@ -74,6 +97,17 @@ export class MarketDataService {
       volatility120s,
       drift120s,
       momentum30s,
+      range120s,
+      range300s,
+      rangeBps120s,
+      rangeBps300s,
+      upExcursionBps120s,
+      downExcursionBps120s,
+      minBiExcursionBps120s,
+      driftRatio120s,
+      momentumRatio30s,
+      rangePercentile120s,
+      chopScore,
       samples120s,
       latestCrossAt,
       source: latest?.source ?? 'none',
@@ -263,6 +297,62 @@ function stddev(values: number[]): number {
   const mean = values.reduce((sum, value) => sum + value, 0) / values.length;
   const variance = values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / values.length;
   return Math.sqrt(variance);
+}
+
+function range(values: number[]): number {
+  if (values.length < 2) return 0;
+  return Math.max(...values) - Math.min(...values);
+}
+
+function bps(value: number, denominator: number): number {
+  return denominator > 0 ? (value / denominator) * 10_000 : 0;
+}
+
+function rollingRangePercentile(ticks: PriceTick[], now: number, windowMs: number): number | null {
+  const windows: number[] = [];
+  const start = now - 10 * 60_000;
+  for (let end = start + windowMs; end <= now; end += 30_000) {
+    const prices = ticks
+      .filter((tick) => {
+        const time = new Date(tick.receivedAt).getTime();
+        return time > end - windowMs && time <= end;
+      })
+      .map((tick) => tick.price);
+    const value = range(prices);
+    if (value > 0) windows.push(value);
+  }
+  if (windows.length < 3) return null;
+  const current = windows.at(-1);
+  if (current == null) return null;
+  const belowOrEqual = windows.filter((value) => value <= current).length;
+  return belowOrEqual / windows.length;
+}
+
+function scoreChop(input: {
+  cross120s: number;
+  rangeBps120s: number;
+  minBiExcursionBps120s: number;
+  driftRatio120s: number;
+  momentumRatio30s: number;
+  rangePercentile120s: number | null;
+}): number {
+  const crossScore = clamp(input.cross120s / 3) * 20;
+  const rangeScore = clamp(input.rangeBps120s / 6) * 20;
+  const twoSidedScore = clamp(input.minBiExcursionBps120s / 2) * 25;
+  const driftScore = clamp(1 - input.driftRatio120s / 0.7) * 15;
+  const momentumScore = clamp(1 - input.momentumRatio30s / 0.8) * 10;
+  const percentile = input.rangePercentile120s;
+  const percentileScore = percentile == null
+    ? 5
+    : percentile >= 0.35 && percentile <= 0.9
+      ? 10
+      : clamp(1 - Math.min(Math.abs(percentile - 0.6), 0.6) / 0.6) * 10;
+  return Math.round((crossScore + rangeScore + twoSidedScore + driftScore + momentumScore + percentileScore) * 10) / 10;
+}
+
+function clamp(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(1, value));
 }
 
 function findNumber(value: any, keys: string[]): number | null {

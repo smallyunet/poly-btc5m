@@ -1,5 +1,5 @@
 import type { BtcRoundConfig, PositionSnapshot, RoundPhase, RoundSnapshot, SettlementRecord, StateSnapshot } from '../../../packages/shared/src';
-import { classifyRegime, evaluateEntry, evaluateExit, type StrategyRiskConfig } from '../../../packages/strategy/src';
+import { classifyRegime, evaluateEntry, type StrategyRiskConfig } from '../../../packages/strategy/src';
 import { PolymarketAdapter } from '../../../packages/polymarket/src';
 import type { AppConfig } from './config';
 import { executeLiveIntents } from './execution';
@@ -10,7 +10,6 @@ import type { InMemoryStore } from './store';
 export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, data: MarketDataService, adapter: PolymarketAdapter, discovery: Btc5mRoundDiscovery): Promise<StateSnapshot> {
   const diagnostics: string[] = [];
   const discovered = await discovery.discover({
-    trackedRoundSlug: store.trackedRoundSlug(),
     latestPrice: data.latestPrice(),
     persistedStrike: (roundId) => store.getRoundStrike(roundId),
   });
@@ -39,17 +38,14 @@ export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, dat
   const risk = riskConfig(appConfig, store.getRuntime().executionMode !== 'live');
   const snapshot: StateSnapshot = { ...baseSnapshot, regime: classifyRegime(baseSnapshot, risk) };
   const entry = evaluateEntry(snapshot, risk);
-  const exit = appConfig.enableSingleExitStrategy
-    ? evaluateExit(snapshot, positions, risk, { fills: store.roundFills(snapshot.round.id), orders: store.roundOrders(snapshot.round.id) })
-    : { intents: [], rejected: [], diagnostics: [], checks: [] };
-  const intents = [...exit.intents, ...entry.intents];
-  store.recordIntents([...intents, ...exit.rejected, ...entry.rejected]);
+  const intents = [...entry.intents];
+  store.recordIntents([...intents, ...entry.rejected]);
   const executionDiagnostics = await executeLiveIntents({ appConfig, adapter, store, snapshot, intents, risk });
   await reconcileFills(adapter, store, roundSnapshot, tokenLabels, diagnostics);
   maybeRecordEstimatedSettlement(store, snapshot);
-  const finalSnapshot = { ...snapshot, diagnostics: [...diagnostics, ...entry.diagnostics, ...exit.diagnostics, ...executionDiagnostics] };
+  const finalSnapshot = { ...snapshot, diagnostics: [...diagnostics, ...entry.diagnostics, ...executionDiagnostics] };
   store.recordSnapshot(finalSnapshot, data.status());
-  store.recordStrategyChecks([...entry.checks, ...exit.checks]);
+  store.recordStrategyChecks([...entry.checks]);
   return finalSnapshot;
 }
 
@@ -157,11 +153,13 @@ function riskConfig(appConfig: AppConfig, dryRun: boolean): StrategyRiskConfig {
     minOrderShares: appConfig.minOrderShares,
     maxOrderbookAgeSeconds: appConfig.maxOrderbookAgeSeconds,
     minCross120s: appConfig.minCross120s,
-    minVolatility120s: appConfig.minVolatility120s,
     maxAbsDrift120s: appConfig.maxAbsDrift120s,
     maxAbsMomentum30s: appConfig.maxAbsMomentum30s,
-    singleFillGraceSeconds: appConfig.singleFillGraceSeconds,
-    minSingleExitBid: appConfig.minSingleExitBid,
+    minChopScore: appConfig.minChopScore,
+    minRangeBps120s: appConfig.minRangeBps120s,
+    minBiExcursionBps120s: appConfig.minBiExcursionBps120s,
+    maxDriftRatio120s: appConfig.maxDriftRatio120s,
+    maxMomentumRatio30s: appConfig.maxMomentumRatio30s,
     entryOrderTtlSeconds: appConfig.marketConfig.decisionLeadSeconds,
   };
 }

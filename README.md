@@ -39,7 +39,7 @@ The worker runs every `BOT_TICK_MS` and produces one `DashboardState` snapshot:
 - Discovers the next BTC 5m round from deterministic `btc-updown-5m-<roundStartSec>` slugs and Gamma `/markets/slug/:slug`.
 - Maintains recent BTC price samples only from Polymarket RTDS over `wss://ws-live-data.polymarket.com`.
 - Maintains YES/NO CLOB orderbooks only from the Polymarket CLOB market websocket.
-- Computes `cross120s`, `volatility120s`, `drift120s`, and `momentum30s`.
+- Computes BTC path features including `cross120s`, realized range bps, two-sided excursion bps, drift/momentum ratios, range percentile, and a `chopScore`.
 - Classifies the round regime.
 - Generates paired 45c entry intents during the pre-round decision window when the regime is `CHOP`.
 - Reconciles recent fills and estimates settlement/PnL after a round has ended.
@@ -81,16 +81,16 @@ DUAL_LIMIT_PRICE=0.45
 ORDER_SHARES_PER_SIDE=10
 MIN_ORDER_SHARES=5
 MIN_CROSS_120S=2
-MIN_VOLATILITY_120S=12
 MAX_ABS_DRIFT_120S=40
 MAX_ABS_MOMENTUM_30S=28
-SINGLE_FILL_GRACE_SECONDS=75
-MIN_SINGLE_EXIT_BID=0.30
-ENABLE_SINGLE_EXIT_STRATEGY=true
+MIN_CHOP_SCORE=70
+MIN_RANGE_BPS_120S=3
+MIN_BI_EXCURSION_BPS_120S=1
+MAX_DRIFT_RATIO_120S=0.45
+MAX_MOMENTUM_RATIO_30S=0.55
 ```
 
-Set `ENABLE_SINGLE_EXIT_STRATEGY=false` to disable the `BTC5M_SINGLE_EXIT` sell-side risk exit. Paired 45c entry orders remain enabled.
-`MIN_SINGLE_EXIT_BID` is the lowest bid at which the single-side exit strategy may sell unpaired exposure.
+The worker targets the next BTC 5m round only. It posts paired BUY limit orders before round start, does not set an exchange-level expiration on those limit orders, and rejects all trade intents after the round has started. The runtime does not generate sell-side exits; after start it only reconciles fills and records settlement estimates.
 
 Live entry orders are configured as CLOB limit order `price + size`:
 

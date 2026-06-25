@@ -383,6 +383,96 @@ button.primary:hover:not(:disabled) {
   color: var(--text-primary);
 }
 
+/* Pre-round decision status */
+.decisionPanel {
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.02);
+}
+
+.decisionHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 12px;
+}
+
+.decisionHeader > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.decisionHeader strong {
+  color: var(--text-primary);
+  font-size: 15px;
+  line-height: 1.35;
+}
+
+.decisionKicker {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.decisionGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+}
+
+.decisionMetric {
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 11px;
+  background: rgba(0, 0, 0, 0.012);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.decisionMetric.good { border-color: rgba(16, 185, 129, 0.28); }
+.decisionMetric.warn { border-color: rgba(245, 158, 11, 0.32); }
+.decisionMetric.bad { border-color: rgba(225, 29, 72, 0.28); }
+
+.decisionMetric span {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.decisionMetric strong {
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 16px;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.decisionMetric.good strong { color: var(--color-success); }
+.decisionMetric.warn strong { color: var(--color-warning); }
+.decisionMetric.bad strong { color: var(--color-danger); }
+
+.decisionMetric em {
+  color: var(--text-secondary);
+  font-style: normal;
+  font-size: 12px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
 /* Active Positions Panel */
 .positionsList {
   display: flex;
@@ -1166,6 +1256,9 @@ td.mono {
   .digest {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
+  .decisionGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
   .span-4, .span-6, .span-8 {
     grid-column: span 12;
   }
@@ -1183,6 +1276,12 @@ td.mono {
   }
   .digest {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .decisionHeader {
+    flex-direction: column;
+  }
+  .decisionGrid {
+    grid-template-columns: 1fr;
   }
   .consoleLogLine {
     grid-template-columns: 1fr;
