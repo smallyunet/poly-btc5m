@@ -2,7 +2,7 @@
 
 Deployable Polymarket BTC 5-minute strategy worker and operator dashboard.
 
-The strategy is based on `docs/polymarket_rtds_pre_round_strategy.md`: it does not predict BTC direction. It classifies the next 5-minute round as `CHOP`, `TREND`, or `LOW_ACTIVITY`, and only in `CHOP` does it prepare paired `YES @ 0.45` and `NO @ 0.45` limit orders.
+The strategy is based on `docs/polymarket_rtds_pre_round_strategy.md`: it does not predict BTC direction. It classifies the next 5-minute round as `CHOP`, `TREND`, or `LOW_ACTIVITY`, and only in `CHOP` does it prepare paired YES/NO limit orders using the score-based dynamic limit policy.
 
 ## Structure
 
@@ -41,7 +41,7 @@ The worker runs every `BOT_TICK_MS` and produces one `DashboardState` snapshot:
 - Maintains YES/NO CLOB orderbooks only from the Polymarket CLOB market websocket.
 - Computes BTC path features including `cross120s`, realized range bps, two-sided excursion bps, drift/momentum ratios, range percentile, and a `chopScore`.
 - Classifies the round regime.
-- Generates paired 45c entry intents during the pre-round decision window when the regime is `CHOP`.
+- Generates paired score-based entry intents during the pre-round decision window when the regime is `CHOP`.
 - Reconciles recent fills and estimates settlement/PnL after a round has ended.
 
 ## Configuration
@@ -78,6 +78,10 @@ Strategy thresholds:
 
 ```dotenv
 DUAL_LIMIT_PRICE=0.45
+DYNAMIC_LIMIT_ENABLED=true
+MIN_DYNAMIC_LIMIT_PRICE=0.42
+MAX_DYNAMIC_LIMIT_PRICE=0.46
+MAX_PAIR_COST=0.92
 ORDER_SHARES_PER_SIDE=10
 MIN_ORDER_SHARES=5
 MIN_CROSS_120S=2
@@ -94,7 +98,8 @@ The worker targets the next BTC 5m round only. It posts paired BUY limit orders 
 
 Live entry orders are configured as CLOB limit order `price + size`:
 
-- `DUAL_LIMIT_PRICE` becomes the `price` sent to `createOrder`.
+- With `DYNAMIC_LIMIT_ENABLED=true`, CHOP score maps to 42c/44c/45c/46c, capped by `MAX_PAIR_COST`.
+- `DUAL_LIMIT_PRICE` is the fixed fallback price when dynamic limit pricing is disabled.
 - `ORDER_SHARES_PER_SIDE` becomes the `size` sent to `createOrder` for each YES/NO side.
 
 ## Docker

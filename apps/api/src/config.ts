@@ -18,6 +18,10 @@ export type AppConfig = {
   rtdsWsUrl: string;
   clobWsUrl: string;
   dualLimitPrice: number;
+  dynamicLimitEnabled: boolean;
+  minDynamicLimitPrice: number;
+  maxDynamicLimitPrice: number;
+  maxPairCost: number;
   orderSharesPerSide: number;
   minOrderShares: number;
   maxOrderbookAgeSeconds: number;
@@ -48,6 +52,10 @@ export function loadConfig(): AppConfig {
     rtdsWsUrl: rtdsWsUrl(process.env.POLYMARKET_RTDS_WS_URL),
     clobWsUrl: clobWsUrl(process.env.POLYMARKET_CLOB_WS_URL),
     dualLimitPrice: numberEnv('DUAL_LIMIT_PRICE', 0.45),
+    dynamicLimitEnabled: booleanEnv('DYNAMIC_LIMIT_ENABLED', true),
+    minDynamicLimitPrice: numberEnv('MIN_DYNAMIC_LIMIT_PRICE', 0.42),
+    maxDynamicLimitPrice: numberEnv('MAX_DYNAMIC_LIMIT_PRICE', 0.46),
+    maxPairCost: numberEnv('MAX_PAIR_COST', 0.92),
     orderSharesPerSide: numberEnv('ORDER_SHARES_PER_SIDE', 10),
     minOrderShares: numberEnv('MIN_ORDER_SHARES', 5),
     maxOrderbookAgeSeconds: numberEnv('MAX_ORDERBOOK_AGE_SECONDS', 5),
@@ -85,6 +93,14 @@ function parsePositiveInteger(value: string | undefined, fallback: number): numb
 function numberEnv(name: string, fallback: number): number {
   const parsed = Number(process.env[name]);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function booleanEnv(name: string, fallback: boolean): boolean {
+  const raw = process.env[name]?.trim().toLowerCase();
+  if (!raw) return fallback;
+  if (['1', 'true', 'yes', 'on'].includes(raw)) return true;
+  if (['0', 'false', 'no', 'off'].includes(raw)) return false;
+  return fallback;
 }
 
 function rtdsWsUrl(value: string | undefined): string {

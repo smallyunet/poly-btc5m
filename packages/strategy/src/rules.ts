@@ -3,9 +3,9 @@ import type { StrategyRule } from '../../shared/src';
 export const STRATEGY_RULES: StrategyRule[] = [
   {
     id: 'BTC5M_DUAL_45',
-    title: 'BTC 5m Dual 45c Pre-Round',
+    title: 'BTC 5m Dynamic Dual Pre-Round',
     allocationPct: 1,
-    summary: 'Pre-commit YES and NO liquidity at 45c only when the next round looks choppy.',
+    summary: 'Pre-commit YES and NO liquidity with score-based limit pricing only when the next round looks choppy.',
     entryRules: [
       'Round must be inside the T-30s decision window before start.',
       'Regime must be CHOP: BTC path score, cross_120s, range, two-sided excursion, drift ratio, and momentum ratio filters all pass.',

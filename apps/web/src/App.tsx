@@ -387,6 +387,9 @@ export function App() {
   const entryStatusTone = entryCheck?.status === 'eligible' ? 'good' : entryCheck?.status === 'blocked' ? 'bad' : 'neutral';
   const entryStatusLabel = entryCheck?.status || 'not-loaded';
   const topBlockers = failedEntryConditions.slice(0, 4).map((condition) => condition.label).join(', ') || 'none';
+  const entryLimit = entryCheck?.limitPrice;
+  const entryPairCost = entryLimit == null ? null : entryLimit * 2;
+  const entryPairEdge = entryPairCost == null ? null : 1 - entryPairCost;
 
   return (
     <Shell>
@@ -483,7 +486,7 @@ export function App() {
                 <div className="decisionHeader">
                   <div>
                     <span className="decisionKicker">Next Round Pre-Start Decision</span>
-                    <strong>{entryCheck?.title || 'BTC 5m Dual 45c Pre-Round'}</strong>
+                    <strong>{entryCheck?.title || 'BTC 5m Dynamic Dual Pre-Round'}</strong>
                   </div>
                   <Badge tone={entryStatusTone}>{entryStatusLabel}</Badge>
                 </div>
@@ -499,6 +502,12 @@ export function App() {
                     value={formatNumber(snapshot.features.chopScore, 1)}
                     detail={`range ${formatNumber(snapshot.features.rangeBps120s, 2)}bps / two-sided ${formatNumber(snapshot.features.minBiExcursionBps120s, 2)}bps`}
                     tone={btcDecisionPassed ? 'good' : 'bad'}
+                  />
+                  <DecisionMetric
+                    label="Entry Limit"
+                    value={entryLimit == null ? '-' : entryLimit.toFixed(3)}
+                    detail={entryPairCost == null || entryPairEdge == null ? 'waiting for strategy check' : `pair cost ${entryPairCost.toFixed(3)} / edge ${entryPairEdge.toFixed(3)}`}
+                    tone={entryLimit == null ? 'neutral' : entryPairEdge != null && entryPairEdge >= 0.08 ? 'good' : 'warn'}
                   />
                   <DecisionMetric
                     label="Orderbook Role"

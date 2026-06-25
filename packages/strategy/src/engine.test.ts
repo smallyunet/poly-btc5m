@@ -7,6 +7,10 @@ import type { OrderRecord, StateSnapshot } from '../../shared/src';
 const risk: StrategyRiskConfig = {
   dryRun: true,
   dualLimitPrice: 0.45,
+  dynamicLimitEnabled: true,
+  minDynamicLimitPrice: 0.42,
+  maxDynamicLimitPrice: 0.46,
+  maxPairCost: 0.92,
   orderSharesPerSide: 10,
   minOrderShares: 5,
   maxOrderbookAgeSeconds: 5,
@@ -51,8 +55,33 @@ test('generates paired YES and NO intents in a fresh CHOP decision window', () =
   const result = evaluateEntry(snapshot, risk);
   assert.equal(result.intents.length, 2);
   assert.deepEqual(result.intents.map((intent) => intent.label).sort(), ['NO', 'YES']);
-  assert.equal(result.intents[0].limitPrice, 0.45);
+  assert.equal(result.intents[0].limitPrice, 0.44);
   assert.equal(result.intents[0].shares, 10);
+  assert.equal(result.checks[0].limitPrice, 0.44);
+});
+
+test('caps high-score dynamic price before the final 15 seconds', () => {
+  const snapshot = { ...baseSnapshot({ ...chopFeatures(), chopScore: 97 }), regime: 'CHOP' as const };
+  snapshot.round.secondsToStart = 20;
+  const result = evaluateEntry(snapshot, risk);
+  assert.equal(result.intents.length, 2);
+  assert.equal(result.intents[0].limitPrice, 0.45);
+});
+
+test('allows 46c only for very high score near round start', () => {
+  const snapshot = { ...baseSnapshot({ ...chopFeatures(), chopScore: 97 }), regime: 'CHOP' as const };
+  snapshot.round.secondsToStart = 10;
+  const result = evaluateEntry(snapshot, risk);
+  assert.equal(result.intents.length, 2);
+  assert.equal(result.intents[0].limitPrice, 0.46);
+  assert.match(result.checks[0].conditions.find((item) => item.label === 'Pair cost cap')?.actual || '', /0\.920/);
+});
+
+test('uses 42c for edge-score entries', () => {
+  const snapshot = { ...baseSnapshot({ ...chopFeatures(), chopScore: 75 }), regime: 'CHOP' as const };
+  const result = evaluateEntry(snapshot, risk);
+  assert.equal(result.intents.length, 2);
+  assert.equal(result.intents[0].limitPrice, 0.42);
 });
 
 test('does not generate sell intents for single-sided exposure', () => {

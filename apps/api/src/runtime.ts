@@ -149,6 +149,10 @@ function riskConfig(appConfig: AppConfig, dryRun: boolean): StrategyRiskConfig {
   return {
     dryRun,
     dualLimitPrice: appConfig.dualLimitPrice,
+    dynamicLimitEnabled: appConfig.dynamicLimitEnabled,
+    minDynamicLimitPrice: appConfig.minDynamicLimitPrice,
+    maxDynamicLimitPrice: appConfig.maxDynamicLimitPrice,
+    maxPairCost: appConfig.maxPairCost,
     orderSharesPerSide: appConfig.orderSharesPerSide,
     minOrderShares: appConfig.minOrderShares,
     maxOrderbookAgeSeconds: appConfig.maxOrderbookAgeSeconds,

@@ -3,6 +3,10 @@ import type { FillRecord, OrderBookQuote, OrderRecord, PositionSnapshot, StateSn
 export type StrategyRiskConfig = {
   dryRun: boolean;
   dualLimitPrice: number;
+  dynamicLimitEnabled: boolean;
+  minDynamicLimitPrice: number;
+  maxDynamicLimitPrice: number;
+  maxPairCost: number;
   orderSharesPerSide: number;
   minOrderShares: number;
   maxOrderbookAgeSeconds: number;
@@ -58,16 +62,20 @@ export function evaluateEntry(snapshot: StateSnapshot, config: StrategyRiskConfi
   const noQuote = quoteFor(snapshot, snapshot.round.noTokenId);
   const booksTradable = buyQuoteReady(yesQuote, config) && buyQuoteReady(noQuote, config);
   const shares = roundShares(config.orderSharesPerSide);
+  const limitPrice = entryLimitPrice(snapshot, config);
+  const pairCost = limitPrice * 2;
+  const pairEdge = 1 - pairCost;
 
   if (!inDecisionWindow) reasons.push('NOT_IN_DECISION_WINDOW');
   if (snapshot.regime !== 'CHOP') reasons.push(`REGIME_${snapshot.regime}`);
   if (!booksTradable) reasons.push('ORDERBOOK_NOT_TRADABLE');
   if (shares < config.minOrderShares) reasons.push('ORDER_SHARES_TOO_SMALL');
-  if (config.dualLimitPrice <= 0 || config.dualLimitPrice >= 1) reasons.push('INVALID_DUAL_LIMIT_PRICE');
+  if (limitPrice <= 0 || limitPrice >= 1) reasons.push('INVALID_DUAL_LIMIT_PRICE');
+  if (pairCost > config.maxPairCost + 0.000001) reasons.push('PAIR_COST_TOO_HIGH');
 
   const base = [
-    makeIntent(snapshot, 'YES', snapshot.round.yesTokenId, shares, config),
-    makeIntent(snapshot, 'NO', snapshot.round.noTokenId, shares, config),
+    makeIntent(snapshot, 'YES', snapshot.round.yesTokenId, shares, limitPrice, config),
+    makeIntent(snapshot, 'NO', snapshot.round.noTokenId, shares, limitPrice, config),
   ];
 
   if (reasons.length) {
@@ -78,13 +86,13 @@ export function evaluateEntry(snapshot: StateSnapshot, config: StrategyRiskConfi
 
   const checks: StrategyCheck[] = [{
     strategy: 'BTC5M_DUAL_45',
-    title: 'BTC 5m Dual 45c Pre-Round',
+    title: 'BTC 5m Dynamic Dual Pre-Round',
     status: reasons.length ? 'blocked' : 'eligible',
-    summary: 'Place paired YES/NO limit buys before the round starts when BTC path structure is choppy.',
-    reason: reasons.length ? reasons.join(', ') : 'Chop setup is eligible for paired pre-round liquidity.',
+    summary: 'Place paired YES/NO limit buys before the round starts using score-based limit pricing when BTC path structure is choppy.',
+    reason: reasons.length ? reasons.join(', ') : `Chop setup is eligible at ${limitPrice.toFixed(3)} per side.`,
     blockers: reasons,
-    amountUsd: shares * config.dualLimitPrice * 2,
-    limitPrice: config.dualLimitPrice,
+    amountUsd: shares * pairCost,
+    limitPrice,
     conditions: [
       condition('Decision window', inDecisionWindow, `${snapshot.round.secondsToStart.toFixed(1)}s to start`),
       condition('Regime is CHOP', snapshot.regime === 'CHOP', snapshot.regime),
@@ -96,6 +104,8 @@ export function evaluateEntry(snapshot: StateSnapshot, config: StrategyRiskConfi
       condition('momentum ratio capped', snapshot.features.momentumRatio30s <= config.maxMomentumRatio30s, `${snapshot.features.momentumRatio30s.toFixed(2)} / ${config.maxMomentumRatio30s}`),
       condition('YES book tradable', buyQuoteReady(yesQuote, config), quoteAgeLabel(yesQuote)),
       condition('NO book tradable', buyQuoteReady(noQuote, config), quoteAgeLabel(noQuote)),
+      condition('Dynamic limit price', limitPrice > 0 && limitPrice < 1, `${limitPrice.toFixed(3)} (${config.dynamicLimitEnabled ? 'score policy' : 'fixed'})`),
+      condition('Pair cost cap', pairCost <= config.maxPairCost + 0.000001, `${pairCost.toFixed(3)} / ${config.maxPairCost.toFixed(3)}, edge ${pairEdge.toFixed(3)}`),
       condition('Shares per side', shares >= config.minOrderShares, `${shares.toFixed(2)} / min ${config.minOrderShares}`),
     ],
   }];
@@ -126,7 +136,7 @@ export function evaluateExit(snapshot: StateSnapshot, positions: PositionSnapsho
   return { intents, rejected, diagnostics, checks };
 }
 
-function makeIntent(snapshot: StateSnapshot, label: 'YES' | 'NO', tokenId: string, shares: number, config: StrategyRiskConfig): TradeIntent {
+function makeIntent(snapshot: StateSnapshot, label: 'YES' | 'NO', tokenId: string, shares: number, limitPrice: number, config: StrategyRiskConfig): TradeIntent {
   return {
     id: makeId('intent'),
     strategy: 'BTC5M_DUAL_45',
@@ -135,13 +145,29 @@ function makeIntent(snapshot: StateSnapshot, label: 'YES' | 'NO', tokenId: strin
     label,
     side: 'BUY',
     orderType: 'LIMIT',
-    limitPrice: config.dualLimitPrice,
+    limitPrice,
     shares,
     reason: `Round ${snapshot.round.id} is classified as CHOP before start.`,
     status: 'generated',
     ttlSeconds: config.entryOrderTtlSeconds,
     createdAt: nowIso(),
   };
+}
+
+function entryLimitPrice(snapshot: StateSnapshot, config: StrategyRiskConfig): number {
+  if (!config.dynamicLimitEnabled) return roundPrice(config.dualLimitPrice);
+  const scorePrice = priceFromScore(snapshot.features.chopScore);
+  const timeCap = snapshot.round.secondsToStart > 15 ? 0.45 : 0.46;
+  const pairCostCap = config.maxPairCost / 2;
+  const capped = Math.min(scorePrice, timeCap, config.maxDynamicLimitPrice, pairCostCap);
+  return roundPrice(Math.max(config.minDynamicLimitPrice, capped));
+}
+
+function priceFromScore(score: number): number {
+  if (score >= 95) return 0.46;
+  if (score >= 90) return 0.45;
+  if (score >= 80) return 0.44;
+  return 0.42;
 }
 
 function reject(base: TradeIntent, reason: string): TradeIntent {
@@ -175,4 +201,8 @@ function condition(label: string, passed: boolean, actual: string): StrategyCond
 
 function roundShares(value: number): number {
   return Math.floor(value * 100) / 100;
+}
+
+function roundPrice(value: number): number {
+  return Math.round(value * 1000) / 1000;
 }
