@@ -277,7 +277,7 @@ button.primary:hover:not(:disabled) {
 /* Digest Section */
 .digest {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
   gap: 12px;
 }
 

@@ -17,6 +17,8 @@ export type BotRuntimeStatus = {
   tickIntervalMs: number;
   version: string;
   dockerReady: boolean;
+  entryCooldownUntil?: string;
+  entryCooldownReason?: string;
 };
 
 export type BtcRoundConfig = {

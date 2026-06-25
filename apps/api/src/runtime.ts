@@ -1,4 +1,4 @@
-import type { BtcRoundConfig, PositionSnapshot, RoundPhase, RoundSnapshot, SettlementRecord, StateSnapshot } from '../../../packages/shared/src';
+import type { BtcRoundConfig, FillRecord, PositionSnapshot, RoundPhase, RoundSnapshot, SettlementRecord, StateSnapshot } from '../../../packages/shared/src';
 import { classifyRegime, evaluateEntry, type StrategyRiskConfig } from '../../../packages/strategy/src';
 import { PolymarketAdapter, type FillTarget } from '../../../packages/polymarket/src';
 import type { AppConfig } from './config';
@@ -35,14 +35,15 @@ export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, dat
     positionReadStatus: appConfig.depositWallet?.trim() ? 'enabled' : 'disabled',
     diagnostics,
   };
-  const risk = riskConfig(appConfig, store.getRuntime().executionMode !== 'live');
+  const activeCooldown = store.getActiveEntryCooldown();
+  const risk = riskConfig(appConfig, store.getRuntime().executionMode !== 'live', activeCooldown?.expiresAt, activeCooldown ? `single fill on ${activeCooldown.roundId}` : undefined);
   const snapshot: StateSnapshot = { ...baseSnapshot, regime: classifyRegime(baseSnapshot, risk) };
   const entry = evaluateEntry(snapshot, risk);
   const intents = [...entry.intents];
   store.recordIntents([...intents, ...entry.rejected]);
   const executionDiagnostics = await executeLiveIntents({ appConfig, adapter, store, snapshot, intents, risk });
-  await reconcileFills(adapter, store, roundSnapshot, tokenLabels, diagnostics);
-  await reconcileTrackedOrders(adapter, store, diagnostics);
+  await reconcileFills(appConfig, adapter, store, roundSnapshot, tokenLabels, diagnostics);
+  await reconcileTrackedOrders(appConfig, adapter, store, diagnostics);
   await reconcileSettlements(appConfig, store, diagnostics);
   maybeRecordEstimatedSettlement(store, snapshot);
   const finalSnapshot = { ...snapshot, diagnostics: [...diagnostics, ...entry.diagnostics, ...executionDiagnostics] };
@@ -104,7 +105,7 @@ async function loadPositions(appConfig: AppConfig, adapter: PolymarketAdapter, t
   }
 }
 
-async function reconcileFills(adapter: PolymarketAdapter, store: InMemoryStore, round: RoundSnapshot, tokenLabels: Map<string, 'YES' | 'NO'>, diagnostics: string[]): Promise<void> {
+async function reconcileFills(appConfig: AppConfig, adapter: PolymarketAdapter, store: InMemoryStore, round: RoundSnapshot, tokenLabels: Map<string, 'YES' | 'NO'>, diagnostics: string[]): Promise<void> {
   if (!tokenLabels.size) return;
   try {
     const fills = await adapter.getRecentFills({
@@ -114,13 +115,13 @@ async function reconcileFills(adapter: PolymarketAdapter, store: InMemoryStore, 
       marketTitle: round.title,
       imageUrl: round.imageUrl,
     });
-    store.recordFills(fills);
+    recordFillsAndMaybeCooldown(appConfig, store, fills);
   } catch (error) {
     if (store.getRuntime().executionMode === 'live') diagnostics.push(`Fill reconciliation failed: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
-async function reconcileTrackedOrders(adapter: PolymarketAdapter, store: InMemoryStore, diagnostics: string[]): Promise<void> {
+async function reconcileTrackedOrders(appConfig: AppConfig, adapter: PolymarketAdapter, store: InMemoryStore, diagnostics: string[]): Promise<void> {
   const orders = store.ordersNeedingReconciliation();
   if (!orders.length) return;
   try {
@@ -134,7 +135,7 @@ async function reconcileTrackedOrders(adapter: PolymarketAdapter, store: InMemor
       clobOrderId: order.clobOrderId,
     }));
     const fills = await adapter.getRecentFillsForTargets(targets);
-    store.recordFills(fills);
+    recordFillsAndMaybeCooldown(appConfig, store, fills);
 
     const openOrders = await adapter.getOpenOrders();
     const cancelled = store.reconcileOpenOrderStatuses(openOrders);
@@ -148,6 +149,18 @@ async function reconcileTrackedOrders(adapter: PolymarketAdapter, store: InMemor
   } catch (error) {
     if (store.getRuntime().executionMode === 'live') diagnostics.push(`Order reconciliation failed: ${error instanceof Error ? error.message : String(error)}`);
   }
+}
+
+function recordFillsAndMaybeCooldown(appConfig: AppConfig, store: InMemoryStore, fills: FillRecord[]): void {
+  const newFills = store.recordFills(fills);
+  const cooldown = store.maybeStartSingleFillCooldown(newFills, appConfig.singleFillCooldownMs);
+  if (!cooldown) return;
+  store.recordRuntimeLog({
+    level: 'warn',
+    source: 'execution',
+    message: `Single-sided fill detected on ${cooldown.roundId}; entry cooldown active until ${cooldown.expiresAt}.`,
+    details: cooldown,
+  });
 }
 
 async function reconcileSettlements(appConfig: AppConfig, store: InMemoryStore, diagnostics: string[]): Promise<void> {
@@ -228,7 +241,7 @@ async function resolvedWinningLabel(appConfig: AppConfig, eventSlug: string): Pr
   return null;
 }
 
-function riskConfig(appConfig: AppConfig, dryRun: boolean): StrategyRiskConfig {
+function riskConfig(appConfig: AppConfig, dryRun: boolean, entryCooldownUntil?: string, entryCooldownReason?: string): StrategyRiskConfig {
   return {
     dryRun,
     dualLimitPrice: appConfig.dualLimitPrice,
@@ -250,6 +263,8 @@ function riskConfig(appConfig: AppConfig, dryRun: boolean): StrategyRiskConfig {
     maxDriftRatio120s: appConfig.maxDriftRatio120s,
     maxMomentumRatio30s: appConfig.maxMomentumRatio30s,
     entryOrderTtlSeconds: appConfig.marketConfig.decisionLeadSeconds,
+    entryCooldownUntil,
+    entryCooldownReason,
   };
 }
 

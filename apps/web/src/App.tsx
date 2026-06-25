@@ -143,6 +143,17 @@ function formatShares(value: number): string {
   return value.toFixed(value % 1 === 0 ? 0 : 2);
 }
 
+function formatCooldownRemaining(until: string | undefined): string {
+  if (!until) return 'inactive';
+  const remainingMs = new Date(until).getTime() - Date.now();
+  if (!Number.isFinite(remainingMs) || remainingMs <= 0) return 'inactive';
+  const totalMinutes = Math.ceil(remainingMs / 60_000);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (hours <= 0) return `${minutes}m left`;
+  return minutes > 0 ? `${hours}h ${minutes}m left` : `${hours}h left`;
+}
+
 function sumShares(values: number[]): number {
   return values.reduce((total, value) => total + value, 0);
 }
@@ -429,6 +440,9 @@ export function App() {
   const entryLimit = entryCheck?.limitPrice;
   const entryPairCost = entryLimit == null ? null : entryLimit * 2;
   const entryPairEdge = entryPairCost == null ? null : 1 - entryPairCost;
+  const entryCooldownActive = Boolean(state.runtime.entryCooldownUntil && new Date(state.runtime.entryCooldownUntil).getTime() > Date.now());
+  const entryCooldownRemaining = formatCooldownRemaining(state.runtime.entryCooldownUntil);
+  const entryCooldownReason = state.runtime.entryCooldownReason || 'no single-fill lockout';
 
   return (
     <Shell>
@@ -509,6 +523,13 @@ export function App() {
           value={`${activeOrders} Orders`} 
           detail={`${state.fills.length} fills / ${state.orders.length} total`} 
           tone={activeOrders ? 'warn' : 'neutral'} 
+        />
+        <Digest
+          icon={<Timer size={16} />}
+          label="Entry Cooldown"
+          value={entryCooldownActive ? 'ACTIVE' : 'INACTIVE'}
+          detail={entryCooldownActive ? `${entryCooldownRemaining} / ${entryCooldownReason}` : entryCooldownReason}
+          tone={entryCooldownActive ? 'warn' : 'neutral'}
         />
         <Digest 
           icon={<CheckCircle2 size={16} />} 

@@ -35,6 +35,7 @@ export type AppConfig = {
   minBiExcursionBps120s: number;
   maxDriftRatio120s: number;
   maxMomentumRatio30s: number;
+  singleFillCooldownMs: number;
   marketConfig: BtcMarketConfig;
 };
 
@@ -72,6 +73,7 @@ export function loadConfig(): AppConfig {
     minBiExcursionBps120s: numberEnv('MIN_BI_EXCURSION_BPS_120S', 1),
     maxDriftRatio120s: numberEnv('MAX_DRIFT_RATIO_120S', 0.45),
     maxMomentumRatio30s: numberEnv('MAX_MOMENTUM_RATIO_30S', 0.55),
+    singleFillCooldownMs: parsePositiveInteger(process.env.SINGLE_FILL_COOLDOWN_MS, 4 * 60 * 60_000),
     marketConfig: loadMarketConfig(),
   };
 }

@@ -21,6 +21,8 @@ export type StrategyRiskConfig = {
   maxDriftRatio120s: number;
   maxMomentumRatio30s: number;
   entryOrderTtlSeconds: number;
+  entryCooldownUntil?: string;
+  entryCooldownReason?: string;
 };
 
 export type ExitEvaluationContext = {
@@ -67,7 +69,10 @@ export function evaluateEntry(snapshot: StateSnapshot, config: StrategyRiskConfi
   const shares = entryShares(snapshot, config);
   const pairCost = limitPrice * 2;
   const pairEdge = 1 - pairCost;
+  const cooldownUntilMs = config.entryCooldownUntil ? new Date(config.entryCooldownUntil).getTime() : 0;
+  const cooldownActive = Number.isFinite(cooldownUntilMs) && cooldownUntilMs > Date.now();
 
+  if (cooldownActive) reasons.push('SINGLE_FILL_COOLDOWN');
   if (!inDecisionWindow) reasons.push('NOT_IN_DECISION_WINDOW');
   if (snapshot.regime !== 'CHOP') reasons.push(`REGIME_${snapshot.regime}`);
   if (!booksTradable) reasons.push('ORDERBOOK_NOT_TRADABLE');
@@ -97,6 +102,7 @@ export function evaluateEntry(snapshot: StateSnapshot, config: StrategyRiskConfi
     limitPrice,
     conditions: [
       condition('Decision window', inDecisionWindow, `${snapshot.round.secondsToStart.toFixed(1)}s to start`),
+      condition('Single-fill cooldown', !cooldownActive, cooldownActive ? cooldownLabel(config.entryCooldownUntil, config.entryCooldownReason) : 'inactive'),
       condition('Regime is CHOP', snapshot.regime === 'CHOP', snapshot.regime),
       condition('CHOP score threshold', snapshot.features.chopScore >= config.minChopScore, `${snapshot.features.chopScore.toFixed(1)} / ${config.minChopScore}`),
       condition('cross_120s threshold', snapshot.features.cross120s >= config.minCross120s, `${snapshot.features.cross120s} / ${config.minCross120s}`),
@@ -114,6 +120,14 @@ export function evaluateEntry(snapshot: StateSnapshot, config: StrategyRiskConfi
   }];
 
   return { intents, rejected, diagnostics, checks };
+}
+
+function cooldownLabel(until: string | undefined, reason: string | undefined): string {
+  if (!until) return 'active';
+  const remainingSeconds = Math.max(0, (new Date(until).getTime() - Date.now()) / 1000);
+  const remainingHours = remainingSeconds / 3600;
+  const remaining = remainingHours >= 1 ? `${remainingHours.toFixed(1)}h remaining` : `${Math.ceil(remainingSeconds / 60)}m remaining`;
+  return reason ? `${remaining}, ${reason}` : remaining;
 }
 
 export function evaluateExit(snapshot: StateSnapshot, positions: PositionSnapshot[], config: StrategyRiskConfig, context: ExitEvaluationContext = {}): StrategyEvaluation {

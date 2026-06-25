@@ -22,6 +22,15 @@ type PersistedRuntimeState = {
   fills: FillRecord[];
   settlements: SettlementRecord[];
   roundStrikes?: Record<string, number>;
+  singleFillCooldown?: SingleFillCooldownRecord | null;
+};
+
+type SingleFillCooldownRecord = {
+  roundId: string;
+  triggeredAt: string;
+  expiresAt: string;
+  yesShares: number;
+  noShares: number;
 };
 
 export class InMemoryStore {
@@ -33,6 +42,7 @@ export class InMemoryStore {
   private fills: FillRecord[] = [];
   private settlements: SettlementRecord[] = [];
   private roundStrikes = new Map<string, number>();
+  private singleFillCooldown: SingleFillCooldownRecord | null = null;
   private runtimeLogs: RuntimeLogRecord[] = [];
   private strategyChecks: StrategyCheck[] = [];
   private readonly persistencePath?: string;
@@ -55,7 +65,7 @@ export class InMemoryStore {
   }
 
   getRuntime(): BotRuntimeStatus {
-    return this.runtime;
+    return this.runtimeWithCooldown();
   }
 
   markDegraded(): BotRuntimeStatus {
@@ -107,14 +117,15 @@ export class InMemoryStore {
     this.persistState();
   }
 
-  recordFills(fills: FillRecord[]): void {
-    if (!fills.length) return;
+  recordFills(fills: FillRecord[]): FillRecord[] {
+    if (!fills.length) return [];
     const seen = new Set(this.fills.map((item) => item.id));
     const nextFills = fills.filter((item) => !seen.has(item.id));
-    if (!nextFills.length) return;
+    if (!nextFills.length) return [];
     this.fills = [...nextFills, ...this.fills].slice(0, this.maxRecords);
     this.reconcileOrderFillStatus();
     this.persistState();
+    return nextFills;
   }
 
   recordSettlement(settlement: SettlementRecord): void {
@@ -211,6 +222,45 @@ export class InMemoryStore {
     return this.roundStrikes.get(roundId);
   }
 
+  getActiveEntryCooldown(nowMs = Date.now()): SingleFillCooldownRecord | null {
+    if (!this.singleFillCooldown) return null;
+    const expiresAtMs = new Date(this.singleFillCooldown.expiresAt).getTime();
+    if (!Number.isFinite(expiresAtMs) || expiresAtMs <= nowMs) return null;
+    return this.singleFillCooldown;
+  }
+
+  maybeStartSingleFillCooldown(newFills: FillRecord[], cooldownMs: number, nowMs = Date.now()): SingleFillCooldownRecord | null {
+    if (!newFills.some((fill) => fill.side === 'BUY')) return null;
+    if (this.getActiveEntryCooldown(nowMs)) return null;
+
+    const rounds = new Set(newFills.filter((fill) => fill.side === 'BUY').map((fill) => fill.roundId));
+    for (const roundId of rounds) {
+      const buys = this.fills.filter((fill) => fill.roundId === roundId && fill.side === 'BUY');
+      const yesShares = sum(buys.filter((fill) => fill.label === 'YES').map((fill) => fill.size));
+      const noShares = sum(buys.filter((fill) => fill.label === 'NO').map((fill) => fill.size));
+      const singleSided = (yesShares > 0 && noShares <= 0) || (noShares > 0 && yesShares <= 0);
+      if (!singleSided) continue;
+
+      const record: SingleFillCooldownRecord = {
+        roundId,
+        triggeredAt: new Date(nowMs).toISOString(),
+        expiresAt: new Date(nowMs + cooldownMs).toISOString(),
+        yesShares,
+        noShares,
+      };
+      this.singleFillCooldown = record;
+      this.runtime = {
+        ...this.runtime,
+        entryCooldownUntil: record.expiresAt,
+        entryCooldownReason: `single fill on ${roundId}`,
+      };
+      this.persistState();
+      return record;
+    }
+
+    return null;
+  }
+
   recordRoundStrike(roundId: string, strike: number): void {
     if (!Number.isFinite(strike) || strike <= 0) return;
     if (this.roundStrikes.get(roundId) === strike) return;
@@ -234,7 +284,7 @@ export class InMemoryStore {
   dashboardState(): DashboardState {
     if (!this.latestSnapshot) throw new Error('No snapshot has been captured yet.');
     return {
-      runtime: this.runtime,
+      runtime: this.runtimeWithCooldown(),
       feed: this.latestFeed,
       latestSnapshot: this.latestSnapshot,
       intents: this.intents,
@@ -256,6 +306,8 @@ export class InMemoryStore {
       this.fills = Array.isArray(parsed.fills) ? parsed.fills.filter(isFillRecordLike).slice(0, this.maxRecords) : [];
       this.settlements = Array.isArray(parsed.settlements) ? parsed.settlements.slice(0, this.maxRecords) : [];
       this.roundStrikes = new Map(Object.entries(parsed.roundStrikes || {}).filter(([, strike]) => Number.isFinite(strike) && strike > 0));
+      this.singleFillCooldown = isSingleFillCooldownLike(parsed.singleFillCooldown) ? parsed.singleFillCooldown : null;
+      this.runtime = this.runtimeWithCooldown();
       this.reconcileOrderFillStatus();
     } catch (error) {
       console.warn('[store] failed to load persisted runtime state', error);
@@ -303,6 +355,7 @@ export class InMemoryStore {
         fills: this.fills,
         settlements: this.settlements,
         roundStrikes: Object.fromEntries(this.roundStrikes),
+        singleFillCooldown: this.singleFillCooldown,
       };
       const tmpPath = `${this.persistencePath}.${process.pid}.tmp`;
       fs.writeFileSync(tmpPath, JSON.stringify(payload, null, 2));
@@ -310,6 +363,19 @@ export class InMemoryStore {
     } catch (error) {
       console.warn('[store] failed to persist runtime state', error);
     }
+  }
+
+  private runtimeWithCooldown(nowMs = Date.now()): BotRuntimeStatus {
+    const activeCooldown = this.getActiveEntryCooldown(nowMs);
+    if (!activeCooldown) {
+      const { entryCooldownUntil: _entryCooldownUntil, entryCooldownReason: _entryCooldownReason, ...runtime } = this.runtime;
+      return runtime;
+    }
+    return {
+      ...this.runtime,
+      entryCooldownUntil: activeCooldown.expiresAt,
+      entryCooldownReason: `single fill on ${activeCooldown.roundId}`,
+    };
   }
 }
 
@@ -331,6 +397,16 @@ function isFillRecordLike(value: unknown): value is FillRecord {
   if (typeof item.id !== 'string' || typeof item.roundId !== 'string' || typeof item.tokenId !== 'string') return false;
   const raw = item.raw as { trader_side?: unknown; maker_orders?: unknown } | undefined;
   return !(String(raw?.trader_side || '').toUpperCase() === 'MAKER' && Array.isArray(raw?.maker_orders) && !item.clobOrderId);
+}
+
+function isSingleFillCooldownLike(value: unknown): value is SingleFillCooldownRecord {
+  if (!value || typeof value !== 'object') return false;
+  const item = value as Partial<SingleFillCooldownRecord>;
+  return typeof item.roundId === 'string'
+    && typeof item.triggeredAt === 'string'
+    && typeof item.expiresAt === 'string'
+    && typeof item.yesShares === 'number'
+    && typeof item.noShares === 'number';
 }
 
 function matchingOrderFills(order: OrderRecord, fills: FillRecord[]): FillRecord[] {

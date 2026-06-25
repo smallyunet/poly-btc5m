@@ -52,6 +52,30 @@ test('blocks entry outside the decision window', () => {
   assert.match(result.rejected[0].rejectionReason || '', /NOT_IN_DECISION_WINDOW/);
 });
 
+test('blocks entry during single-fill cooldown', () => {
+  const snapshot = { ...baseSnapshot(chopFeatures()), regime: 'CHOP' as const };
+  const result = evaluateEntry(snapshot, {
+    ...risk,
+    entryCooldownUntil: new Date(Date.now() + 4 * 60 * 60_000).toISOString(),
+    entryCooldownReason: 'single fill on round-0',
+  });
+  assert.equal(result.intents.length, 0);
+  assert.equal(result.rejected.length, 2);
+  assert.match(result.rejected[0].rejectionReason || '', /SINGLE_FILL_COOLDOWN/);
+  assert.equal(result.checks[0].conditions.find((item) => item.label === 'Single-fill cooldown')?.passed, false);
+});
+
+test('ignores expired single-fill cooldown', () => {
+  const snapshot = { ...baseSnapshot(chopFeatures()), regime: 'CHOP' as const };
+  const result = evaluateEntry(snapshot, {
+    ...risk,
+    entryCooldownUntil: new Date(Date.now() - 1_000).toISOString(),
+    entryCooldownReason: 'single fill on round-0',
+  });
+  assert.equal(result.intents.length, 2);
+  assert.equal(result.checks[0].conditions.find((item) => item.label === 'Single-fill cooldown')?.passed, true);
+});
+
 test('generates paired YES and NO intents in a fresh CHOP decision window', () => {
   const snapshot = { ...baseSnapshot(chopFeatures()), regime: 'CHOP' as const };
   const result = evaluateEntry(snapshot, risk);
