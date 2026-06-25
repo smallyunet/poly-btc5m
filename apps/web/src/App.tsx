@@ -34,6 +34,8 @@ type RoundExecutionSummary = {
   sellOrderCount: number;
   orderedYes: number;
   orderedNo: number;
+  orderedYesPrice?: number;
+  orderedNoPrice?: number;
   filledBuyYes: number;
   filledBuyNo: number;
   filledSellYes: number;
@@ -79,6 +81,18 @@ function outcomeLabel(label: 'YES' | 'NO'): string {
 
 function outcomeTone(label: 'YES' | 'NO'): 'good' | 'bad' {
   return label === 'YES' ? 'good' : 'bad';
+}
+
+function fillStateTone(yesShares: number, noShares: number): 'good' | 'warn' | 'neutral' {
+  if (yesShares > 0 && noShares > 0) return 'good';
+  if (yesShares > 0 || noShares > 0) return 'warn';
+  return 'neutral';
+}
+
+function fillStateLabel(yesShares: number, noShares: number): 'paired' | 'single' | 'none' {
+  if (yesShares > 0 && noShares > 0) return 'paired';
+  if (yesShares > 0 || noShares > 0) return 'single';
+  return 'none';
 }
 
 function formatEtTime(value: string): string {
@@ -130,6 +144,17 @@ function sumShares(values: number[]): number {
   return values.reduce((total, value) => total + value, 0);
 }
 
+function weightedAverageOrderPrice(orders: DashboardOrder[]): number | undefined {
+  const totalShares = sumShares(orders.map((order) => order.size));
+  if (totalShares <= 0) return undefined;
+  return orders.reduce((total, order) => total + order.price * order.size, 0) / totalShares;
+}
+
+function formatSubmittedLeg(label: string, shares: number, price?: number): string {
+  if (shares <= 0 || price == null) return `${label} -`;
+  return `${label} ${formatShares(shares)} @ $${price.toFixed(3)}`;
+}
+
 function matchedFillShares(order: DashboardOrder, fills: DashboardFill[]): number {
   const exact = order.clobOrderId
     ? fills.filter((fill) => fill.clobOrderId === order.clobOrderId)
@@ -163,6 +188,8 @@ function buildRoundExecutionSummaries(state: DashboardState): RoundExecutionSumm
   state.settlements.forEach((settlement) => ensure(settlement.roundId).settlements.push(settlement));
 
   return [...byRound.entries()].map(([roundId, record]) => {
+    const yesBuyOrders = record.orders.filter((order) => order.label === 'YES' && order.side === 'BUY');
+    const noBuyOrders = record.orders.filter((order) => order.label === 'NO' && order.side === 'BUY');
     const unfilledByOrder = record.orders.map((order) => Math.max(0, order.size - matchedFillShares(order, record.fills)));
     const metadataSource = record.orders[0] || record.fills[0] || record.settlements[0];
     const latestTime = Math.max(
@@ -180,8 +207,10 @@ function buildRoundExecutionSummaries(state: DashboardState): RoundExecutionSumm
       orderCount: record.orders.length,
       buyOrderCount: record.orders.filter((order) => order.side === 'BUY').length,
       sellOrderCount: record.orders.filter((order) => order.side === 'SELL').length,
-      orderedYes: sumShares(record.orders.filter((order) => order.label === 'YES' && order.side === 'BUY').map((order) => order.size)),
-      orderedNo: sumShares(record.orders.filter((order) => order.label === 'NO' && order.side === 'BUY').map((order) => order.size)),
+      orderedYes: sumShares(yesBuyOrders.map((order) => order.size)),
+      orderedNo: sumShares(noBuyOrders.map((order) => order.size)),
+      orderedYesPrice: weightedAverageOrderPrice(yesBuyOrders),
+      orderedNoPrice: weightedAverageOrderPrice(noBuyOrders),
       filledBuyYes: sumShares(record.fills.filter((fill) => fill.label === 'YES' && fill.side === 'BUY').map((fill) => fill.size)),
       filledBuyNo: sumShares(record.fills.filter((fill) => fill.label === 'NO' && fill.side === 'BUY').map((fill) => fill.size)),
       filledSellYes: sumShares(record.fills.filter((fill) => fill.label === 'YES' && fill.side === 'SELL').map((fill) => fill.size)),
@@ -804,10 +833,10 @@ export function App() {
               {activitySubTab === 'rounds' && (
                 roundSummaries.length > 0 ? (
                   <>
-                    <DataTable headers={['Market', 'Round ID', 'Orders', 'Ordered Buy Shares', 'Filled Buy Shares', 'Filled Sell Shares', 'Unfilled', 'Settlement PnL']}>
+                    <DataTable headers={['Market', 'Round ID', 'Orders', 'Submitted Buy Orders', 'Filled Buy Shares', 'Filled Sell Shares', 'Unfilled', 'Settlement PnL']}>
                       {roundPagination.pageRows.map((round) => {
                         const hasUnfilled = round.unfilledOrders > 0;
-                        const hasPairedFill = round.filledBuyYes > 0 && round.filledBuyNo > 0;
+                        const fillLabel = fillStateLabel(round.filledBuyYes, round.filledBuyNo);
                         return (
                           <tr key={round.roundId}>
                             <td>
@@ -825,13 +854,15 @@ export function App() {
                               <span className="mono">{round.orderCount}</span>
                               <span className="mutedInline"> {round.buyOrderCount} buy / {round.sellOrderCount} sell</span>
                             </td>
-                            <td className="mono">
-                              UP {formatShares(round.orderedYes)} / DOWN {formatShares(round.orderedNo)}
+                            <td className="mono" style={{ whiteSpace: 'normal' }}>
+                              {formatSubmittedLeg('UP', round.orderedYes, round.orderedYesPrice)}
+                              <br />
+                              {formatSubmittedLeg('DOWN', round.orderedNo, round.orderedNoPrice)}
                             </td>
                             <td className="mono">
                               UP {formatShares(round.filledBuyYes)} / DOWN {formatShares(round.filledBuyNo)}
                               {' '}
-                              <Badge tone={hasPairedFill ? 'good' : 'warn'}>{hasPairedFill ? 'paired' : 'single'}</Badge>
+                              <Badge tone={fillStateTone(round.filledBuyYes, round.filledBuyNo)}>{fillLabel}</Badge>
                             </td>
                             <td className="mono">
                               UP {formatShares(round.filledSellYes)} / DOWN {formatShares(round.filledSellNo)}

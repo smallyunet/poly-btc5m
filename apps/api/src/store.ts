@@ -105,7 +105,10 @@ export class InMemoryStore {
   recordFills(fills: FillRecord[]): void {
     if (!fills.length) return;
     const seen = new Set(this.fills.map((item) => item.id));
-    this.fills = [...fills.filter((item) => !seen.has(item.id)), ...this.fills].slice(0, this.maxRecords);
+    const nextFills = fills.filter((item) => !seen.has(item.id));
+    if (!nextFills.length) return;
+    this.fills = [...nextFills, ...this.fills].slice(0, this.maxRecords);
+    this.reconcileOrderFillStatus();
     this.persistState();
   }
 
@@ -191,9 +194,39 @@ export class InMemoryStore {
       this.fills = Array.isArray(parsed.fills) ? parsed.fills.filter(isFillRecordLike).slice(0, this.maxRecords) : [];
       this.settlements = Array.isArray(parsed.settlements) ? parsed.settlements.slice(0, this.maxRecords) : [];
       this.roundStrikes = new Map(Object.entries(parsed.roundStrikes || {}).filter(([, strike]) => Number.isFinite(strike) && strike > 0));
+      this.reconcileOrderFillStatus();
     } catch (error) {
       console.warn('[store] failed to load persisted runtime state', error);
     }
+  }
+
+  private reconcileOrderFillStatus(): void {
+    this.orders = this.orders.map((order) => {
+      if (order.status === 'failed' || order.status === 'cancelled') return order;
+      const fills = matchingOrderFills(order, this.fills);
+      if (!fills.length) return order;
+
+      const filledSize = sum(fills.map((fill) => fill.size));
+      const totalCost = sum(fills.map((fill) => fill.price * fill.size));
+      const avgFillPrice = filledSize > 0 ? totalCost / filledSize : undefined;
+      const nextStatus = filledSize >= order.size - 0.01 ? 'filled' : 'partially_filled';
+
+      if (
+        order.status === nextStatus
+        && order.filledSize === filledSize
+        && order.avgFillPrice === avgFillPrice
+      ) {
+        return order;
+      }
+
+      return {
+        ...order,
+        status: nextStatus,
+        filledSize,
+        avgFillPrice,
+        updatedAt: new Date().toISOString(),
+      };
+    });
   }
 
   private persistState(): void {
@@ -236,4 +269,20 @@ function isFillRecordLike(value: unknown): value is FillRecord {
   if (typeof item.id !== 'string' || typeof item.roundId !== 'string' || typeof item.tokenId !== 'string') return false;
   const raw = item.raw as { trader_side?: unknown; maker_orders?: unknown } | undefined;
   return !(String(raw?.trader_side || '').toUpperCase() === 'MAKER' && Array.isArray(raw?.maker_orders) && !item.clobOrderId);
+}
+
+function matchingOrderFills(order: OrderRecord, fills: FillRecord[]): FillRecord[] {
+  const exact = order.clobOrderId
+    ? fills.filter((fill) => fill.clobOrderId === order.clobOrderId)
+    : [];
+  if (exact.length) return exact;
+  return fills.filter((fill) => (
+    fill.roundId === order.roundId
+    && fill.tokenId === order.tokenId
+    && fill.side === order.side
+  ));
+}
+
+function sum(values: number[]): number {
+  return values.reduce((total, value) => total + value, 0);
 }
