@@ -26,6 +26,7 @@ export type AppConfig = {
   maxAbsDrift120s: number;
   maxAbsMomentum30s: number;
   singleFillGraceSeconds: number;
+  minSingleExitBid: number;
   enableSingleExitStrategy: boolean;
   marketConfig: BtcMarketConfig;
 };
@@ -54,6 +55,7 @@ export function loadConfig(): AppConfig {
     maxAbsDrift120s: numberEnv('MAX_ABS_DRIFT_120S', 40),
     maxAbsMomentum30s: numberEnv('MAX_ABS_MOMENTUM_30S', 28),
     singleFillGraceSeconds: numberEnv('SINGLE_FILL_GRACE_SECONDS', 75),
+    minSingleExitBid: numberEnv('MIN_SINGLE_EXIT_BID', 0.3),
     enableSingleExitStrategy: booleanEnv('ENABLE_SINGLE_EXIT_STRATEGY', true),
     marketConfig: loadMarketConfig(),
   };

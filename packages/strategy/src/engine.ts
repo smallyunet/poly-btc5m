@@ -1,4 +1,4 @@
-import type { OrderBookQuote, PositionSnapshot, StateSnapshot, StrategyCheck, StrategyCondition, TradeIntent } from '../../shared/src';
+import type { FillRecord, OrderBookQuote, OrderRecord, PositionSnapshot, StateSnapshot, StrategyCheck, StrategyCondition, TradeIntent } from '../../shared/src';
 
 export type StrategyRiskConfig = {
   dryRun: boolean;
@@ -11,7 +11,13 @@ export type StrategyRiskConfig = {
   maxAbsDrift120s: number;
   maxAbsMomentum30s: number;
   singleFillGraceSeconds: number;
+  minSingleExitBid: number;
   entryOrderTtlSeconds: number;
+};
+
+export type ExitEvaluationContext = {
+  fills?: FillRecord[];
+  orders?: OrderRecord[];
 };
 
 export type StrategyEvaluation = {
@@ -89,36 +95,57 @@ export function evaluateEntry(snapshot: StateSnapshot, config: StrategyRiskConfi
   return { intents, rejected, diagnostics, checks };
 }
 
-export function evaluateExit(snapshot: StateSnapshot, positions: PositionSnapshot[], config: StrategyRiskConfig): StrategyEvaluation {
+export function evaluateExit(snapshot: StateSnapshot, positions: PositionSnapshot[], config: StrategyRiskConfig, context: ExitEvaluationContext = {}): StrategyEvaluation {
   const intents: TradeIntent[] = [];
   const rejected: TradeIntent[] = [];
   const diagnostics: string[] = [];
   const yes = positions.find((item) => item.label === 'YES' && item.shares > 0);
   const no = positions.find((item) => item.label === 'NO' && item.shares > 0);
   const paired = Math.min(yes?.shares || 0, no?.shares || 0);
-  const unpaired = [yes, no].filter((item): item is PositionSnapshot => Boolean(item && item.shares - paired > 0.01));
-  const shouldExit = snapshot.regime === 'TREND' || snapshot.round.secondsToEnd <= 30 || snapshot.features.source === 'none';
+  const unpaired = [yes, no]
+    .filter((item): item is PositionSnapshot => Boolean(item && item.shares - paired > 0.01))
+    .map((position) => ({ position, unpairedShares: roundShares(position.shares - paired) }));
 
-  for (const position of unpaired) {
+  for (const { position, unpairedShares } of unpaired) {
     const quote = quoteFor(snapshot, position.tokenId);
+    const ageSeconds = exposureAgeSeconds(snapshot, position, context);
+    const inGrace = ageSeconds == null || ageSeconds < config.singleFillGraceSeconds;
+    const oppositeOpen = hasOppositeOpenBuyOrder(snapshot, position, context.orders || []);
+    const nearExpiry = snapshot.round.secondsToEnd <= 30;
+    const unfavorableTrend = isUnfavorableTrend(snapshot, position);
+    const shouldExit = !inGrace && (!oppositeOpen || nearExpiry) && (unfavorableTrend || nearExpiry);
+
     if (!shouldExit) continue;
     if (!quote?.bestBid) {
-      rejected.push(reject(exitIntent(snapshot, position, 0), 'NO_EXIT_BID'));
+      rejected.push(reject(exitIntent(snapshot, position, 0, unpairedShares), 'NO_EXIT_BID'));
       continue;
     }
-    intents.push(exitIntent(snapshot, position, quote.bestBid));
+    if (quote.bestBid < config.minSingleExitBid) {
+      rejected.push(reject(exitIntent(snapshot, position, quote.bestBid, unpairedShares), `EXIT_BID_TOO_LOW:${quote.bestBid.toFixed(3)}<${config.minSingleExitBid.toFixed(3)}`));
+      continue;
+    }
+    intents.push(exitIntent(snapshot, position, quote.bestBid, unpairedShares));
   }
+
+  const hasExitTrigger = unpaired.some(({ position }) => isUnfavorableTrend(snapshot, position) || snapshot.round.secondsToEnd <= 30);
+  const hasOppositeOpen = unpaired.some(({ position }) => hasOppositeOpenBuyOrder(snapshot, position, context.orders || []));
+  const youngestAge = minDefined(unpaired.map(({ position }) => exposureAgeSeconds(snapshot, position, context)));
+  const gracePassed = youngestAge != null && youngestAge >= config.singleFillGraceSeconds;
+  const bidBlocks = rejected.filter((item) => (item.rejectionReason || '').includes('EXIT_BID_TOO_LOW')).length;
 
   const checks: StrategyCheck[] = [{
     strategy: 'BTC5M_SINGLE_EXIT',
     title: 'BTC 5m Single-Side Exit',
     status: unpaired.length ? (intents.length ? 'eligible' : 'blocked') : 'not-applicable',
-    summary: 'Exit single-sided fill when the chop thesis is invalidated.',
-    reason: unpaired.length ? (shouldExit ? 'Single-sided exposure should be reduced.' : 'Single-sided exposure exists, but grace conditions still allow waiting.') : 'No single-sided exposure.',
+    summary: 'Conservatively exit unpaired exposure only after grace, missing opposite fill, and an adverse trend or expiry risk.',
+    reason: unpaired.length ? (intents.length ? 'Single-sided exposure qualifies for risk exit.' : 'Single-sided exposure exists, but exit guardrails are still blocking.') : 'No single-sided exposure.',
     blockers: rejected.map((item) => item.rejectionReason || 'REJECTED'),
     conditions: [
       condition('Single-sided exposure exists', unpaired.length > 0, `${unpaired.length}`),
-      condition('Exit trigger active', shouldExit, snapshot.regime === 'TREND' ? 'TREND' : `${snapshot.round.secondsToEnd.toFixed(1)}s to end`),
+      condition('Grace window passed', gracePassed, youngestAge == null ? 'unknown' : `${youngestAge.toFixed(1)}s / ${config.singleFillGraceSeconds}s`),
+      condition('Opposite open order absent', !hasOppositeOpen, hasOppositeOpen ? 'waiting for opposite fill' : 'none'),
+      condition('Adverse trend or expiry risk', hasExitTrigger, snapshot.round.secondsToEnd <= 30 ? `${snapshot.round.secondsToEnd.toFixed(1)}s to end` : `${snapshot.regime}, momentum ${snapshot.features.momentum30s.toFixed(2)}, drift ${snapshot.features.drift120s.toFixed(2)}`),
+      condition('Minimum exit bid', bidBlocks === 0, `${config.minSingleExitBid.toFixed(3)} min`),
     ],
   }];
 
@@ -143,7 +170,7 @@ function makeIntent(snapshot: StateSnapshot, label: 'YES' | 'NO', tokenId: strin
   };
 }
 
-function exitIntent(snapshot: StateSnapshot, position: PositionSnapshot, bid: number): TradeIntent {
+function exitIntent(snapshot: StateSnapshot, position: PositionSnapshot, bid: number, shares: number): TradeIntent {
   return {
     id: makeId('exit'),
     strategy: 'BTC5M_SINGLE_EXIT',
@@ -153,12 +180,55 @@ function exitIntent(snapshot: StateSnapshot, position: PositionSnapshot, bid: nu
     side: 'SELL',
     orderType: 'LIMIT',
     limitPrice: bid,
-    shares: Math.floor(position.shares * 100) / 100,
-    reason: `Single-sided ${position.label} exposure is no longer protected by a CHOP setup.`,
+    shares: roundShares(shares),
+    reason: `Unpaired ${position.label} exposure met conservative exit guardrails.`,
     status: 'generated',
     ttlSeconds: 20,
     createdAt: nowIso(),
   };
+}
+
+function exposureAgeSeconds(snapshot: StateSnapshot, position: PositionSnapshot, context: ExitEvaluationContext): number | null {
+  const timestamps = [
+    ...(context.fills || [])
+      .filter((fill) => fill.roundId === snapshot.round.id && fill.label === position.label && fill.side === 'BUY')
+      .map((fill) => toTime(fill.matchedAt)),
+    ...(context.orders || [])
+      .filter((order) => order.roundId === snapshot.round.id && order.label === position.label && order.side === 'BUY')
+      .map((order) => toTime(order.createdAt)),
+  ].filter((time): time is number => time != null);
+  if (!timestamps.length) return null;
+  return Math.max(0, (Date.now() - Math.min(...timestamps)) / 1000);
+}
+
+function hasOppositeOpenBuyOrder(snapshot: StateSnapshot, position: PositionSnapshot, orders: OrderRecord[]): boolean {
+  const opposite = position.label === 'YES' ? 'NO' : 'YES';
+  return orders.some((order) => (
+    order.roundId === snapshot.round.id
+    && order.label === opposite
+    && order.side === 'BUY'
+    && (order.status === 'local' || order.status === 'posted' || order.status === 'partially_filled')
+  ));
+}
+
+function isUnfavorableTrend(snapshot: StateSnapshot, position: PositionSnapshot): boolean {
+  if (snapshot.regime !== 'TREND') return false;
+  const momentum = snapshot.features.momentum30s;
+  const drift = snapshot.features.drift120s;
+  const bearish = momentum < -0.000001 || drift < -0.000001;
+  const bullish = momentum > 0.000001 || drift > 0.000001;
+  return position.label === 'YES' ? bearish : bullish;
+}
+
+function toTime(value: string | undefined): number | null {
+  if (!value) return null;
+  const time = new Date(value).getTime();
+  return Number.isFinite(time) ? time : null;
+}
+
+function minDefined(values: Array<number | null>): number | null {
+  const defined = values.filter((value): value is number => value != null);
+  return defined.length ? Math.min(...defined) : null;
 }
 
 function reject(base: TradeIntent, reason: string): TradeIntent {

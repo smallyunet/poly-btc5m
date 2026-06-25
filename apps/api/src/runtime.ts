@@ -40,7 +40,7 @@ export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, dat
   const snapshot: StateSnapshot = { ...baseSnapshot, regime: classifyRegime(baseSnapshot, risk) };
   const entry = evaluateEntry(snapshot, risk);
   const exit = appConfig.enableSingleExitStrategy
-    ? evaluateExit(snapshot, positions, risk)
+    ? evaluateExit(snapshot, positions, risk, { fills: store.roundFills(snapshot.round.id), orders: store.roundOrders(snapshot.round.id) })
     : { intents: [], rejected: [], diagnostics: [], checks: [] };
   const intents = [...exit.intents, ...entry.intents];
   store.recordIntents([...intents, ...exit.rejected, ...entry.rejected]);
@@ -161,6 +161,7 @@ function riskConfig(appConfig: AppConfig, dryRun: boolean): StrategyRiskConfig {
     maxAbsDrift120s: appConfig.maxAbsDrift120s,
     maxAbsMomentum30s: appConfig.maxAbsMomentum30s,
     singleFillGraceSeconds: appConfig.singleFillGraceSeconds,
+    minSingleExitBid: appConfig.minSingleExitBid,
     entryOrderTtlSeconds: appConfig.marketConfig.decisionLeadSeconds,
   };
 }

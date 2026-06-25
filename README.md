@@ -85,10 +85,12 @@ MIN_VOLATILITY_120S=12
 MAX_ABS_DRIFT_120S=40
 MAX_ABS_MOMENTUM_30S=28
 SINGLE_FILL_GRACE_SECONDS=75
+MIN_SINGLE_EXIT_BID=0.30
 ENABLE_SINGLE_EXIT_STRATEGY=true
 ```
 
 Set `ENABLE_SINGLE_EXIT_STRATEGY=false` to disable the `BTC5M_SINGLE_EXIT` sell-side risk exit. Paired 45c entry orders remain enabled.
+`MIN_SINGLE_EXIT_BID` is the lowest bid at which the single-side exit strategy may sell unpaired exposure.
 
 Live entry orders are configured as CLOB limit order `price + size`:
 

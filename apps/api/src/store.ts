@@ -138,6 +138,10 @@ export class InMemoryStore {
     return this.fills.filter((fill) => fill.roundId === roundId);
   }
 
+  roundOrders(roundId: string): OrderRecord[] {
+    return this.orders.filter((order) => order.roundId === roundId);
+  }
+
   getRoundStrike(roundId: string): number | undefined {
     return this.roundStrikes.get(roundId);
   }
