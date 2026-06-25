@@ -83,6 +83,8 @@ MIN_DYNAMIC_LIMIT_PRICE=0.42
 MAX_DYNAMIC_LIMIT_PRICE=0.46
 MAX_PAIR_COST=0.92
 ORDER_SHARES_PER_SIDE=10
+DYNAMIC_SHARES_ENABLED=true
+MAX_ORDER_SHARES_PER_SIDE=12.5
 MIN_ORDER_SHARES=5
 MIN_CROSS_120S=2
 MAX_ABS_DRIFT_120S=40
@@ -100,7 +102,8 @@ Live entry orders are configured as CLOB limit order `price + size`:
 
 - With `DYNAMIC_LIMIT_ENABLED=true`, CHOP score maps to 42c/44c/45c/46c, capped by `MAX_PAIR_COST`.
 - `DUAL_LIMIT_PRICE` is the fixed fallback price when dynamic limit pricing is disabled.
-- `ORDER_SHARES_PER_SIDE` becomes the `size` sent to `createOrder` for each YES/NO side.
+- With `DYNAMIC_SHARES_ENABLED=true`, CHOP score maps to `0.5x/1.0x/1.0x/1.25x` of `ORDER_SHARES_PER_SIDE`, capped by `MAX_ORDER_SHARES_PER_SIDE`.
+- The resulting shares value becomes the `size` sent to `createOrder` for each YES/NO side.
 
 ## Docker
 

@@ -275,11 +275,13 @@ Default execution size settings:
 
 ```text
 ORDER_SHARES_PER_SIDE=10
+DYNAMIC_SHARES_ENABLED=true
+MAX_ORDER_SHARES_PER_SIDE=12.5
 MIN_ORDER_SHARES=5
 MAX_ORDERBOOK_AGE_SECONDS=5
 ```
 
-Live deployment may override `ORDER_SHARES_PER_SIDE`; the current local `.env` uses 5.
+Live deployment may override `ORDER_SHARES_PER_SIDE` and `MAX_ORDER_SHARES_PER_SIDE`.
 
 ---
 
@@ -349,16 +351,58 @@ The strategy currently does not use 48c in normal operation because 48/48 leaves
 
 ---
 
-## 8. Intent Generation
+## 8. Dynamic Shares Policy
+
+Dynamic sizing is enabled by:
+
+```text
+DYNAMIC_SHARES_ENABLED=true
+```
+
+If disabled, both YES and NO use:
+
+```text
+ORDER_SHARES_PER_SIDE
+```
+
+If enabled, the score-based shares multiplier is:
+
+```text
+chopScore 70-79  => 0.50x ORDER_SHARES_PER_SIDE
+chopScore 80-89  => 1.00x ORDER_SHARES_PER_SIDE
+chopScore 90-94  => 1.00x ORDER_SHARES_PER_SIDE
+chopScore >= 95  => 1.25x ORDER_SHARES_PER_SIDE
+```
+
+Then the max size cap is applied:
+
+```text
+shares = min(scoreShares, MAX_ORDER_SHARES_PER_SIDE)
+```
+
+This sizing policy is intentionally conservative: the main risk reduction comes from cutting size on edge-score entries, while very high CHOP scores only get a small size increase.
+
+Current defaults:
+
+```text
+ORDER_SHARES_PER_SIDE=10
+DYNAMIC_SHARES_ENABLED=true
+MAX_ORDER_SHARES_PER_SIDE=12.5
+MIN_ORDER_SHARES=5
+```
+
+---
+
+## 9. Intent Generation
 
 When entry is eligible, the worker creates two BUY LIMIT intents:
 
 ```text
-YES BUY limitPrice, ORDER_SHARES_PER_SIDE
-NO  BUY limitPrice, ORDER_SHARES_PER_SIDE
+YES BUY limitPrice, dynamic shares
+NO  BUY limitPrice, dynamic shares
 ```
 
-Both sides use the same dynamic limit price. The strategy does not currently bias YES vs NO based on BTC direction.
+Both sides use the same dynamic limit price and the same dynamic shares. The strategy does not currently bias YES vs NO based on BTC direction.
 
 Intent fields:
 
@@ -371,7 +415,7 @@ Intent fields:
 
 ---
 
-## 9. Execution Gates
+## 10. Execution Gates
 
 Before posting an intent live, execution checks:
 
@@ -395,7 +439,7 @@ For BUY, orderbook must have best ask. For SELL, execution rejects before orderb
 
 ---
 
-## 10. After Round Start
+## 11. After Round Start
 
 After round start, the worker does not:
 
@@ -424,7 +468,7 @@ Local settlement rows are estimates until final Polymarket resolution is indepen
 
 ---
 
-## 11. Fill Scenarios
+## 12. Fill Scenarios
 
 ### Both Sides Fill
 
@@ -460,7 +504,7 @@ This is the main risk of the strategy. Dynamic pricing is designed to use lower 
 
 ---
 
-## 12. Dashboard Surfaces
+## 13. Dashboard Surfaces
 
 The dashboard shows:
 
@@ -477,7 +521,7 @@ The page is intended to make the current decision and blockers visible without r
 
 ---
 
-## 13. Final Rule
+## 14. Final Rule
 
 Trade only when BTC shows a high-quality two-sided CHOP structure before the next round starts.
 

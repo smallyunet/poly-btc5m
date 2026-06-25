@@ -23,6 +23,8 @@ export type AppConfig = {
   maxDynamicLimitPrice: number;
   maxPairCost: number;
   orderSharesPerSide: number;
+  dynamicSharesEnabled: boolean;
+  maxOrderSharesPerSide: number;
   minOrderShares: number;
   maxOrderbookAgeSeconds: number;
   minCross120s: number;
@@ -37,6 +39,7 @@ export type AppConfig = {
 };
 
 export function loadConfig(): AppConfig {
+  const orderSharesPerSide = numberEnv('ORDER_SHARES_PER_SIDE', 10);
   return {
     port: Number(process.env.PORT || 8788),
     dashboardInternalApiKey: process.env.DASHBOARD_INTERNAL_API_KEY,
@@ -56,7 +59,9 @@ export function loadConfig(): AppConfig {
     minDynamicLimitPrice: numberEnv('MIN_DYNAMIC_LIMIT_PRICE', 0.42),
     maxDynamicLimitPrice: numberEnv('MAX_DYNAMIC_LIMIT_PRICE', 0.46),
     maxPairCost: numberEnv('MAX_PAIR_COST', 0.92),
-    orderSharesPerSide: numberEnv('ORDER_SHARES_PER_SIDE', 10),
+    orderSharesPerSide,
+    dynamicSharesEnabled: booleanEnv('DYNAMIC_SHARES_ENABLED', true),
+    maxOrderSharesPerSide: numberEnv('MAX_ORDER_SHARES_PER_SIDE', orderSharesPerSide * 1.25),
     minOrderShares: numberEnv('MIN_ORDER_SHARES', 5),
     maxOrderbookAgeSeconds: numberEnv('MAX_ORDERBOOK_AGE_SECONDS', 5),
     minCross120s: numberEnv('MIN_CROSS_120S', 2),

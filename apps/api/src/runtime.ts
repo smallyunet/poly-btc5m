@@ -237,6 +237,8 @@ function riskConfig(appConfig: AppConfig, dryRun: boolean): StrategyRiskConfig {
     maxDynamicLimitPrice: appConfig.maxDynamicLimitPrice,
     maxPairCost: appConfig.maxPairCost,
     orderSharesPerSide: appConfig.orderSharesPerSide,
+    dynamicSharesEnabled: appConfig.dynamicSharesEnabled,
+    maxOrderSharesPerSide: appConfig.maxOrderSharesPerSide,
     minOrderShares: appConfig.minOrderShares,
     maxOrderbookAgeSeconds: appConfig.maxOrderbookAgeSeconds,
     minCross120s: appConfig.minCross120s,

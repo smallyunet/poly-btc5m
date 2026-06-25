@@ -12,6 +12,8 @@ const risk: StrategyRiskConfig = {
   maxDynamicLimitPrice: 0.46,
   maxPairCost: 0.92,
   orderSharesPerSide: 10,
+  dynamicSharesEnabled: true,
+  maxOrderSharesPerSide: 12.5,
   minOrderShares: 5,
   maxOrderbookAgeSeconds: 5,
   minCross120s: 2,
@@ -74,7 +76,9 @@ test('allows 46c only for very high score near round start', () => {
   const result = evaluateEntry(snapshot, risk);
   assert.equal(result.intents.length, 2);
   assert.equal(result.intents[0].limitPrice, 0.46);
+  assert.equal(result.intents[0].shares, 12.5);
   assert.match(result.checks[0].conditions.find((item) => item.label === 'Pair cost cap')?.actual || '', /0\.920/);
+  assert.match(result.checks[0].conditions.find((item) => item.label === 'Dynamic shares')?.actual || '', /12\.50 \/ base 10\.00/);
 });
 
 test('uses 42c for edge-score entries', () => {
@@ -82,6 +86,29 @@ test('uses 42c for edge-score entries', () => {
   const result = evaluateEntry(snapshot, risk);
   assert.equal(result.intents.length, 2);
   assert.equal(result.intents[0].limitPrice, 0.42);
+  assert.equal(result.intents[0].shares, 5);
+});
+
+test('keeps base shares for mid-score entries', () => {
+  const snapshot = { ...baseSnapshot({ ...chopFeatures(), chopScore: 90 }), regime: 'CHOP' as const };
+  const result = evaluateEntry(snapshot, risk);
+  assert.equal(result.intents.length, 2);
+  assert.equal(result.intents[0].limitPrice, 0.45);
+  assert.equal(result.intents[0].shares, 10);
+});
+
+test('caps dynamic shares at configured maximum', () => {
+  const snapshot = { ...baseSnapshot({ ...chopFeatures(), chopScore: 98 }), regime: 'CHOP' as const };
+  const result = evaluateEntry(snapshot, { ...risk, orderSharesPerSide: 20, maxOrderSharesPerSide: 22 });
+  assert.equal(result.intents.length, 2);
+  assert.equal(result.intents[0].shares, 22);
+});
+
+test('uses fixed shares when dynamic shares are disabled', () => {
+  const snapshot = { ...baseSnapshot({ ...chopFeatures(), chopScore: 97 }), regime: 'CHOP' as const };
+  const result = evaluateEntry(snapshot, { ...risk, dynamicSharesEnabled: false });
+  assert.equal(result.intents.length, 2);
+  assert.equal(result.intents[0].shares, 10);
 });
 
 test('does not generate sell intents for single-sided exposure', () => {

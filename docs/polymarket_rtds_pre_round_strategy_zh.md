@@ -279,11 +279,13 @@ bestAsk exists
 
 ```text
 ORDER_SHARES_PER_SIDE=10
+DYNAMIC_SHARES_ENABLED=true
+MAX_ORDER_SHARES_PER_SIDE=12.5
 MIN_ORDER_SHARES=5
 MAX_ORDERBOOK_AGE_SECONDS=5
 ```
 
-实盘部署可以覆盖 `ORDER_SHARES_PER_SIDE`；当前本地 `.env` 使用 5。
+实盘部署可以覆盖 `ORDER_SHARES_PER_SIDE` 和 `MAX_ORDER_SHARES_PER_SIDE`。
 
 ---
 
@@ -353,16 +355,58 @@ pairEdge = 1 - pairCost
 
 ---
 
-## 8. Intent 生成
+## 8. 动态 shares 策略
+
+动态规模通过以下配置启用：
+
+```text
+DYNAMIC_SHARES_ENABLED=true
+```
+
+如果禁用，YES 和 NO 都使用：
+
+```text
+ORDER_SHARES_PER_SIDE
+```
+
+如果启用，基于分数的 shares multiplier 为：
+
+```text
+chopScore 70-79  => 0.50x ORDER_SHARES_PER_SIDE
+chopScore 80-89  => 1.00x ORDER_SHARES_PER_SIDE
+chopScore 90-94  => 1.00x ORDER_SHARES_PER_SIDE
+chopScore >= 95  => 1.25x ORDER_SHARES_PER_SIDE
+```
+
+随后应用最大规模上限：
+
+```text
+shares = min(scoreShares, MAX_ORDER_SHARES_PER_SIDE)
+```
+
+该 sizing 策略刻意保持保守：主要风险降低来自低分入场减仓，极高 CHOP 分数只获得小幅加仓。
+
+当前默认值：
+
+```text
+ORDER_SHARES_PER_SIDE=10
+DYNAMIC_SHARES_ENABLED=true
+MAX_ORDER_SHARES_PER_SIDE=12.5
+MIN_ORDER_SHARES=5
+```
+
+---
+
+## 9. Intent 生成
 
 入场合格时，worker 创建两个 BUY LIMIT intents：
 
 ```text
-YES BUY limitPrice, ORDER_SHARES_PER_SIDE
-NO  BUY limitPrice, ORDER_SHARES_PER_SIDE
+YES BUY limitPrice, dynamic shares
+NO  BUY limitPrice, dynamic shares
 ```
 
-两侧使用相同的动态限价。策略当前不会根据 BTC 方向对 YES 或 NO 做偏置。
+两侧使用相同的动态限价和相同的动态 shares。策略当前不会根据 BTC 方向对 YES 或 NO 做偏置。
 
 Intent 字段：
 
@@ -375,7 +419,7 @@ Intent 字段：
 
 ---
 
-## 9. 执行门槛
+## 10. 执行门槛
 
 在实盘发布 intent 前，执行层会检查：
 
@@ -399,7 +443,7 @@ no open Polymarket order exists for the same token
 
 ---
 
-## 10. 轮次开始后
+## 11. 轮次开始后
 
 轮次开始后，worker 不会：
 
@@ -428,7 +472,7 @@ pnl = payout - total BUY cost
 
 ---
 
-## 11. 成交场景
+## 12. 成交场景
 
 ### 双侧成交
 
@@ -464,7 +508,7 @@ p=0.46 => win +0.54, lose -0.46
 
 ---
 
-## 12. Dashboard 展示面
+## 13. Dashboard 展示面
 
 dashboard 展示：
 
@@ -481,7 +525,7 @@ dashboard 展示：
 
 ---
 
-## 13. 最终规则
+## 14. 最终规则
 
 只有当 BTC 在下一轮开始前呈现高质量双侧 CHOP 结构时才交易。
 

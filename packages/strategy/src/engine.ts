@@ -8,6 +8,8 @@ export type StrategyRiskConfig = {
   maxDynamicLimitPrice: number;
   maxPairCost: number;
   orderSharesPerSide: number;
+  dynamicSharesEnabled: boolean;
+  maxOrderSharesPerSide: number;
   minOrderShares: number;
   maxOrderbookAgeSeconds: number;
   minCross120s: number;
@@ -61,8 +63,8 @@ export function evaluateEntry(snapshot: StateSnapshot, config: StrategyRiskConfi
   const yesQuote = quoteFor(snapshot, snapshot.round.yesTokenId);
   const noQuote = quoteFor(snapshot, snapshot.round.noTokenId);
   const booksTradable = buyQuoteReady(yesQuote, config) && buyQuoteReady(noQuote, config);
-  const shares = roundShares(config.orderSharesPerSide);
   const limitPrice = entryLimitPrice(snapshot, config);
+  const shares = entryShares(snapshot, config);
   const pairCost = limitPrice * 2;
   const pairEdge = 1 - pairCost;
 
@@ -106,6 +108,7 @@ export function evaluateEntry(snapshot: StateSnapshot, config: StrategyRiskConfi
       condition('NO book tradable', buyQuoteReady(noQuote, config), quoteAgeLabel(noQuote)),
       condition('Dynamic limit price', limitPrice > 0 && limitPrice < 1, `${limitPrice.toFixed(3)} (${config.dynamicLimitEnabled ? 'score policy' : 'fixed'})`),
       condition('Pair cost cap', pairCost <= config.maxPairCost + 0.000001, `${pairCost.toFixed(3)} / ${config.maxPairCost.toFixed(3)}, edge ${pairEdge.toFixed(3)}`),
+      condition('Dynamic shares', shares >= config.minOrderShares, `${shares.toFixed(2)} / base ${config.orderSharesPerSide.toFixed(2)} / max ${config.maxOrderSharesPerSide.toFixed(2)} (${config.dynamicSharesEnabled ? 'score policy' : 'fixed'})`),
       condition('Shares per side', shares >= config.minOrderShares, `${shares.toFixed(2)} / min ${config.minOrderShares}`),
     ],
   }];
@@ -163,11 +166,23 @@ function entryLimitPrice(snapshot: StateSnapshot, config: StrategyRiskConfig): n
   return roundPrice(Math.max(config.minDynamicLimitPrice, capped));
 }
 
+function entryShares(snapshot: StateSnapshot, config: StrategyRiskConfig): number {
+  if (!config.dynamicSharesEnabled) return roundShares(config.orderSharesPerSide);
+  const scoreShares = config.orderSharesPerSide * sharesMultiplierFromScore(snapshot.features.chopScore);
+  return roundShares(Math.min(scoreShares, config.maxOrderSharesPerSide));
+}
+
 function priceFromScore(score: number): number {
   if (score >= 95) return 0.46;
   if (score >= 90) return 0.45;
   if (score >= 80) return 0.44;
   return 0.42;
+}
+
+function sharesMultiplierFromScore(score: number): number {
+  if (score >= 95) return 1.25;
+  if (score >= 80) return 1;
+  return 0.5;
 }
 
 function reject(base: TradeIntent, reason: string): TradeIntent {
