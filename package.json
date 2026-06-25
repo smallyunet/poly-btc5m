@@ -9,7 +9,7 @@
     "build:server": "tsc -p tsconfig.json",
     "build:web": "vite build --config apps/web/vite.config.ts",
     "start:api": "node dist/apps/api/src/main.js",
-    "test": "node --import tsx --test \"packages/strategy/src/**/*.test.ts\"",
+    "test": "node --import tsx --test \"packages/strategy/src/**/*.test.ts\" \"apps/api/src/**/*.test.ts\"",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p apps/web/tsconfig.json"
   },
   "dependencies": {

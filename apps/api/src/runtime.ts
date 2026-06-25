@@ -152,13 +152,13 @@ async function reconcileTrackedOrders(appConfig: AppConfig, adapter: PolymarketA
 }
 
 function recordFillsAndMaybeCooldown(appConfig: AppConfig, store: InMemoryStore, fills: FillRecord[]): void {
-  const newFills = store.recordFills(fills);
-  const cooldown = store.maybeStartSingleFillCooldown(newFills, appConfig.singleFillCooldownMs);
+  store.recordFills(fills);
+  const cooldown = store.maybeStartSingleFillCooldown(appConfig.singleFillCooldownMs);
   if (!cooldown) return;
   store.recordRuntimeLog({
     level: 'warn',
     source: 'execution',
-    message: `Single-sided fill detected on ${cooldown.roundId}; entry cooldown active until ${cooldown.expiresAt}.`,
+    message: `Final single-sided fill detected on ${cooldown.roundId}; entry cooldown active until ${cooldown.expiresAt}.`,
     details: cooldown,
   });
 }

@@ -23,6 +23,7 @@ type PersistedRuntimeState = {
   settlements: SettlementRecord[];
   roundStrikes?: Record<string, number>;
   singleFillCooldown?: SingleFillCooldownRecord | null;
+  singleFillCooldownRoundIds?: string[];
 };
 
 type SingleFillCooldownRecord = {
@@ -32,6 +33,8 @@ type SingleFillCooldownRecord = {
   yesShares: number;
   noShares: number;
 };
+
+const FINAL_SINGLE_FILL_GRACE_MS = 60_000;
 
 export class InMemoryStore {
   private runtime: BotRuntimeStatus;
@@ -43,6 +46,7 @@ export class InMemoryStore {
   private settlements: SettlementRecord[] = [];
   private roundStrikes = new Map<string, number>();
   private singleFillCooldown: SingleFillCooldownRecord | null = null;
+  private singleFillCooldownRoundIds = new Set<string>();
   private runtimeLogs: RuntimeLogRecord[] = [];
   private strategyChecks: StrategyCheck[] = [];
   private readonly persistencePath?: string;
@@ -224,29 +228,38 @@ export class InMemoryStore {
 
   getActiveEntryCooldown(nowMs = Date.now()): SingleFillCooldownRecord | null {
     if (!this.singleFillCooldown) return null;
+    if (!this.isFinalSingleSidedBuyRound(this.singleFillCooldown.roundId, nowMs)) {
+      this.clearSingleFillCooldown();
+      return null;
+    }
     const expiresAtMs = new Date(this.singleFillCooldown.expiresAt).getTime();
-    if (!Number.isFinite(expiresAtMs) || expiresAtMs <= nowMs) return null;
+    if (!Number.isFinite(expiresAtMs) || expiresAtMs <= nowMs) {
+      this.clearSingleFillCooldown();
+      return null;
+    }
     return this.singleFillCooldown;
   }
 
-  maybeStartSingleFillCooldown(newFills: FillRecord[], cooldownMs: number, nowMs = Date.now()): SingleFillCooldownRecord | null {
-    if (!newFills.some((fill) => fill.side === 'BUY')) return null;
+  maybeStartSingleFillCooldown(cooldownMs: number, nowMs = Date.now()): SingleFillCooldownRecord | null {
     if (this.getActiveEntryCooldown(nowMs)) return null;
 
-    const rounds = new Set(newFills.filter((fill) => fill.side === 'BUY').map((fill) => fill.roundId));
+    const rounds = new Set(this.fills.filter((fill) => fill.side === 'BUY').map((fill) => fill.roundId));
     for (const roundId of rounds) {
-      const buys = this.fills.filter((fill) => fill.roundId === roundId && fill.side === 'BUY');
-      const yesShares = sum(buys.filter((fill) => fill.label === 'YES').map((fill) => fill.size));
-      const noShares = sum(buys.filter((fill) => fill.label === 'NO').map((fill) => fill.size));
-      const singleSided = (yesShares > 0 && noShares <= 0) || (noShares > 0 && yesShares <= 0);
-      if (!singleSided) continue;
+      if (this.singleFillCooldownRoundIds.has(roundId)) continue;
+      if (!isRoundEnded(roundId, nowMs, FINAL_SINGLE_FILL_GRACE_MS)) continue;
+      const exposure = this.singleSidedBuyExposure(roundId);
+      this.singleFillCooldownRoundIds.add(roundId);
+      if (!exposure.singleSided) {
+        this.persistState();
+        continue;
+      }
 
       const record: SingleFillCooldownRecord = {
         roundId,
         triggeredAt: new Date(nowMs).toISOString(),
         expiresAt: new Date(nowMs + cooldownMs).toISOString(),
-        yesShares,
-        noShares,
+        yesShares: exposure.yesShares,
+        noShares: exposure.noShares,
       };
       this.singleFillCooldown = record;
       this.runtime = {
@@ -307,6 +320,7 @@ export class InMemoryStore {
       this.settlements = Array.isArray(parsed.settlements) ? parsed.settlements.slice(0, this.maxRecords) : [];
       this.roundStrikes = new Map(Object.entries(parsed.roundStrikes || {}).filter(([, strike]) => Number.isFinite(strike) && strike > 0));
       this.singleFillCooldown = isSingleFillCooldownLike(parsed.singleFillCooldown) ? parsed.singleFillCooldown : null;
+      this.singleFillCooldownRoundIds = new Set(Array.isArray(parsed.singleFillCooldownRoundIds) ? parsed.singleFillCooldownRoundIds.filter((roundId): roundId is string => typeof roundId === 'string') : []);
       this.runtime = this.runtimeWithCooldown();
       this.reconcileOrderFillStatus();
     } catch (error) {
@@ -356,6 +370,7 @@ export class InMemoryStore {
         settlements: this.settlements,
         roundStrikes: Object.fromEntries(this.roundStrikes),
         singleFillCooldown: this.singleFillCooldown,
+        singleFillCooldownRoundIds: [...this.singleFillCooldownRoundIds],
       };
       const tmpPath = `${this.persistencePath}.${process.pid}.tmp`;
       fs.writeFileSync(tmpPath, JSON.stringify(payload, null, 2));
@@ -376,6 +391,30 @@ export class InMemoryStore {
       entryCooldownUntil: activeCooldown.expiresAt,
       entryCooldownReason: `single fill on ${activeCooldown.roundId}`,
     };
+  }
+
+  private isFinalSingleSidedBuyRound(roundId: string, nowMs: number): boolean {
+    if (!isRoundEnded(roundId, nowMs, FINAL_SINGLE_FILL_GRACE_MS)) return false;
+    return this.singleSidedBuyExposure(roundId).singleSided;
+  }
+
+  private singleSidedBuyExposure(roundId: string): { yesShares: number; noShares: number; singleSided: boolean } {
+    const buys = this.fills.filter((fill) => fill.roundId === roundId && fill.side === 'BUY');
+    const yesShares = sum(buys.filter((fill) => fill.label === 'YES').map((fill) => fill.size));
+    const noShares = sum(buys.filter((fill) => fill.label === 'NO').map((fill) => fill.size));
+    return {
+      yesShares,
+      noShares,
+      singleSided: (yesShares > 0 && noShares <= 0) || (noShares > 0 && yesShares <= 0),
+    };
+  }
+
+  private clearSingleFillCooldown(): void {
+    if (!this.singleFillCooldown && !this.runtime.entryCooldownUntil && !this.runtime.entryCooldownReason) return;
+    this.singleFillCooldown = null;
+    const { entryCooldownUntil: _entryCooldownUntil, entryCooldownReason: _entryCooldownReason, ...runtime } = this.runtime;
+    this.runtime = runtime;
+    this.persistState();
   }
 }
 
