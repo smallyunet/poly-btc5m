@@ -436,7 +436,6 @@ export function App() {
             <Cpu size={24} style={{ color: 'var(--color-primary)' }} />
             Poly BTC 5m Terminal
           </h1>
-          <p>{snapshot.round.title || snapshot.round.eventSlug}</p>
         </div>
         
         {/* Navigation Tabs */}
