@@ -24,11 +24,13 @@ type PersistedRuntimeState = {
   roundStrikes?: Record<string, number>;
   singleFillCooldown?: SingleFillCooldownRecord | null;
   singleFillCooldownRoundIds?: string[];
+  pendingSingleFillReviewRoundIds?: string[];
 };
 
 type SingleFillCooldownRecord = {
   roundId: string;
   triggeredAt: string;
+  finalizedAt?: string;
   expiresAt: string;
   yesShares: number;
   noShares: number;
@@ -47,6 +49,7 @@ export class InMemoryStore {
   private roundStrikes = new Map<string, number>();
   private singleFillCooldown: SingleFillCooldownRecord | null = null;
   private singleFillCooldownRoundIds = new Set<string>();
+  private pendingSingleFillReviewRoundIds = new Set<string>();
   private runtimeLogs: RuntimeLogRecord[] = [];
   private strategyChecks: StrategyCheck[] = [];
   private readonly persistencePath?: string;
@@ -228,6 +231,10 @@ export class InMemoryStore {
 
   getActiveEntryCooldown(nowMs = Date.now()): SingleFillCooldownRecord | null {
     if (!this.singleFillCooldown) return null;
+    if (!this.singleFillCooldown.finalizedAt) {
+      this.clearSingleFillCooldown();
+      return null;
+    }
     if (!this.isFinalSingleSidedBuyRound(this.singleFillCooldown.roundId, nowMs)) {
       this.clearSingleFillCooldown();
       return null;
@@ -240,15 +247,24 @@ export class InMemoryStore {
     return this.singleFillCooldown;
   }
 
-  maybeStartSingleFillCooldown(cooldownMs: number, nowMs = Date.now()): SingleFillCooldownRecord | null {
+  maybeStartSingleFillCooldown(newFills: FillRecord[], cooldownMs: number, nowMs = Date.now()): SingleFillCooldownRecord | null {
+    let dirty = false;
+    for (const fill of newFills) {
+      if (fill.side !== 'BUY' || this.singleFillCooldownRoundIds.has(fill.roundId)) continue;
+      const before = this.pendingSingleFillReviewRoundIds.size;
+      this.pendingSingleFillReviewRoundIds.add(fill.roundId);
+      dirty ||= this.pendingSingleFillReviewRoundIds.size !== before;
+    }
+
     if (this.getActiveEntryCooldown(nowMs)) return null;
 
-    const rounds = new Set(this.fills.filter((fill) => fill.side === 'BUY').map((fill) => fill.roundId));
-    for (const roundId of rounds) {
+    for (const roundId of this.pendingSingleFillReviewRoundIds) {
       if (this.singleFillCooldownRoundIds.has(roundId)) continue;
       if (!isRoundEnded(roundId, nowMs, FINAL_SINGLE_FILL_GRACE_MS)) continue;
       const exposure = this.singleSidedBuyExposure(roundId);
+      this.pendingSingleFillReviewRoundIds.delete(roundId);
       this.singleFillCooldownRoundIds.add(roundId);
+      dirty = true;
       if (!exposure.singleSided) {
         this.persistState();
         continue;
@@ -257,6 +273,7 @@ export class InMemoryStore {
       const record: SingleFillCooldownRecord = {
         roundId,
         triggeredAt: new Date(nowMs).toISOString(),
+        finalizedAt: new Date(nowMs).toISOString(),
         expiresAt: new Date(nowMs + cooldownMs).toISOString(),
         yesShares: exposure.yesShares,
         noShares: exposure.noShares,
@@ -271,6 +288,7 @@ export class InMemoryStore {
       return record;
     }
 
+    if (dirty) this.persistState();
     return null;
   }
 
@@ -321,6 +339,7 @@ export class InMemoryStore {
       this.roundStrikes = new Map(Object.entries(parsed.roundStrikes || {}).filter(([, strike]) => Number.isFinite(strike) && strike > 0));
       this.singleFillCooldown = isSingleFillCooldownLike(parsed.singleFillCooldown) ? parsed.singleFillCooldown : null;
       this.singleFillCooldownRoundIds = new Set(Array.isArray(parsed.singleFillCooldownRoundIds) ? parsed.singleFillCooldownRoundIds.filter((roundId): roundId is string => typeof roundId === 'string') : []);
+      this.pendingSingleFillReviewRoundIds = new Set(Array.isArray(parsed.pendingSingleFillReviewRoundIds) ? parsed.pendingSingleFillReviewRoundIds.filter((roundId): roundId is string => typeof roundId === 'string') : []);
       this.runtime = this.runtimeWithCooldown();
       this.reconcileOrderFillStatus();
     } catch (error) {
@@ -371,6 +390,7 @@ export class InMemoryStore {
         roundStrikes: Object.fromEntries(this.roundStrikes),
         singleFillCooldown: this.singleFillCooldown,
         singleFillCooldownRoundIds: [...this.singleFillCooldownRoundIds],
+        pendingSingleFillReviewRoundIds: [...this.pendingSingleFillReviewRoundIds],
       };
       const tmpPath = `${this.persistencePath}.${process.pid}.tmp`;
       fs.writeFileSync(tmpPath, JSON.stringify(payload, null, 2));
