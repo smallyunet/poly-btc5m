@@ -21,6 +21,7 @@ import { api, DASHBOARD_REFRESH_MS } from './lib/api';
 import { formatMoney, formatNumber, formatSeconds, modeLabel } from './lib/format';
 
 type TabType = 'terminal' | 'orderbooks' | 'activity' | 'strategy' | 'logs';
+type ActivitySubTab = 'rounds' | 'orders';
 type ActivityRecord =
   | { id: string; type: 'fill'; time: string; sortTime: number; fill: DashboardState['fills'][number] }
   | { id: string; type: 'settlement'; time: string; sortTime: number; settlement: DashboardState['settlements'][number] };
@@ -201,6 +202,7 @@ export function App() {
   
   // Navigation Tab State
   const [activeTab, setActiveTab] = React.useState<TabType>('terminal');
+  const [activitySubTab, setActivitySubTab] = React.useState<ActivitySubTab>('rounds');
 
   // Logs Search & Filter States
   const [logSearch, setLogSearch] = React.useState('');
@@ -675,117 +677,135 @@ export function App() {
 
         {activeTab === 'activity' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-            {/* Per-round execution summary */}
             <div className="panel">
               <h2>
-                Round Execution Summary
-                <span className="panelSubTitle">{roundSummaries.length} rounds</span>
+                Execution Review
+                <span className="panelSubTitle">
+                  {roundSummaries.length} rounds / {state.orders.length} orders
+                </span>
               </h2>
-              {roundSummaries.length > 0 ? (
-                <>
-                  <DataTable headers={['Market', 'Round ID', 'Orders', 'Ordered Buy Shares', 'Filled Buy Shares', 'Filled Sell Shares', 'Unfilled', 'Settlement PnL']}>
-                    {roundPagination.pageRows.map((round) => {
-                      const hasUnfilled = round.unfilledOrders > 0;
-                      const hasPairedFill = round.filledBuyYes > 0 && round.filledBuyNo > 0;
-                      return (
-                        <tr key={round.roundId}>
+
+              <div className="subTabBar">
+                <button
+                  type="button"
+                  className={`subTabBtn ${activitySubTab === 'rounds' ? 'active' : ''}`}
+                  onClick={() => setActivitySubTab('rounds')}
+                >
+                  Round Summary
+                  <span>{roundSummaries.length}</span>
+                </button>
+                <button
+                  type="button"
+                  className={`subTabBtn ${activitySubTab === 'orders' ? 'active' : ''}`}
+                  onClick={() => setActivitySubTab('orders')}
+                >
+                  Orders
+                  <span>{state.orders.length}</span>
+                </button>
+              </div>
+
+              {activitySubTab === 'rounds' && (
+                roundSummaries.length > 0 ? (
+                  <>
+                    <DataTable headers={['Market', 'Round ID', 'Orders', 'Ordered Buy Shares', 'Filled Buy Shares', 'Filled Sell Shares', 'Unfilled', 'Settlement PnL']}>
+                      {roundPagination.pageRows.map((round) => {
+                        const hasUnfilled = round.unfilledOrders > 0;
+                        const hasPairedFill = round.filledBuyYes > 0 && round.filledBuyNo > 0;
+                        return (
+                          <tr key={round.roundId}>
+                            <td>
+                              <div className="marketCell">
+                                {round.imageUrl ? (
+                                  <img src={round.imageUrl} alt="" className="marketThumb" />
+                                ) : (
+                                  <span className="marketThumb marketThumbFallback">₿</span>
+                                )}
+                                <span className="marketTitle">{round.title}</span>
+                              </div>
+                            </td>
+                            <td className="mono" style={{ fontSize: '11px' }}>{round.roundId}</td>
+                            <td>
+                              <span className="mono">{round.orderCount}</span>
+                              <span className="mutedInline"> {round.buyOrderCount} buy / {round.sellOrderCount} sell</span>
+                            </td>
+                            <td className="mono">
+                              UP {formatShares(round.orderedYes)} / DOWN {formatShares(round.orderedNo)}
+                            </td>
+                            <td className="mono">
+                              UP {formatShares(round.filledBuyYes)} / DOWN {formatShares(round.filledBuyNo)}
+                              {' '}
+                              <Badge tone={hasPairedFill ? 'good' : 'warn'}>{hasPairedFill ? 'paired' : 'single'}</Badge>
+                            </td>
+                            <td className="mono">
+                              UP {formatShares(round.filledSellYes)} / DOWN {formatShares(round.filledSellNo)}
+                            </td>
+                            <td>
+                              <Badge tone={hasUnfilled ? 'warn' : 'good'}>
+                                {hasUnfilled ? `${round.unfilledOrders} orders / ${formatShares(round.unfilledShares)} shares` : 'none'}
+                              </Badge>
+                            </td>
+                            <td className={`mono ${round.settlementPnl == null ? '' : round.settlementPnl >= 0 ? 'pass' : 'fail'}`}>
+                              {round.settlementPnl == null ? '-' : `${round.settlementPnl >= 0 ? '+' : ''}${formatMoney(round.settlementPnl)}`}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </DataTable>
+                    <PaginationControls
+                      page={roundPagination.page}
+                      totalPages={roundPagination.totalPages}
+                      totalRows={roundSummaries.length}
+                      pageSize={ROUND_PAGE_SIZE}
+                      onPageChange={roundPagination.setPage}
+                    />
+                  </>
+                ) : (
+                  <div className="empty" style={{ minHeight: '150px' }}>
+                    <p className="emptyText">No round execution records found</p>
+                  </div>
+                )
+              )}
+
+              {activitySubTab === 'orders' && (
+                state.orders.length > 0 ? (
+                  <>
+                    <DataTable headers={['Time (ET)', 'Round ID', 'Outcome', 'Side', 'Price', 'Size', 'Status', 'Polymarket CLOB Order ID']}>
+                      {ordersPagination.pageRows.map((order) => (
+                        <tr key={order.id}>
+                          <td className="mono">{formatEtTime(order.createdAt)}</td>
+                          <td className="mono" style={{ fontSize: '11px' }}>{order.roundId}</td>
+                          <td><Badge tone={outcomeTone(order.label)}>{outcomeLabel(order.label)}</Badge></td>
                           <td>
-                            <div className="marketCell">
-                              {round.imageUrl ? (
-                                <img src={round.imageUrl} alt="" className="marketThumb" />
-                              ) : (
-                                <span className="marketThumb marketThumbFallback">₿</span>
-                              )}
-                              <span className="marketTitle">{round.title}</span>
-                            </div>
+                            <strong style={{ color: order.side === 'BUY' ? 'var(--color-success)' : 'var(--color-danger)' }}>
+                              {order.side}
+                            </strong>
                           </td>
-                          <td className="mono" style={{ fontSize: '11px' }}>{round.roundId}</td>
+                          <td className="mono">${order.price.toFixed(3)}</td>
+                          <td className="mono">{order.size.toFixed(1)}</td>
                           <td>
-                            <span className="mono">{round.orderCount}</span>
-                            <span className="mutedInline"> {round.buyOrderCount} buy / {round.sellOrderCount} sell</span>
-                          </td>
-                          <td className="mono">
-                            UP {formatShares(round.orderedYes)} / DOWN {formatShares(round.orderedNo)}
-                          </td>
-                          <td className="mono">
-                            UP {formatShares(round.filledBuyYes)} / DOWN {formatShares(round.filledBuyNo)}
-                            {' '}
-                            <Badge tone={hasPairedFill ? 'good' : 'warn'}>{hasPairedFill ? 'paired' : 'single'}</Badge>
-                          </td>
-                          <td className="mono">
-                            UP {formatShares(round.filledSellYes)} / DOWN {formatShares(round.filledSellNo)}
-                          </td>
-                          <td>
-                            <Badge tone={hasUnfilled ? 'warn' : 'good'}>
-                              {hasUnfilled ? `${round.unfilledOrders} orders / ${formatShares(round.unfilledShares)} shares` : 'none'}
+                            <Badge tone={order.status === 'failed' ? 'bad' : order.status === 'filled' ? 'good' : order.status === 'posted' ? 'warn' : 'neutral'}>
+                              {order.status}
                             </Badge>
                           </td>
-                          <td className={`mono ${round.settlementPnl == null ? '' : round.settlementPnl >= 0 ? 'pass' : 'fail'}`}>
-                            {round.settlementPnl == null ? '-' : `${round.settlementPnl >= 0 ? '+' : ''}${formatMoney(round.settlementPnl)}`}
+                          <td className="mono" style={{ fontSize: '11px' }} title={order.clobOrderId || ''}>
+                            {order.clobOrderId ? shortenTokenId(order.clobOrderId) : '-'}
                           </td>
                         </tr>
-                      );
-                    })}
-                  </DataTable>
-                  <PaginationControls
-                    page={roundPagination.page}
-                    totalPages={roundPagination.totalPages}
-                    totalRows={roundSummaries.length}
-                    pageSize={ROUND_PAGE_SIZE}
-                    onPageChange={roundPagination.setPage}
-                  />
-                </>
-              ) : (
-                <div className="empty" style={{ minHeight: '150px' }}>
-                  <p className="emptyText">No round execution records found</p>
-                </div>
-              )}
-            </div>
-            
-            {/* Active / Recent Orders */}
-            <div className="panel">
-              <h2>
-                Active Orders & Intent History
-                <span className="panelSubTitle">{state.orders.length} records</span>
-              </h2>
-              {state.orders.length > 0 ? (
-                <>
-                  <DataTable headers={['Time (ET)', 'Round ID', 'Outcome', 'Side', 'Price', 'Size', 'Status', 'Polymarket CLOB Order ID']}>
-                    {ordersPagination.pageRows.map((order) => (
-                      <tr key={order.id}>
-                        <td className="mono">{formatEtTime(order.createdAt)}</td>
-                        <td className="mono" style={{ fontSize: '11px' }}>{order.roundId}</td>
-                        <td><Badge tone={outcomeTone(order.label)}>{outcomeLabel(order.label)}</Badge></td>
-                        <td>
-                          <strong style={{ color: order.side === 'BUY' ? 'var(--color-success)' : 'var(--color-danger)' }}>
-                            {order.side}
-                          </strong>
-                        </td>
-                        <td className="mono">${order.price.toFixed(3)}</td>
-                        <td className="mono">{order.size.toFixed(1)}</td>
-                        <td>
-                          <Badge tone={order.status === 'failed' ? 'bad' : order.status === 'filled' ? 'good' : order.status === 'posted' ? 'warn' : 'neutral'}>
-                            {order.status}
-                          </Badge>
-                        </td>
-                        <td className="mono" style={{ fontSize: '11px' }} title={order.clobOrderId || ''}>
-                          {order.clobOrderId ? shortenTokenId(order.clobOrderId) : '-'}
-                        </td>
-                      </tr>
-                    ))}
-                  </DataTable>
-                  <PaginationControls
-                    page={ordersPagination.page}
-                    totalPages={ordersPagination.totalPages}
-                    totalRows={state.orders.length}
-                    pageSize={ORDER_PAGE_SIZE}
-                    onPageChange={ordersPagination.setPage}
-                  />
-                </>
-              ) : (
-                <div className="empty" style={{ minHeight: '150px' }}>
-                  <p className="emptyText">No orders placed by the bot yet</p>
-                </div>
+                      ))}
+                    </DataTable>
+                    <PaginationControls
+                      page={ordersPagination.page}
+                      totalPages={ordersPagination.totalPages}
+                      totalRows={state.orders.length}
+                      pageSize={ORDER_PAGE_SIZE}
+                      onPageChange={ordersPagination.setPage}
+                    />
+                  </>
+                ) : (
+                  <div className="empty" style={{ minHeight: '150px' }}>
+                    <p className="emptyText">No orders placed by the bot yet</p>
+                  </div>
+                )
               )}
             </div>
 

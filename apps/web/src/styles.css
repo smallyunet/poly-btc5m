@@ -183,6 +183,55 @@ button.primary:hover:not(:disabled) {
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
 }
 
+.subTabBar {
+  display: inline-flex;
+  width: fit-content;
+  gap: 4px;
+  padding: 4px;
+  background: rgba(15, 23, 42, 0.035);
+  border: 1px solid var(--border-color);
+  border-radius: 9px;
+}
+
+.subTabBtn {
+  min-height: 30px;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.subTabBtn span {
+  min-width: 20px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(100, 116, 139, 0.1);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.subTabBtn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.7);
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.subTabBtn.active {
+  background: #ffffff;
+  border-color: var(--border-color-active);
+  color: var(--color-primary);
+}
+
+.subTabBtn.active span {
+  background: rgba(37, 99, 235, 0.1);
+  color: var(--color-primary);
+}
+
 /* Digest Section */
 .digest {
   display: grid;
