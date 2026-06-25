@@ -22,9 +22,6 @@ import { formatMoney, formatNumber, formatSeconds, modeLabel } from './lib/forma
 
 type TabType = 'terminal' | 'orderbooks' | 'activity' | 'strategy' | 'logs';
 type ActivitySubTab = 'rounds' | 'orders';
-type ActivityRecord =
-  | { id: string; type: 'fill'; time: string; sortTime: number; fill: DashboardState['fills'][number] }
-  | { id: string; type: 'settlement'; time: string; sortTime: number; settlement: DashboardState['settlements'][number] };
 type DashboardOrder = DashboardState['orders'][number];
 type DashboardFill = DashboardState['fills'][number];
 type RoundExecutionSummary = {
@@ -48,8 +45,26 @@ type RoundExecutionSummary = {
 
 const ROUND_PAGE_SIZE = 20;
 const ORDER_PAGE_SIZE = 25;
-const ACTIVITY_PAGE_SIZE = 25;
 const LOG_PAGE_SIZE = 75;
+const TAB_TYPES: TabType[] = ['terminal', 'orderbooks', 'activity', 'strategy', 'logs'];
+
+function isTabType(value: string | null): value is TabType {
+  return TAB_TYPES.includes(value as TabType);
+}
+
+function tabFromUrl(): TabType {
+  if (typeof window === 'undefined') return 'terminal';
+  const tab = new URLSearchParams(window.location.search).get('tab');
+  return isTabType(tab) ? tab : 'terminal';
+}
+
+function syncTabToUrl(tab: TabType): void {
+  if (typeof window === 'undefined') return;
+  const url = new URL(window.location.href);
+  if (url.searchParams.get('tab') === tab) return;
+  url.searchParams.set('tab', tab);
+  window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
+}
 
 // Helper to shorten long crypto addresses/token IDs
 function shortenTokenId(id: string): string {
@@ -201,7 +216,7 @@ export function App() {
   const [refreshing, setRefreshing] = React.useState(false);
   
   // Navigation Tab State
-  const [activeTab, setActiveTab] = React.useState<TabType>('terminal');
+  const [activeTab, setActiveTab] = React.useState<TabType>(() => tabFromUrl());
   const [activitySubTab, setActivitySubTab] = React.useState<ActivitySubTab>('rounds');
 
   // Logs Search & Filter States
@@ -230,6 +245,16 @@ export function App() {
     return () => clearInterval(timer);
   }, [load]);
 
+  React.useEffect(() => {
+    syncTabToUrl(activeTab);
+  }, [activeTab]);
+
+  React.useEffect(() => {
+    const handlePopState = () => setActiveTab(tabFromUrl());
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
   // Filter logs in real-time
   const filteredLogs = React.useMemo(() => {
     if (!state?.runtimeLogs) return [];
@@ -244,31 +269,10 @@ export function App() {
     });
   }, [state?.runtimeLogs, logSearch, logLevel, logSource]);
 
-  const activityRecords = React.useMemo<ActivityRecord[]>(() => {
-    if (!state) return [];
-    return [
-      ...state.fills.map((fill): ActivityRecord => ({
-        id: `fill-${fill.id}`,
-        type: 'fill',
-        time: fill.matchedAt,
-        sortTime: toSortTime(fill.matchedAt),
-        fill,
-      })),
-      ...state.settlements.map((settlement): ActivityRecord => ({
-        id: `settlement-${settlement.id}`,
-        type: 'settlement',
-        time: settlement.resolvedAt,
-        sortTime: toSortTime(settlement.resolvedAt),
-        settlement,
-      })),
-    ].sort((a, b) => b.sortTime - a.sortTime);
-  }, [state]);
-
   const roundSummaries = React.useMemo(() => state ? buildRoundExecutionSummaries(state) : [], [state]);
 
   const roundPagination = usePaginatedRows(roundSummaries, ROUND_PAGE_SIZE);
   const ordersPagination = usePaginatedRows(state?.orders ?? [], ORDER_PAGE_SIZE);
-  const activityPagination = usePaginatedRows(activityRecords, ACTIVITY_PAGE_SIZE);
   const logsPagination = usePaginatedRows(filteredLogs, LOG_PAGE_SIZE);
 
   React.useEffect(() => {
@@ -278,10 +282,6 @@ export function App() {
   React.useEffect(() => {
     ordersPagination.setPage(1);
   }, [state?.orders.length]);
-
-  React.useEffect(() => {
-    activityPagination.setPage(1);
-  }, [activityRecords.length]);
 
   React.useEffect(() => {
     logsPagination.setPage(1);
@@ -809,69 +809,6 @@ export function App() {
               )}
             </div>
 
-            {/* Fills & Settlements */}
-            <div className="panel">
-              <h2>
-                Trade Fills & Settlement History
-                <span className="panelSubTitle">{activityRecords.length} records</span>
-              </h2>
-              {activityRecords.length > 0 ? (
-                <>
-                  <DataTable headers={['Record Type', 'Time (ET)', 'Round ID', 'Details', 'Position/Winner', 'Price/Cost', 'Size/PnL']}>
-                    {activityPagination.pageRows.map((record) => {
-                      if (record.type === 'fill') {
-                        const { fill } = record;
-                        return (
-                          <tr key={record.id}>
-                            <td><Badge tone="neutral">FILL</Badge></td>
-                            <td className="mono">{formatEtTime(fill.matchedAt)}</td>
-                            <td className="mono" style={{ fontSize: '11px' }}>{fill.roundId}</td>
-                            <td>{outcomeLabel(fill.label)} Match</td>
-                            <td>
-                              <strong style={{ color: fill.side === 'BUY' ? 'var(--color-success)' : 'var(--color-danger)' }}>
-                                {fill.side}
-                              </strong>
-                            </td>
-                            <td className="mono">${fill.price.toFixed(3)}</td>
-                            <td className="mono">{fill.size.toFixed(1)}</td>
-                          </tr>
-                        );
-                      }
-
-                      const { settlement } = record;
-                      return (
-                        <tr key={record.id}>
-                          <td><Badge tone="good">SETTLEMENT</Badge></td>
-                          <td className="mono">{formatEtTime(settlement.resolvedAt)}</td>
-                          <td className="mono" style={{ fontSize: '11px' }}>{settlement.roundId}</td>
-                          <td>{settlement.status.toUpperCase()}</td>
-                          <td>
-                            <Badge tone={settlement.winningLabel === 'YES' ? 'good' : settlement.winningLabel === 'NO' ? 'bad' : 'neutral'}>
-                              {settlement.winningLabel ? outcomeLabel(settlement.winningLabel) : 'pending'}
-                            </Badge>
-                          </td>
-                          <td className="mono">{formatMoney(settlement.totalCost)}</td>
-                          <td className={`mono ${settlement.pnl >= 0 ? 'pass' : 'fail'}`} style={{ fontWeight: 700 }}>
-                            {settlement.pnl >= 0 ? '+' : ''}{formatMoney(settlement.pnl)}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </DataTable>
-                  <PaginationControls
-                    page={activityPagination.page}
-                    totalPages={activityPagination.totalPages}
-                    totalRows={activityRecords.length}
-                    pageSize={ACTIVITY_PAGE_SIZE}
-                    onPageChange={activityPagination.setPage}
-                  />
-                </>
-              ) : (
-                <div className="empty" style={{ minHeight: '150px' }}>
-                  <p className="emptyText">No filled trades or settled rounds found</p>
-                </div>
-              )}
-            </div>
           </div>
         )}
 
