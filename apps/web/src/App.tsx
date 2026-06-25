@@ -564,7 +564,7 @@ export function App() {
                   <DecisionMetric
                     label="BTC Dynamic Score"
                     value={formatNumber(snapshot.features.chopScore, 1)}
-                    detail={`range ${formatNumber(snapshot.features.rangeBps120s, 2)}bps / two-sided ${formatNumber(snapshot.features.minBiExcursionBps120s, 2)}bps`}
+                    detail={`range ${formatNumber(snapshot.features.rangeBps120s, 2)}bps / two-sided ${formatNumber(snapshot.features.minBiExcursionBps120s, 2)}bps / balance ${formatNumber(snapshot.features.excursionBalance120s, 2)}`}
                     tone={btcDecisionPassed ? 'good' : 'bad'}
                   />
                   <DecisionMetric
@@ -786,6 +786,10 @@ export function App() {
                   <div className="metricRow">
                     <span className="metricLabel">Two-Sided Excursion</span>
                     <span className="metricValue">{formatNumber(snapshot.features.minBiExcursionBps120s, 2)}bps</span>
+                  </div>
+                  <div className="metricRow">
+                    <span className="metricLabel">Excursion Balance</span>
+                    <span className="metricValue">{formatNumber(snapshot.features.excursionBalance120s, 2)}</span>
                   </div>
                   <div className="metricRow">
                     <span className="metricLabel">Volatility (120s)</span>

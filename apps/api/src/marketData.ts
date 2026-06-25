@@ -77,6 +77,8 @@ export class MarketDataService {
     const upExcursionBps120s = bps(upExcursion, denominator);
     const downExcursionBps120s = bps(downExcursion, denominator);
     const minBiExcursionBps120s = Math.min(upExcursionBps120s, downExcursionBps120s);
+    const maxBiExcursionBps120s = Math.max(upExcursionBps120s, downExcursionBps120s);
+    const excursionBalance120s = maxBiExcursionBps120s > 0 ? minBiExcursionBps120s / maxBiExcursionBps120s : 0;
     const driftRatio120s = range120s > 0 ? Math.abs(drift120s) / range120s : 1;
     const momentumRatio30s = range120s > 0 ? Math.abs(momentum30s) / range120s : 1;
     const rangePercentile120s = rollingRangePercentile(this.priceTicks, now, 120_000);
@@ -84,6 +86,7 @@ export class MarketDataService {
       cross120s,
       rangeBps120s,
       minBiExcursionBps120s,
+      excursionBalance120s,
       driftRatio120s,
       momentumRatio30s,
       rangePercentile120s,
@@ -104,6 +107,7 @@ export class MarketDataService {
       upExcursionBps120s,
       downExcursionBps120s,
       minBiExcursionBps120s,
+      excursionBalance120s,
       driftRatio120s,
       momentumRatio30s,
       rangePercentile120s,
@@ -328,26 +332,22 @@ function rollingRangePercentile(ticks: PriceTick[], now: number, windowMs: numbe
   return belowOrEqual / windows.length;
 }
 
-function scoreChop(input: {
+export function scoreChop(input: {
   cross120s: number;
   rangeBps120s: number;
   minBiExcursionBps120s: number;
+  excursionBalance120s: number;
   driftRatio120s: number;
   momentumRatio30s: number;
   rangePercentile120s: number | null;
 }): number {
-  const crossScore = clamp(input.cross120s / 3) * 20;
-  const rangeScore = clamp(input.rangeBps120s / 6) * 20;
+  const crossScore = clamp(input.cross120s / 4) * 25;
+  const rangeScore = clamp(input.rangeBps120s / 3) * 10;
   const twoSidedScore = clamp(input.minBiExcursionBps120s / 2) * 25;
+  const balanceScore = clamp(input.excursionBalance120s) * 15;
   const driftScore = clamp(1 - input.driftRatio120s / 0.7) * 15;
   const momentumScore = clamp(1 - input.momentumRatio30s / 0.8) * 10;
-  const percentile = input.rangePercentile120s;
-  const percentileScore = percentile == null
-    ? 5
-    : percentile >= 0.35 && percentile <= 0.9
-      ? 10
-      : clamp(1 - Math.min(Math.abs(percentile - 0.6), 0.6) / 0.6) * 10;
-  return Math.round((crossScore + rangeScore + twoSidedScore + driftScore + momentumScore + percentileScore) * 10) / 10;
+  return Math.round((crossScore + rangeScore + twoSidedScore + balanceScore + driftScore + momentumScore) * 10) / 10;
 }
 
 function clamp(value: number): number {

@@ -123,9 +123,10 @@ downExcursion = max(strike - price, 0)
 upExcursionBps120s = upExcursion / latestPrice * 10000
 downExcursionBps120s = downExcursion / latestPrice * 10000
 minBiExcursionBps120s = min(upExcursionBps120s, downExcursionBps120s)
+excursionBalance120s = min(upExcursionBps120s, downExcursionBps120s) / max(upExcursionBps120s, downExcursionBps120s)
 ```
 
-This is the most important CHOP quality feature because the strategy wants both YES and NO to have a chance to trade cheaply.
+This is the most important CHOP quality feature because the strategy wants both YES and NO to have a chance to trade cheaply. `excursionBalance120s` is closest to 1 when both sides move similarly; a path with one deep side and one shallow touch is scored lower.
 
 ### 3.4 Drift Ratio
 
@@ -151,6 +152,8 @@ The worker computes rolling 120s ranges over the last 10 minutes using 30s steps
 
 Healthy middle-high range percentiles are better than extremely low or extreme outlier ranges.
 
+Range percentile is currently kept as a diagnostic feature. It no longer directly increases `chopScore`.
+
 ---
 
 ## 4. CHOP Score
@@ -162,27 +165,23 @@ chopScore =
   crossScore
 + rangeScore
 + twoSidedScore
++ balanceScore
 + driftScore
 + momentumScore
-+ percentileScore
 ```
 
 Current scoring:
 
 ```text
-crossScore       = min(cross120s / 3, 1) * 20
-rangeScore       = min(rangeBps120s / 6, 1) * 20
+crossScore       = min(cross120s / 4, 1) * 25
+rangeScore       = min(rangeBps120s / 3, 1) * 10
 twoSidedScore    = min(minBiExcursionBps120s / 2, 1) * 25
+balanceScore     = excursionBalance120s * 15
 driftScore       = max(1 - driftRatio120s / 0.7, 0) * 15
 momentumScore    = max(1 - momentumRatio30s / 0.8, 0) * 10
-percentileScore  = up to 10
 ```
 
-Range percentile scoring:
-
-- `0.35 <= percentile <= 0.90`: full 10 points
-- missing percentile: 5 points
-- otherwise: decays as it moves away from the healthy range
+`rangeScore` now represents a minimum activity gate: once the path reaches roughly 3bps, larger range does not keep adding score. Higher dynamic limit prices and shares mostly come from repeated crosses, two-sided excursion, balanced excursions, low drift, and low short-term momentum.
 
 High CHOP score does **not** mean low volatility. It means BTC has enough two-sided movement without strong directional persistence.
 
