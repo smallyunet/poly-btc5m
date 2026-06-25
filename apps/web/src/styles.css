@@ -602,6 +602,39 @@ td.mono {
   color: var(--text-primary);
 }
 
+.paginationBar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.45);
+}
+
+.paginationSummary,
+.paginationPage {
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+
+.paginationControls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.paginationControls button {
+  min-height: 30px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
 /* Depth Bars in Orderbook Table */
 .depthCell {
   position: relative;

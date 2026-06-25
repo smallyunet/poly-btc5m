@@ -64,12 +64,15 @@ POLYMARKET_CLOB_WS_URL=wss://ws-subscriptions-clob.polymarket.com/ws/market
 POLYMARKET_GAMMA_API_URL=https://gamma-api.polymarket.com
 BOT_TICK_MS=2000
 MAX_ORDERBOOK_AGE_SECONDS=5
+RUNTIME_MAX_RECORDS=1000
 ```
 
 BTC price has no HTTP/manual/simulated fallback. The worker subscribes to the RTDS `crypto_prices` stream and only accepts `btcusdt` updates. If RTDS is not connected or no `btcusdt` tick has arrived, the regime remains `UNKNOWN` and entry orders are blocked.
 Orderbook price also has no REST fallback. The worker discovers the next 5-minute BTC Up/Down market from Gamma, maps `Up` to the local `YES` side and `Down` to the local `NO` side, then subscribes to both token IDs over the CLOB market websocket. If discovery fails, the CLOB websocket is not connected, or books are missing/stale, entry orders are blocked.
 
 The round strike is the BTC price at the beginning of the 5-minute Polymarket range. Before the next round starts, the dashboard shows the latest RTDS BTC price as an estimate. Once the round starts, the first available RTDS BTC price is persisted as that round's opening strike.
+
+`RUNTIME_MAX_RECORDS` bounds retained intents, orders, fills, and settlement records in memory and in `runtime-state.json`. The dashboard paginates long activity and log lists so the UI does not render the full retained history at once.
 
 Strategy thresholds:
 
@@ -82,7 +85,10 @@ MIN_VOLATILITY_120S=12
 MAX_ABS_DRIFT_120S=40
 MAX_ABS_MOMENTUM_30S=28
 SINGLE_FILL_GRACE_SECONDS=75
+ENABLE_SINGLE_EXIT_STRATEGY=true
 ```
+
+Set `ENABLE_SINGLE_EXIT_STRATEGY=false` to disable the `BTC5M_SINGLE_EXIT` sell-side risk exit. Paired 45c entry orders remain enabled.
 
 Live entry orders are configured as CLOB limit order `price + size`:
 

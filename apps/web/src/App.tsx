@@ -21,6 +21,13 @@ import { api, DASHBOARD_REFRESH_MS } from './lib/api';
 import { formatMoney, formatNumber, formatSeconds, modeLabel } from './lib/format';
 
 type TabType = 'terminal' | 'orderbooks' | 'activity' | 'strategy' | 'logs';
+type ActivityRecord =
+  | { id: string; type: 'fill'; time: string; sortTime: number; fill: DashboardState['fills'][number] }
+  | { id: string; type: 'settlement'; time: string; sortTime: number; settlement: DashboardState['settlements'][number] };
+
+const ORDER_PAGE_SIZE = 25;
+const ACTIVITY_PAGE_SIZE = 25;
+const LOG_PAGE_SIZE = 75;
 
 // Helper to shorten long crypto addresses/token IDs
 function shortenTokenId(id: string): string {
@@ -46,6 +53,28 @@ function formatEtTime(value: string): string {
     minute: '2-digit',
     second: '2-digit',
   })} ET`;
+}
+
+function toSortTime(value: string): number {
+  const time = new Date(value).getTime();
+  return Number.isFinite(time) ? time : 0;
+}
+
+function usePaginatedRows<T>(rows: T[], pageSize: number) {
+  const [page, setPage] = React.useState(1);
+  const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
+  const safePage = Math.min(page, totalPages);
+
+  React.useEffect(() => {
+    if (page !== safePage) setPage(safePage);
+  }, [page, safePage]);
+
+  return {
+    page: safePage,
+    totalPages,
+    pageRows: rows.slice((safePage - 1) * pageSize, safePage * pageSize),
+    setPage,
+  };
 }
 
 export function App() {
@@ -95,6 +124,42 @@ export function App() {
       return matchesSearch && matchesLevel && matchesSource;
     });
   }, [state?.runtimeLogs, logSearch, logLevel, logSource]);
+
+  const activityRecords = React.useMemo<ActivityRecord[]>(() => {
+    if (!state) return [];
+    return [
+      ...state.fills.map((fill): ActivityRecord => ({
+        id: `fill-${fill.id}`,
+        type: 'fill',
+        time: fill.matchedAt,
+        sortTime: toSortTime(fill.matchedAt),
+        fill,
+      })),
+      ...state.settlements.map((settlement): ActivityRecord => ({
+        id: `settlement-${settlement.id}`,
+        type: 'settlement',
+        time: settlement.resolvedAt,
+        sortTime: toSortTime(settlement.resolvedAt),
+        settlement,
+      })),
+    ].sort((a, b) => b.sortTime - a.sortTime);
+  }, [state]);
+
+  const ordersPagination = usePaginatedRows(state?.orders ?? [], ORDER_PAGE_SIZE);
+  const activityPagination = usePaginatedRows(activityRecords, ACTIVITY_PAGE_SIZE);
+  const logsPagination = usePaginatedRows(filteredLogs, LOG_PAGE_SIZE);
+
+  React.useEffect(() => {
+    ordersPagination.setPage(1);
+  }, [state?.orders.length]);
+
+  React.useEffect(() => {
+    activityPagination.setPage(1);
+  }, [activityRecords.length]);
+
+  React.useEffect(() => {
+    logsPagination.setPage(1);
+  }, [logSearch, logLevel, logSource]);
 
   // Auto-scroll log console to bottom when new logs arrive
   React.useEffect(() => {
@@ -489,32 +554,44 @@ export function App() {
             
             {/* Active / Recent Orders */}
             <div className="panel">
-              <h2>Active Orders & Intent History</h2>
+              <h2>
+                Active Orders & Intent History
+                <span className="panelSubTitle">{state.orders.length} records</span>
+              </h2>
               {state.orders.length > 0 ? (
-                <DataTable headers={['Time (ET)', 'Round ID', 'Outcome', 'Side', 'Price', 'Size', 'Status', 'Polymarket CLOB Order ID']}>
-                  {state.orders.slice(0, 100).map((order) => (
-                    <tr key={order.id}>
-                      <td className="mono">{formatEtTime(order.createdAt)}</td>
-                      <td className="mono" style={{ fontSize: '11px' }}>{order.roundId}</td>
-                      <td><Badge tone={outcomeTone(order.label)}>{outcomeLabel(order.label)}</Badge></td>
-                      <td>
-                        <strong style={{ color: order.side === 'BUY' ? 'var(--color-success)' : 'var(--color-danger)' }}>
-                          {order.side}
-                        </strong>
-                      </td>
-                      <td className="mono">${order.price.toFixed(3)}</td>
-                      <td className="mono">{order.size.toFixed(1)}</td>
-                      <td>
-                        <Badge tone={order.status === 'failed' ? 'bad' : order.status === 'filled' ? 'good' : order.status === 'posted' ? 'warn' : 'neutral'}>
-                          {order.status}
-                        </Badge>
-                      </td>
-                      <td className="mono" style={{ fontSize: '11px' }} title={order.clobOrderId || ''}>
-                        {order.clobOrderId ? shortenTokenId(order.clobOrderId) : '-'}
-                      </td>
-                    </tr>
-                  ))}
-                </DataTable>
+                <>
+                  <DataTable headers={['Time (ET)', 'Round ID', 'Outcome', 'Side', 'Price', 'Size', 'Status', 'Polymarket CLOB Order ID']}>
+                    {ordersPagination.pageRows.map((order) => (
+                      <tr key={order.id}>
+                        <td className="mono">{formatEtTime(order.createdAt)}</td>
+                        <td className="mono" style={{ fontSize: '11px' }}>{order.roundId}</td>
+                        <td><Badge tone={outcomeTone(order.label)}>{outcomeLabel(order.label)}</Badge></td>
+                        <td>
+                          <strong style={{ color: order.side === 'BUY' ? 'var(--color-success)' : 'var(--color-danger)' }}>
+                            {order.side}
+                          </strong>
+                        </td>
+                        <td className="mono">${order.price.toFixed(3)}</td>
+                        <td className="mono">{order.size.toFixed(1)}</td>
+                        <td>
+                          <Badge tone={order.status === 'failed' ? 'bad' : order.status === 'filled' ? 'good' : order.status === 'posted' ? 'warn' : 'neutral'}>
+                            {order.status}
+                          </Badge>
+                        </td>
+                        <td className="mono" style={{ fontSize: '11px' }} title={order.clobOrderId || ''}>
+                          {order.clobOrderId ? shortenTokenId(order.clobOrderId) : '-'}
+                        </td>
+                      </tr>
+                    ))}
+                  </DataTable>
+                  <PaginationControls
+                    page={ordersPagination.page}
+                    totalPages={ordersPagination.totalPages}
+                    totalRows={state.orders.length}
+                    pageSize={ORDER_PAGE_SIZE}
+                    onPageChange={ordersPagination.setPage}
+                  />
+                </>
               ) : (
                 <div className="empty" style={{ minHeight: '150px' }}>
                   <p className="emptyText">No orders placed by the bot yet</p>
@@ -524,44 +601,61 @@ export function App() {
 
             {/* Fills & Settlements */}
             <div className="panel">
-              <h2>Trade Fills & Settlement History</h2>
-              {(state.fills.length > 0 || state.settlements.length > 0) ? (
-                <DataTable headers={['Record Type', 'Time (ET)', 'Round ID', 'Details', 'Position/Winner', 'Price/Cost', 'Size/PnL']}>
-                  {/* Fills list */}
-                  {state.fills.slice(0, 50).map((fill) => (
-                    <tr key={`fill-${fill.id}`}>
-                      <td><Badge tone="neutral">FILL</Badge></td>
-                      <td className="mono">{formatEtTime(fill.matchedAt)}</td>
-                      <td className="mono" style={{ fontSize: '11px' }}>{fill.roundId}</td>
-                      <td>{outcomeLabel(fill.label)} Match</td>
-                      <td>
-                        <strong style={{ color: fill.side === 'BUY' ? 'var(--color-success)' : 'var(--color-danger)' }}>
-                          {fill.side}
-                        </strong>
-                      </td>
-                      <td className="mono">${fill.price.toFixed(3)}</td>
-                      <td className="mono">{fill.size.toFixed(1)}</td>
-                    </tr>
-                  ))}
-                  {/* Settlements list */}
-                  {state.settlements.slice(0, 50).map((settlement) => (
-                    <tr key={`settlement-${settlement.id}`}>
-                      <td><Badge tone="good">SETTLEMENT</Badge></td>
-                      <td className="mono">{formatEtTime(settlement.resolvedAt)}</td>
-                      <td className="mono" style={{ fontSize: '11px' }}>{settlement.roundId}</td>
-                      <td>{settlement.status.toUpperCase()}</td>
-                      <td>
-                        <Badge tone={settlement.winningLabel === 'YES' ? 'good' : settlement.winningLabel === 'NO' ? 'bad' : 'neutral'}>
-                          {settlement.winningLabel ? outcomeLabel(settlement.winningLabel) : 'pending'}
-                        </Badge>
-                      </td>
-                      <td className="mono">{formatMoney(settlement.totalCost)}</td>
-                      <td className={`mono ${settlement.pnl >= 0 ? 'pass' : 'fail'}`} style={{ fontWeight: 700 }}>
-                        {settlement.pnl >= 0 ? '+' : ''}{formatMoney(settlement.pnl)}
-                      </td>
-                    </tr>
-                  ))}
-                </DataTable>
+              <h2>
+                Trade Fills & Settlement History
+                <span className="panelSubTitle">{activityRecords.length} records</span>
+              </h2>
+              {activityRecords.length > 0 ? (
+                <>
+                  <DataTable headers={['Record Type', 'Time (ET)', 'Round ID', 'Details', 'Position/Winner', 'Price/Cost', 'Size/PnL']}>
+                    {activityPagination.pageRows.map((record) => {
+                      if (record.type === 'fill') {
+                        const { fill } = record;
+                        return (
+                          <tr key={record.id}>
+                            <td><Badge tone="neutral">FILL</Badge></td>
+                            <td className="mono">{formatEtTime(fill.matchedAt)}</td>
+                            <td className="mono" style={{ fontSize: '11px' }}>{fill.roundId}</td>
+                            <td>{outcomeLabel(fill.label)} Match</td>
+                            <td>
+                              <strong style={{ color: fill.side === 'BUY' ? 'var(--color-success)' : 'var(--color-danger)' }}>
+                                {fill.side}
+                              </strong>
+                            </td>
+                            <td className="mono">${fill.price.toFixed(3)}</td>
+                            <td className="mono">{fill.size.toFixed(1)}</td>
+                          </tr>
+                        );
+                      }
+
+                      const { settlement } = record;
+                      return (
+                        <tr key={record.id}>
+                          <td><Badge tone="good">SETTLEMENT</Badge></td>
+                          <td className="mono">{formatEtTime(settlement.resolvedAt)}</td>
+                          <td className="mono" style={{ fontSize: '11px' }}>{settlement.roundId}</td>
+                          <td>{settlement.status.toUpperCase()}</td>
+                          <td>
+                            <Badge tone={settlement.winningLabel === 'YES' ? 'good' : settlement.winningLabel === 'NO' ? 'bad' : 'neutral'}>
+                              {settlement.winningLabel ? outcomeLabel(settlement.winningLabel) : 'pending'}
+                            </Badge>
+                          </td>
+                          <td className="mono">{formatMoney(settlement.totalCost)}</td>
+                          <td className={`mono ${settlement.pnl >= 0 ? 'pass' : 'fail'}`} style={{ fontWeight: 700 }}>
+                            {settlement.pnl >= 0 ? '+' : ''}{formatMoney(settlement.pnl)}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </DataTable>
+                  <PaginationControls
+                    page={activityPagination.page}
+                    totalPages={activityPagination.totalPages}
+                    totalRows={activityRecords.length}
+                    pageSize={ACTIVITY_PAGE_SIZE}
+                    onPageChange={activityPagination.setPage}
+                  />
+                </>
               ) : (
                 <div className="empty" style={{ minHeight: '150px' }}>
                   <p className="emptyText">No filled trades or settled rounds found</p>
@@ -664,7 +758,7 @@ export function App() {
               {/* Console log box */}
               <div className="consoleWindow" ref={consoleRef}>
                 {filteredLogs.length > 0 ? (
-                  filteredLogs.map((log) => (
+                  logsPagination.pageRows.map((log) => (
                     <div key={log.id} className={`consoleLogLine ${log.level}`}>
                       <span className="logTime">{formatEtTime(log.createdAt)}</span>
                       <span className="logSource">[{log.source}]</span>
@@ -678,6 +772,13 @@ export function App() {
                   </div>
                 )}
               </div>
+              <PaginationControls
+                page={logsPagination.page}
+                totalPages={logsPagination.totalPages}
+                totalRows={filteredLogs.length}
+                pageSize={LOG_PAGE_SIZE}
+                onPageChange={logsPagination.setPage}
+              />
             </div>
           </div>
         )}
@@ -774,6 +875,38 @@ function DataTable({ headers, children }: { headers: string[]; children: React.R
         </thead>
         <tbody>{children}</tbody>
       </table>
+    </div>
+  );
+}
+
+function PaginationControls({
+  page,
+  totalPages,
+  totalRows,
+  pageSize,
+  onPageChange,
+}: {
+  page: number;
+  totalPages: number;
+  totalRows: number;
+  pageSize: number;
+  onPageChange: (page: number) => void;
+}) {
+  if (totalRows <= pageSize) return null;
+  const start = (page - 1) * pageSize + 1;
+  const end = Math.min(totalRows, page * pageSize);
+  return (
+    <div className="paginationBar">
+      <span className="paginationSummary">
+        Showing {start}-{end} of {totalRows}
+      </span>
+      <div className="paginationControls">
+        <button type="button" onClick={() => onPageChange(1)} disabled={page === 1}>First</button>
+        <button type="button" onClick={() => onPageChange(page - 1)} disabled={page === 1}>Previous</button>
+        <span className="paginationPage">Page {page} / {totalPages}</span>
+        <button type="button" onClick={() => onPageChange(page + 1)} disabled={page === totalPages}>Next</button>
+        <button type="button" onClick={() => onPageChange(totalPages)} disabled={page === totalPages}>Last</button>
+      </div>
     </div>
   );
 }

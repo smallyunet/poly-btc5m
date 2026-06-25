@@ -8,7 +8,7 @@ import { InMemoryStore } from './store';
 
 async function main() {
   const config = loadConfig();
-  const store = new InMemoryStore(config.executionMode, config.tickIntervalMs, { persistencePath: config.runtimeStatePath });
+  const store = new InMemoryStore(config.executionMode, config.tickIntervalMs, { persistencePath: config.runtimeStatePath, maxRecords: config.runtimeMaxRecords });
   const adapter = new PolymarketAdapter({
     clobApiUrl: config.clobApiUrl,
     chainId: config.chainId,

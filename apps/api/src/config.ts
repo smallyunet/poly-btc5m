@@ -14,6 +14,7 @@ export type AppConfig = {
   depositWallet?: string;
   tickIntervalMs: number;
   runtimeStatePath: string;
+  runtimeMaxRecords: number;
   rtdsWsUrl: string;
   clobWsUrl: string;
   dualLimitPrice: number;
@@ -25,6 +26,7 @@ export type AppConfig = {
   maxAbsDrift120s: number;
   maxAbsMomentum30s: number;
   singleFillGraceSeconds: number;
+  enableSingleExitStrategy: boolean;
   marketConfig: BtcMarketConfig;
 };
 
@@ -40,6 +42,7 @@ export function loadConfig(): AppConfig {
     depositWallet: process.env.POLYMARKET_DEPOSIT_WALLET,
     tickIntervalMs: parsePositiveInteger(process.env.BOT_TICK_MS, 2_000),
     runtimeStatePath: process.env.RUNTIME_STATE_PATH || path.resolve(process.cwd(), 'data/runtime-state.json'),
+    runtimeMaxRecords: parsePositiveInteger(process.env.RUNTIME_MAX_RECORDS, 1_000),
     rtdsWsUrl: rtdsWsUrl(process.env.POLYMARKET_RTDS_WS_URL),
     clobWsUrl: clobWsUrl(process.env.POLYMARKET_CLOB_WS_URL),
     dualLimitPrice: numberEnv('DUAL_LIMIT_PRICE', 0.45),
@@ -51,6 +54,7 @@ export function loadConfig(): AppConfig {
     maxAbsDrift120s: numberEnv('MAX_ABS_DRIFT_120S', 40),
     maxAbsMomentum30s: numberEnv('MAX_ABS_MOMENTUM_30S', 28),
     singleFillGraceSeconds: numberEnv('SINGLE_FILL_GRACE_SECONDS', 75),
+    enableSingleExitStrategy: booleanEnv('ENABLE_SINGLE_EXIT_STRATEGY', true),
     marketConfig: loadMarketConfig(),
   };
 }
@@ -77,6 +81,14 @@ function parsePositiveInteger(value: string | undefined, fallback: number): numb
 function numberEnv(name: string, fallback: number): number {
   const parsed = Number(process.env[name]);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function booleanEnv(name: string, fallback: boolean): boolean {
+  const raw = process.env[name]?.trim().toLowerCase();
+  if (!raw) return fallback;
+  if (['1', 'true', 'yes', 'on'].includes(raw)) return true;
+  if (['0', 'false', 'no', 'off'].includes(raw)) return false;
+  return fallback;
 }
 
 function rtdsWsUrl(value: string | undefined): string {

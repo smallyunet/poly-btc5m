@@ -39,7 +39,9 @@ export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, dat
   const risk = riskConfig(appConfig, store.getRuntime().executionMode !== 'live');
   const snapshot: StateSnapshot = { ...baseSnapshot, regime: classifyRegime(baseSnapshot, risk) };
   const entry = evaluateEntry(snapshot, risk);
-  const exit = evaluateExit(snapshot, positions, risk);
+  const exit = appConfig.enableSingleExitStrategy
+    ? evaluateExit(snapshot, positions, risk)
+    : { intents: [], rejected: [], diagnostics: [], checks: [] };
   const intents = [...exit.intents, ...entry.intents];
   store.recordIntents([...intents, ...exit.rejected, ...entry.rejected]);
   const executionDiagnostics = await executeLiveIntents({ appConfig, adapter, store, snapshot, intents, risk });
