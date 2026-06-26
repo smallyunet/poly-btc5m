@@ -163,6 +163,33 @@ function formatRatioPct(value: number | null | undefined): string {
   return value == null || !Number.isFinite(value) ? 'unknown' : `${formatNumber(value * 100, 1)}%`;
 }
 
+function clamp01(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(1, value));
+}
+
+function scoreBreakdown(features: DashboardState['latestSnapshot']['features']) {
+  return [
+    { label: 'Crosses', value: clamp01(features.cross120s / 4) * 25, max: 25, detail: `${features.cross120s} crosses` },
+    { label: 'Range', value: clamp01(features.rangeBps120s / 3) * 10, max: 10, detail: `${formatNumber(features.rangeBps120s, 2)}bps` },
+    { label: 'Two-sided', value: clamp01(features.minBiExcursionBps120s / 2) * 25, max: 25, detail: `${formatNumber(features.minBiExcursionBps120s, 2)}bps` },
+    { label: 'Balance', value: clamp01(features.excursionBalance120s) * 15, max: 15, detail: formatNumber(features.excursionBalance120s, 2) },
+    { label: 'Drift', value: clamp01(1 - features.driftRatio120s / 0.7) * 15, max: 15, detail: formatNumber(features.driftRatio120s, 2) },
+    { label: 'Momentum', value: clamp01(1 - features.momentumRatio30s / 0.8) * 10, max: 10, detail: formatNumber(features.momentumRatio30s, 2) },
+  ];
+}
+
+function scoreTier(score: number): { label: string; price: string; size: string; next: string; tone: 'good' | 'warn' | 'neutral' } {
+  if (score >= 95) return { label: 'A+ score tier', price: '0.460 cap', size: '1.25x size', next: 'top tier active', tone: 'good' };
+  if (score >= 90) return { label: 'A score tier', price: '0.450 cap', size: '1.00x size', next: `${formatNumber(95 - score, 1)} pts to A+`, tone: 'good' };
+  if (score >= 80) return { label: 'B score tier', price: '0.440 cap', size: '1.00x size', next: `${formatNumber(90 - score, 1)} pts to A`, tone: 'warn' };
+  return { label: 'Base score tier', price: '0.420 cap', size: '0.50x size', next: `${formatNumber(Math.max(0, 80 - score), 1)} pts to B`, tone: score >= 70 ? 'warn' : 'neutral' };
+}
+
+function blockerDetail(condition: StrategyCheck['conditions'][number]): string {
+  return `${condition.label}: ${condition.actual}`;
+}
+
 function sumShares(values: number[]): number {
   return values.reduce((total, value) => total + value, 0);
 }
@@ -450,8 +477,6 @@ export function App() {
   const terminalGaugeStatus = snapshot.round.strikeStatus === 'locked'
     ? (isBtcAboveStrike ? 'BTC >= OPEN (UP WINS)' : 'BTC < OPEN (DOWN WINS)')
     : 'PRE-ROUND OPEN ESTIMATE';
-  const buyPolicyStatus = !isRoundStarted ? 'PRE-START BUY WINDOW' : 'BUY BLOCKED AFTER START';
-  const buyPolicyTone = !isRoundStarted ? 'good' : 'bad';
   const entryStatusTone = entryCheck?.status === 'eligible' ? 'good' : entryCheck?.status === 'blocked' ? 'bad' : 'neutral';
   const entryStatusLabel = entryCheck?.status || 'not-loaded';
   const topBlockers = failedEntryConditions.slice(0, 4).map((condition) => condition.label).join(', ') || 'none';
@@ -470,6 +495,44 @@ export function App() {
   const participationSummary = participationStatus === 'enabled' && participation
     ? `top PnL ${formatNullableMoney(participationMaxPnl)} / visible sum ${formatMoney(participation.totalPositionPnl)}`
     : `${participationStatus}; not blocking`;
+  const decisionWindowCondition = conditionByLabel('Decision window');
+  const cooldownCondition = conditionByLabel('Single-fill cooldown');
+  const entryWindowPassed = decisionWindowCondition?.passed ?? false;
+  const scoreInfo = scoreTier(snapshot.features.chopScore);
+  const scoreParts = scoreBreakdown(snapshot.features);
+  const currentEntryIntents = state.intents.filter((intent) => (
+    intent.roundId === snapshot.round.id
+    && intent.strategy === 'BTC5M_DUAL_45'
+    && intent.status === 'generated'
+  ));
+  const previewShares = currentEntryIntents[0]?.shares;
+  const previewLabels = currentEntryIntents.map((intent) => outcomeLabel(intent.label)).join(' + ');
+  const entryActionDetail = entryCheck?.status === 'eligible'
+    ? `${previewLabels || 'UP + DOWN'} BUY LIMIT${previewShares == null ? '' : `, ${formatShares(previewShares)} shares/side`} @ ${entryLimit == null ? 'strategy limit' : entryLimit.toFixed(3)}`
+    : failedEntryConditions.slice(0, 3).map(blockerDetail).join(' / ') || entryCheck?.reason || 'waiting for strategy check';
+  const decisionState = entryCheck?.status === 'eligible'
+    ? { label: 'ENTER READY', detail: entryActionDetail, tone: 'good' as const }
+    : entryCooldownActive || cooldownCondition?.passed === false
+      ? { label: 'COOLDOWN', detail: cooldownCondition ? blockerDetail(cooldownCondition) : entryCooldownReason, tone: 'warn' as const }
+      : isRoundStarted
+        ? { label: 'POST-START MONITOR', detail: 'regular entries blocked; single-fill hedge may run in final window', tone: 'neutral' as const }
+        : !entryWindowPassed
+          ? { label: 'WAITING FOR T-30S', detail: decisionWindowCondition ? blockerDetail(decisionWindowCondition) : `${formatSeconds(secondsToStart)} to start`, tone: 'neutral' as const }
+          : { label: 'BLOCKED', detail: entryActionDetail, tone: 'bad' as const };
+  const buyPolicyStatus = entryCheck?.status === 'eligible'
+    ? 'CAN ENTER'
+    : isRoundStarted
+      ? 'REGULAR BUY OFF'
+      : entryWindowPassed
+        ? 'DECISION WINDOW'
+        : 'WAITING';
+  const buyPolicyTone = entryCheck?.status === 'eligible' ? 'good' : entryWindowPassed && !isRoundStarted ? 'warn' : isRoundStarted ? 'bad' : 'neutral';
+  const participationGateValue = participationStatus === 'enabled'
+    ? (participationDecisionPassed ? 'PASS' : 'WEAK')
+    : 'NOT BLOCKING';
+  const participationGateTone = participationStatus === 'enabled'
+    ? (participationDecisionPassed ? 'good' : 'warn')
+    : 'neutral';
 
   return (
     <Shell>
@@ -588,18 +651,35 @@ export function App() {
                   </div>
                   <Badge tone={entryStatusTone}>{entryStatusLabel}</Badge>
                 </div>
+                <div className={`decisionSummary ${decisionState.tone}`}>
+                  <div>
+                    <span className="decisionKicker">Current Action</span>
+                    <strong>{decisionState.label}</strong>
+                    <p>{decisionState.detail}</p>
+                  </div>
+                  <div className="decisionSummaryMeta">
+                    <span>{entryCheck?.reason || 'Strategy check has not loaded yet'}</span>
+                    <strong>{state.runtime.executionMode === 'live' ? 'LIVE EXECUTION' : 'MONITOR ONLY'}</strong>
+                  </div>
+                </div>
                 <div className="decisionGrid">
                   <DecisionMetric
                     label="BUY Policy"
                     value={buyPolicyStatus}
-                    detail={!isRoundStarted ? `${formatSeconds(secondsToStart)} before start; no expiry set` : 'execution rejects all trade intents'}
+                    detail={decisionWindowCondition?.actual || (isRoundStarted ? 'entries closed after start' : `${formatSeconds(secondsToStart)} before start`)}
                     tone={buyPolicyTone}
                   />
                   <DecisionMetric
                     label="BTC Dynamic Score"
                     value={formatNumber(snapshot.features.chopScore, 1)}
-                    detail={`range ${formatNumber(snapshot.features.rangeBps120s, 2)}bps / two-sided ${formatNumber(snapshot.features.minBiExcursionBps120s, 2)}bps / balance ${formatNumber(snapshot.features.excursionBalance120s, 2)}`}
+                    detail={`${scoreInfo.label}; ${scoreInfo.next}`}
                     tone={btcDecisionPassed ? 'good' : 'bad'}
+                  />
+                  <DecisionMetric
+                    label="Score Price / Size"
+                    value={`${scoreInfo.price} / ${scoreInfo.size}`}
+                    detail={entryLimit == null ? 'waiting for strategy cap' : `active limit ${entryLimit.toFixed(3)}, ${scoreInfo.next}`}
+                    tone={scoreInfo.tone}
                   />
                   <DecisionMetric
                     label="Entry Limit"
@@ -615,14 +695,14 @@ export function App() {
                   />
                   <DecisionMetric
                     label="Participation Gate"
-                    value={participationDecisionPassed ? 'PASS' : 'WEAK'}
+                    value={participationGateValue}
                     detail={participationSummary}
-                    tone={participationDecisionPassed ? 'good' : 'warn'}
+                    tone={participationGateTone}
                   />
                   <DecisionMetric
                     label="Post-Start Actions"
-                    value="SETTLEMENT ONLY"
-                    detail="no add, no exit, no rebalance after start"
+                    value="REGULAR OFF"
+                    detail="no add/sell/rebalance; capped single-fill hedge can run late"
                     tone="neutral"
                   />
                   <DecisionMetric
@@ -631,6 +711,26 @@ export function App() {
                     detail={topBlockers}
                     tone={failedEntryConditions.length ? 'warn' : 'good'}
                   />
+                </div>
+                <div className="scorePanel">
+                  <div className="scorePanelHeader">
+                    <span>Score Composition</span>
+                    <strong>{formatNumber(scoreParts.reduce((sum, part) => sum + part.value, 0), 1)} / 100</strong>
+                  </div>
+                  <div className="scoreBreakdown">
+                    {scoreParts.map((part) => (
+                      <div key={part.label} className="scorePart">
+                        <div className="scorePartTop">
+                          <span>{part.label}</span>
+                          <strong>{formatNumber(part.value, 1)} / {part.max}</strong>
+                        </div>
+                        <div className="scoreTrack">
+                          <div className="scoreFill" style={{ width: `${Math.max(2, Math.min(100, (part.value / part.max) * 100))}%` }}></div>
+                        </div>
+                        <em>{part.detail}</em>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
               
