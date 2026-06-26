@@ -100,6 +100,12 @@ async function executeOneHedge(params: ExecuteHedgesParams, candidate: SingleFil
   const plan = planSingleFillHedge({ candidate, orders: params.store.roundOrders(candidate.roundId), orderbooks: params.orderbooks, appConfig: params.appConfig });
 
   if (!plan.ok) {
+    params.store.recordSingleFillHedgeOutcome({
+      roundId: candidate.roundId,
+      status: 'blocked',
+      reason: plan.reason,
+      recordedAt: new Date().toISOString(),
+    });
     if (!['NO_MATERIAL_SINGLE_FILL_EXPOSURE', 'NOT_IN_HEDGE_WINDOW', 'HEDGE_TOO_CLOSE_TO_EXPIRY'].includes(plan.reason)) {
       params.store.recordRuntimeLog({ level: 'warn', source: 'execution', message: `Single-fill hedge skipped for ${candidate.roundId}: ${plan.reason}.` });
     }
@@ -112,6 +118,12 @@ async function executeOneHedge(params: ExecuteHedgesParams, candidate: SingleFil
 
   const cancelResult = await cancelMissingSideOrders(params, candidate.roundId, plan.intent.label);
   if (!cancelResult.ok) {
+    params.store.recordSingleFillHedgeOutcome({
+      roundId: candidate.roundId,
+      status: 'failed',
+      reason: cancelResult.reason,
+      recordedAt: new Date().toISOString(),
+    });
     params.store.recordIntents([plan.intent]);
     params.store.updateIntent(plan.intent.id, { status: 'failed', rejectionReason: cancelResult.reason });
     return `Single-fill hedge blocked for ${plan.intent.label}: ${cancelResult.reason}.`;
@@ -119,21 +131,47 @@ async function executeOneHedge(params: ExecuteHedgesParams, candidate: SingleFil
 
   await reconcileCandidateFills(params, params.store.roundOrders(candidate.roundId));
   const finalPlan = planSingleFillHedge({ candidate, orders: params.store.roundOrders(candidate.roundId), orderbooks: params.orderbooks, appConfig: params.appConfig });
-  if (!finalPlan.ok) return null;
+  if (!finalPlan.ok) {
+    params.store.recordSingleFillHedgeOutcome({
+      roundId: candidate.roundId,
+      status: 'blocked',
+      reason: finalPlan.reason,
+      recordedAt: new Date().toISOString(),
+    });
+    return null;
+  }
   params.store.recordIntents([finalPlan.intent]);
 
   if (params.store.getRuntime().executionMode !== 'live') {
     params.store.recordOrder(localHedgeOrder(candidate, finalPlan.intent, executionKey));
     params.store.updateIntent(finalPlan.intent.id, { status: 'executed' });
+    params.store.recordSingleFillHedgeOutcome({
+      roundId: candidate.roundId,
+      status: 'monitor',
+      reason: 'MONITOR_HEDGE_RECORDED',
+      recordedAt: new Date().toISOString(),
+    });
     return `Monitor mode recorded single-fill hedge for ${finalPlan.intent.label} @ ${finalPlan.intent.limitPrice.toFixed(3)}.`;
   }
 
   if (!params.appConfig.ownerPrivateKey?.trim()) {
     params.store.updateIntent(finalPlan.intent.id, { status: 'failed', rejectionReason: 'OWNER_PRIVATE_KEY_MISSING' });
+    params.store.recordSingleFillHedgeOutcome({
+      roundId: candidate.roundId,
+      status: 'failed',
+      reason: 'OWNER_PRIVATE_KEY_MISSING',
+      recordedAt: new Date().toISOString(),
+    });
     return 'Single-fill hedge blocked: OWNER_PRIVATE_KEY_MISSING.';
   }
   if (!params.appConfig.depositWallet?.trim()) {
     params.store.updateIntent(finalPlan.intent.id, { status: 'failed', rejectionReason: 'POLYMARKET_DEPOSIT_WALLET_MISSING' });
+    params.store.recordSingleFillHedgeOutcome({
+      roundId: candidate.roundId,
+      status: 'failed',
+      reason: 'POLYMARKET_DEPOSIT_WALLET_MISSING',
+      recordedAt: new Date().toISOString(),
+    });
     return 'Single-fill hedge blocked: POLYMARKET_DEPOSIT_WALLET_MISSING.';
   }
 
@@ -150,6 +188,12 @@ async function executeOneHedge(params: ExecuteHedgesParams, candidate: SingleFil
       rawResponse: posted.raw,
     });
     params.store.updateIntent(finalPlan.intent.id, { status: posted.ok ? 'executed' : 'failed', rejectionReason: posted.ok ? undefined : posted.error || 'CLOB_POST_FAILED' });
+    params.store.recordSingleFillHedgeOutcome({
+      roundId: candidate.roundId,
+      status: posted.ok ? 'posted' : 'failed',
+      reason: posted.ok ? 'HEDGE_POSTED' : posted.error || 'CLOB_POST_FAILED',
+      recordedAt: new Date().toISOString(),
+    });
     params.store.recordRuntimeLog({
       level: posted.ok ? 'warn' : 'error',
       source: 'execution',
@@ -163,6 +207,12 @@ async function executeOneHedge(params: ExecuteHedgesParams, candidate: SingleFil
     const message = error instanceof Error ? error.message : String(error);
     params.store.recordOrder({ ...localHedgeOrder(candidate, finalPlan.intent, executionKey), status: 'failed', error: message, rawResponse: { error: message } });
     params.store.updateIntent(finalPlan.intent.id, { status: 'failed', rejectionReason: message });
+    params.store.recordSingleFillHedgeOutcome({
+      roundId: candidate.roundId,
+      status: 'failed',
+      reason: message,
+      recordedAt: new Date().toISOString(),
+    });
     params.store.recordRuntimeLog({ level: 'error', source: 'execution', message: `Single-fill hedge failed for ${finalPlan.intent.label}: ${message}.` });
     return `Single-fill hedge failed for ${finalPlan.intent.label}: ${message}.`;
   }

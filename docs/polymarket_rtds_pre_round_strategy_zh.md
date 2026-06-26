@@ -568,6 +568,22 @@ no hedge and original side loses => -0.44/share
 
 因此补单风控的目标是降低 single-fill 尾部损失，而不是无条件提高收益。价格超过上限时，worker 不会追单。
 
+### 单侧成交后的 cooldown
+
+最终结算复盘仍然是 cooldown 的触发点。只要最终 BUY fills 已经成对，说明 hedge 成功或原订单后来成交，不会触发 single-fill cooldown。
+
+如果最终仍是 single，cooldown 根据最后窗口 hedge 结果决定：
+
+```text
+base single                    => SINGLE_FILL_COOLDOWN_BASE_MS              默认 30m
+hedge blocked by price/cost cap => SINGLE_FILL_COOLDOWN_PRICE_CAP_MS         默认 60m
+hedge failed by API/cancel/post => SINGLE_FILL_COOLDOWN_EXECUTION_MS         默认 2h
+2h 内第 2 次 final single       => max(current, SINGLE_FILL_COOLDOWN_SECOND_MS) 默认 2h
+2h 内第 3 次及以上              => max(current, SINGLE_FILL_COOLDOWN_THIRD_MS)  默认 4h
+```
+
+这个规则把 4h 从固定主观值改成递增故障保护：普通 single 不会直接跳过 48 轮，只有连续 single 或执行层失败才会升到长暂停。
+
 ---
 
 ## 13. Dashboard 展示面

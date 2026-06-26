@@ -21,6 +21,22 @@ export type SingleFillHedgeCandidate = {
   noTokenId: string;
 };
 
+export type SingleFillHedgeOutcome = {
+  roundId: string;
+  status: 'posted' | 'blocked' | 'failed' | 'monitor';
+  reason: string;
+  recordedAt: string;
+};
+
+export type SingleFillCooldownPolicy = {
+  baseMs: number;
+  priceCapMs: number;
+  executionMs: number;
+  repeatWindowMs: number;
+  secondMs: number;
+  thirdMs: number;
+};
+
 type StoreOptions = {
   persistencePath?: string | false;
   maxRecords?: number;
@@ -37,6 +53,8 @@ type PersistedRuntimeState = {
   singleFillCooldown?: SingleFillCooldownRecord | null;
   singleFillCooldownRoundIds?: string[];
   pendingSingleFillReviewRoundIds?: string[];
+  singleFillHedgeOutcomes?: Record<string, SingleFillHedgeOutcome>;
+  singleFillCooldownEvents?: SingleFillCooldownEvent[];
 };
 
 type SingleFillCooldownRecord = {
@@ -46,9 +64,20 @@ type SingleFillCooldownRecord = {
   expiresAt: string;
   yesShares: number;
   noShares: number;
+  category?: string;
+  hedgeReason?: string;
+  recentSingleFillCount?: number;
+};
+
+type SingleFillCooldownEvent = {
+  roundId: string;
+  triggeredAt: string;
+  category: string;
 };
 
 const FINAL_SINGLE_FILL_GRACE_MS = 60_000;
+const PRICE_CAP_HEDGE_REASONS = new Set(['HEDGE_ASK_ABOVE_CAP', 'HEDGE_PAIR_COST_ABOVE_CAP']);
+const BENIGN_HEDGE_REASONS = new Set(['NO_MATERIAL_SINGLE_FILL_EXPOSURE', 'NOT_IN_HEDGE_WINDOW', 'HEDGE_TOO_CLOSE_TO_EXPIRY']);
 
 export class InMemoryStore {
   private runtime: BotRuntimeStatus;
@@ -62,6 +91,8 @@ export class InMemoryStore {
   private singleFillCooldown: SingleFillCooldownRecord | null = null;
   private singleFillCooldownRoundIds = new Set<string>();
   private pendingSingleFillReviewRoundIds = new Set<string>();
+  private singleFillHedgeOutcomes = new Map<string, SingleFillHedgeOutcome>();
+  private singleFillCooldownEvents: SingleFillCooldownEvent[] = [];
   private runtimeLogs: RuntimeLogRecord[] = [];
   private strategyChecks: StrategyCheck[] = [];
   private readonly persistencePath?: string;
@@ -308,7 +339,13 @@ export class InMemoryStore {
     return this.singleFillCooldown;
   }
 
-  maybeStartSingleFillCooldown(newFills: FillRecord[], cooldownMs: number, nowMs = Date.now()): SingleFillCooldownRecord | null {
+  recordSingleFillHedgeOutcome(outcome: SingleFillHedgeOutcome): void {
+    this.singleFillHedgeOutcomes.set(outcome.roundId, outcome);
+    this.persistState();
+  }
+
+  maybeStartSingleFillCooldown(newFills: FillRecord[], cooldown: number | SingleFillCooldownPolicy, nowMs = Date.now()): SingleFillCooldownRecord | null {
+    const policy = normalizeCooldownPolicy(cooldown);
     let dirty = false;
     for (const fill of newFills) {
       if (fill.side !== 'BUY' || this.singleFillCooldownRoundIds.has(fill.roundId)) continue;
@@ -331,19 +368,27 @@ export class InMemoryStore {
         continue;
       }
 
+      const cooldownDecision = this.singleFillCooldownDecision(roundId, policy, nowMs);
       const record: SingleFillCooldownRecord = {
         roundId,
         triggeredAt: new Date(nowMs).toISOString(),
         finalizedAt: new Date(nowMs).toISOString(),
-        expiresAt: new Date(nowMs + cooldownMs).toISOString(),
+        expiresAt: new Date(nowMs + cooldownDecision.cooldownMs).toISOString(),
         yesShares: exposure.yesShares,
         noShares: exposure.noShares,
+        category: cooldownDecision.category,
+        hedgeReason: cooldownDecision.hedgeReason,
+        recentSingleFillCount: cooldownDecision.recentCount,
       };
+      this.singleFillCooldownEvents = [
+        { roundId, triggeredAt: record.triggeredAt, category: cooldownDecision.category },
+        ...this.singleFillCooldownEvents.filter((event) => nowMs - toTime(event.triggeredAt) <= policy.repeatWindowMs),
+      ].slice(0, 100);
       this.singleFillCooldown = record;
       this.runtime = {
         ...this.runtime,
         entryCooldownUntil: record.expiresAt,
-        entryCooldownReason: `single fill on ${roundId}`,
+        entryCooldownReason: `single fill on ${roundId} (${cooldownDecision.category})`,
       };
       this.persistState();
       return record;
@@ -401,6 +446,8 @@ export class InMemoryStore {
       this.singleFillCooldown = isSingleFillCooldownLike(parsed.singleFillCooldown) ? parsed.singleFillCooldown : null;
       this.singleFillCooldownRoundIds = new Set(Array.isArray(parsed.singleFillCooldownRoundIds) ? parsed.singleFillCooldownRoundIds.filter((roundId): roundId is string => typeof roundId === 'string') : []);
       this.pendingSingleFillReviewRoundIds = new Set(Array.isArray(parsed.pendingSingleFillReviewRoundIds) ? parsed.pendingSingleFillReviewRoundIds.filter((roundId): roundId is string => typeof roundId === 'string') : []);
+      this.singleFillHedgeOutcomes = new Map(Object.entries(parsed.singleFillHedgeOutcomes || {}).filter((entry): entry is [string, SingleFillHedgeOutcome] => isSingleFillHedgeOutcomeLike(entry[1])));
+      this.singleFillCooldownEvents = Array.isArray(parsed.singleFillCooldownEvents) ? parsed.singleFillCooldownEvents.filter(isSingleFillCooldownEventLike).slice(0, 100) : [];
       this.runtime = this.runtimeWithCooldown();
       this.reconcileOrderFillStatus();
     } catch (error) {
@@ -452,6 +499,8 @@ export class InMemoryStore {
         singleFillCooldown: this.singleFillCooldown,
         singleFillCooldownRoundIds: [...this.singleFillCooldownRoundIds],
         pendingSingleFillReviewRoundIds: [...this.pendingSingleFillReviewRoundIds],
+        singleFillHedgeOutcomes: Object.fromEntries(this.singleFillHedgeOutcomes),
+        singleFillCooldownEvents: this.singleFillCooldownEvents,
       };
       const tmpPath = `${this.persistencePath}.${process.pid}.tmp`;
       fs.writeFileSync(tmpPath, JSON.stringify(payload, null, 2));
@@ -470,7 +519,25 @@ export class InMemoryStore {
     return {
       ...this.runtime,
       entryCooldownUntil: activeCooldown.expiresAt,
-      entryCooldownReason: `single fill on ${activeCooldown.roundId}`,
+      entryCooldownReason: `single fill on ${activeCooldown.roundId}${activeCooldown.category ? ` (${activeCooldown.category})` : ''}`,
+    };
+  }
+
+  private singleFillCooldownDecision(roundId: string, policy: SingleFillCooldownPolicy, nowMs: number): { cooldownMs: number; category: string; hedgeReason?: string; recentCount: number } {
+    const hedgeOutcome = this.singleFillHedgeOutcomes.get(roundId);
+    const category = cooldownCategory(hedgeOutcome);
+    const baseMs = category === 'price-cap'
+      ? policy.priceCapMs
+      : category === 'execution'
+        ? policy.executionMs
+        : policy.baseMs;
+    const recentCount = this.singleFillCooldownEvents.filter((event) => nowMs - toTime(event.triggeredAt) <= policy.repeatWindowMs).length + 1;
+    const repeatMs = recentCount >= 3 ? policy.thirdMs : recentCount >= 2 ? policy.secondMs : 0;
+    return {
+      cooldownMs: Math.max(baseMs, repeatMs),
+      category,
+      hedgeReason: hedgeOutcome?.reason,
+      recentCount,
     };
   }
 
@@ -527,6 +594,45 @@ function isSingleFillCooldownLike(value: unknown): value is SingleFillCooldownRe
     && typeof item.expiresAt === 'string'
     && typeof item.yesShares === 'number'
     && typeof item.noShares === 'number';
+}
+
+function isSingleFillHedgeOutcomeLike(value: unknown): value is SingleFillHedgeOutcome {
+  if (!value || typeof value !== 'object') return false;
+  const item = value as Partial<SingleFillHedgeOutcome>;
+  return typeof item.roundId === 'string'
+    && typeof item.recordedAt === 'string'
+    && typeof item.reason === 'string'
+    && (item.status === 'posted' || item.status === 'blocked' || item.status === 'failed' || item.status === 'monitor');
+}
+
+function isSingleFillCooldownEventLike(value: unknown): value is SingleFillCooldownEvent {
+  if (!value || typeof value !== 'object') return false;
+  const item = value as Partial<SingleFillCooldownEvent>;
+  return typeof item.roundId === 'string'
+    && typeof item.triggeredAt === 'string'
+    && typeof item.category === 'string';
+}
+
+function normalizeCooldownPolicy(value: number | SingleFillCooldownPolicy): SingleFillCooldownPolicy {
+  if (typeof value === 'number') {
+    return {
+      baseMs: value,
+      priceCapMs: value,
+      executionMs: value,
+      repeatWindowMs: 0,
+      secondMs: value,
+      thirdMs: value,
+    };
+  }
+  return value;
+}
+
+function cooldownCategory(outcome: SingleFillHedgeOutcome | undefined): string {
+  if (!outcome) return 'unhedged';
+  if (outcome.status === 'posted' || outcome.status === 'monitor') return 'hedge-unfilled';
+  if (PRICE_CAP_HEDGE_REASONS.has(outcome.reason)) return 'price-cap';
+  if (BENIGN_HEDGE_REASONS.has(outcome.reason)) return 'unhedged';
+  return 'execution';
 }
 
 function matchingOrderFills(order: OrderRecord, fills: FillRecord[]): FillRecord[] {

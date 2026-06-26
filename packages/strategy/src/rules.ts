@@ -16,6 +16,7 @@ export const STRATEGY_RULES: StrategyRule[] = [
     exitRules: [
       'If both sides fill, hold paired exposure through settlement.',
       'If only one side fills, a separate last-window hedge rule may buy the missing side with a capped aggressive limit order.',
+      'Final single-sided fills use adaptive cooldown: short for ordinary/price-cap misses, longer for execution failures, and escalating for repeats.',
       'Outside the configured single-fill hedge window, the bot does not add, sell, or rebalance after the round starts.',
       'Execution rejects all SELL intents and rejects normal entry intents after round start; hedge intents use the separate capped hedge gate.',
     ],

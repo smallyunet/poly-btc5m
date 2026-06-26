@@ -36,6 +36,12 @@ export type AppConfig = {
   maxDriftRatio120s: number;
   maxMomentumRatio30s: number;
   singleFillCooldownMs: number;
+  singleFillCooldownBaseMs: number;
+  singleFillCooldownPriceCapMs: number;
+  singleFillCooldownExecutionMs: number;
+  singleFillCooldownRepeatWindowMs: number;
+  singleFillCooldownSecondMs: number;
+  singleFillCooldownThirdMs: number;
   singleFillHedgeEnabled: boolean;
   singleFillHedgeWindowSeconds: number;
   singleFillHedgeMinSecondsToEnd: number;
@@ -80,6 +86,12 @@ export function loadConfig(): AppConfig {
     maxDriftRatio120s: numberEnv('MAX_DRIFT_RATIO_120S', 0.45),
     maxMomentumRatio30s: numberEnv('MAX_MOMENTUM_RATIO_30S', 0.55),
     singleFillCooldownMs: parsePositiveInteger(process.env.SINGLE_FILL_COOLDOWN_MS, 4 * 60 * 60_000),
+    singleFillCooldownBaseMs: parsePositiveInteger(process.env.SINGLE_FILL_COOLDOWN_BASE_MS, 30 * 60_000),
+    singleFillCooldownPriceCapMs: parsePositiveInteger(process.env.SINGLE_FILL_COOLDOWN_PRICE_CAP_MS, 60 * 60_000),
+    singleFillCooldownExecutionMs: parsePositiveInteger(process.env.SINGLE_FILL_COOLDOWN_EXECUTION_MS, 2 * 60 * 60_000),
+    singleFillCooldownRepeatWindowMs: parsePositiveInteger(process.env.SINGLE_FILL_COOLDOWN_REPEAT_WINDOW_MS, 2 * 60 * 60_000),
+    singleFillCooldownSecondMs: parsePositiveInteger(process.env.SINGLE_FILL_COOLDOWN_SECOND_MS, 2 * 60 * 60_000),
+    singleFillCooldownThirdMs: parsePositiveInteger(process.env.SINGLE_FILL_COOLDOWN_THIRD_MS, 4 * 60 * 60_000),
     singleFillHedgeEnabled: booleanEnv('SINGLE_FILL_HEDGE_ENABLED', true),
     singleFillHedgeWindowSeconds: parsePositiveInteger(process.env.SINGLE_FILL_HEDGE_WINDOW_SECONDS, 30),
     singleFillHedgeMinSecondsToEnd: parsePositiveInteger(process.env.SINGLE_FILL_HEDGE_MIN_SECONDS_TO_END, 5),

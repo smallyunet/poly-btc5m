@@ -60,6 +60,46 @@ test('clears an active cooldown if later fills make the round paired', () => {
   assert.equal(store.getActiveEntryCooldown(nowMs), null);
 });
 
+test('uses shorter cooldown for price-capped single-fill hedge misses', () => {
+  const nowMs = Date.now();
+  const roundId = roundIdFromStart(nowMs - 7 * 60_000);
+  const store = new InMemoryStore('live', 2_000, { persistencePath: false });
+
+  store.recordFills([fill(roundId, 'YES')]);
+  store.recordSingleFillHedgeOutcome({
+    roundId,
+    status: 'blocked',
+    reason: 'HEDGE_ASK_ABOVE_CAP',
+    recordedAt: new Date(nowMs).toISOString(),
+  });
+  store.maybeStartSingleFillCooldown([fill(roundId, 'YES')], policy(), nowMs - 2 * 60_000);
+
+  const cooldown = store.maybeStartSingleFillCooldown([], policy(), nowMs);
+
+  assert.equal(cooldown?.category, 'price-cap');
+  assert.equal(cooldown?.hedgeReason, 'HEDGE_ASK_ABOVE_CAP');
+  assert.equal(new Date(cooldown?.expiresAt || 0).getTime(), nowMs + 60 * 60_000);
+});
+
+test('escalates cooldown for repeated final single fills inside the repeat window', () => {
+  const nowMs = Date.now();
+  const firstRoundId = roundIdFromStart(nowMs - 100 * 60_000);
+  const secondRoundId = roundIdFromStart(nowMs - 7 * 60_000);
+  const store = new InMemoryStore('live', 2_000, { persistencePath: false });
+
+  store.recordFills([fill(firstRoundId, 'YES')]);
+  store.maybeStartSingleFillCooldown([fill(firstRoundId, 'YES')], policy(), nowMs - 95 * 60_000);
+  store.maybeStartSingleFillCooldown([], policy(), nowMs - 94 * 60_000);
+
+  store.recordFills([fill(secondRoundId, 'NO')]);
+  store.maybeStartSingleFillCooldown([fill(secondRoundId, 'NO')], policy(), nowMs - 2 * 60_000);
+  const cooldown = store.maybeStartSingleFillCooldown([], policy(), nowMs);
+
+  assert.equal(cooldown?.roundId, secondRoundId);
+  assert.equal(cooldown?.recentSingleFillCount, 2);
+  assert.equal(new Date(cooldown?.expiresAt || 0).getTime(), nowMs + 2 * 60 * 60_000);
+});
+
 test('does not scan historical fills without a pending final review', () => {
   const nowMs = Date.now();
   const roundId = roundIdFromStart(nowMs - 7 * 60_000);
@@ -98,6 +138,17 @@ test('clears legacy cooldown records that were not created from final review', (
 
 function roundIdFromStart(startMs: number): string {
   return `btc-updown-5m-${Math.floor(startMs / 1000)}`;
+}
+
+function policy() {
+  return {
+    baseMs: 30 * 60_000,
+    priceCapMs: 60 * 60_000,
+    executionMs: 2 * 60 * 60_000,
+    repeatWindowMs: 2 * 60 * 60_000,
+    secondMs: 2 * 60 * 60_000,
+    thirdMs: 4 * 60 * 60_000,
+  };
 }
 
 function fill(roundId: string, label: 'YES' | 'NO'): FillRecord {

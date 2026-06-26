@@ -564,6 +564,22 @@ no hedge and original side loses => -0.44/share
 
 The hedge is therefore a tail-loss reducer, not an unconditional return enhancer. If the cap is exceeded, the worker does not chase.
 
+### Cooldown After One Side Fills
+
+Final-round review is still the cooldown trigger. If final BUY fills are paired, the hedge succeeded or the original orders later filled, so no single-fill cooldown starts.
+
+If the final state is still single-sided, cooldown duration depends on the final-window hedge outcome:
+
+```text
+base single                    => SINGLE_FILL_COOLDOWN_BASE_MS              default 30m
+hedge blocked by price/cost cap => SINGLE_FILL_COOLDOWN_PRICE_CAP_MS         default 60m
+hedge failed by API/cancel/post => SINGLE_FILL_COOLDOWN_EXECUTION_MS         default 2h
+2nd final single inside 2h      => max(current, SINGLE_FILL_COOLDOWN_SECOND_MS) default 2h
+3rd+ final single inside 2h     => max(current, SINGLE_FILL_COOLDOWN_THIRD_MS)  default 4h
+```
+
+This turns 4h from a fixed subjective pause into an escalation guard: ordinary singles do not immediately skip about 48 rounds, while repeated singles or execution failures still force a long pause.
+
 ---
 
 ## 13. Dashboard Surfaces

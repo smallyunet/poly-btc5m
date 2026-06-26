@@ -162,7 +162,14 @@ async function reconcileTrackedOrders(appConfig: AppConfig, adapter: PolymarketA
 
 function recordFillsAndMaybeCooldown(appConfig: AppConfig, store: InMemoryStore, fills: FillRecord[]): void {
   const newFills = store.recordFills(fills);
-  const cooldown = store.maybeStartSingleFillCooldown(newFills, appConfig.singleFillCooldownMs);
+  const cooldown = store.maybeStartSingleFillCooldown(newFills, {
+    baseMs: appConfig.singleFillCooldownBaseMs,
+    priceCapMs: appConfig.singleFillCooldownPriceCapMs,
+    executionMs: appConfig.singleFillCooldownExecutionMs,
+    repeatWindowMs: appConfig.singleFillCooldownRepeatWindowMs,
+    secondMs: appConfig.singleFillCooldownSecondMs,
+    thirdMs: appConfig.singleFillCooldownThirdMs,
+  });
   if (!cooldown) return;
   store.recordRuntimeLog({
     level: 'warn',
