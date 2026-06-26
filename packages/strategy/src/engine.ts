@@ -20,6 +20,7 @@ export type StrategyRiskConfig = {
   minBiExcursionBps120s: number;
   maxDriftRatio120s: number;
   maxMomentumRatio30s: number;
+  maxEntryQueueImbalance: number;
   entryOrderTtlSeconds: number;
   entryCooldownUntil?: string;
   entryCooldownReason?: string;
@@ -69,6 +70,7 @@ export function evaluateEntry(snapshot: StateSnapshot, config: StrategyRiskConfi
   const shares = entryShares(snapshot, config);
   const pairCost = limitPrice * 2;
   const pairEdge = 1 - pairCost;
+  const queue = entryQueueStats(yesQuote, noQuote, limitPrice);
   const cooldownUntilMs = config.entryCooldownUntil ? new Date(config.entryCooldownUntil).getTime() : 0;
   const cooldownActive = Number.isFinite(cooldownUntilMs) && cooldownUntilMs > Date.now();
 
@@ -79,6 +81,7 @@ export function evaluateEntry(snapshot: StateSnapshot, config: StrategyRiskConfi
   if (shares < config.minOrderShares) reasons.push('ORDER_SHARES_TOO_SMALL');
   if (limitPrice <= 0 || limitPrice >= 1) reasons.push('INVALID_DUAL_LIMIT_PRICE');
   if (pairCost > config.maxPairCost + 0.000001) reasons.push('PAIR_COST_TOO_HIGH');
+  if (queue.ratio != null && queue.ratio > config.maxEntryQueueImbalance) reasons.push('ENTRY_QUEUE_IMBALANCE');
 
   const base = [
     makeIntent(snapshot, 'YES', snapshot.round.yesTokenId, shares, limitPrice, config),
@@ -112,6 +115,7 @@ export function evaluateEntry(snapshot: StateSnapshot, config: StrategyRiskConfi
       condition('momentum ratio capped', snapshot.features.momentumRatio30s <= config.maxMomentumRatio30s, `${snapshot.features.momentumRatio30s.toFixed(2)} / ${config.maxMomentumRatio30s}`),
       condition('YES book tradable', buyQuoteReady(yesQuote, config), quoteAgeLabel(yesQuote)),
       condition('NO book tradable', buyQuoteReady(noQuote, config), quoteAgeLabel(noQuote)),
+      condition('Entry queue imbalance', queue.ratio == null || queue.ratio <= config.maxEntryQueueImbalance, queueLabel(queue, config.maxEntryQueueImbalance)),
       condition('Dynamic limit price', limitPrice > 0 && limitPrice < 1, `${limitPrice.toFixed(3)} (${config.dynamicLimitEnabled ? 'score policy' : 'fixed'})`),
       condition('Pair cost cap', pairCost <= config.maxPairCost + 0.000001, `${pairCost.toFixed(3)} / ${config.maxPairCost.toFixed(3)}, edge ${pairEdge.toFixed(3)}`),
       condition('Dynamic shares', shares >= config.minOrderShares, `${shares.toFixed(2)} / base ${config.orderSharesPerSide.toFixed(2)} / max ${config.maxOrderSharesPerSide.toFixed(2)} (${config.dynamicSharesEnabled ? 'score policy' : 'fixed'})`),
@@ -222,6 +226,31 @@ function quoteAgeLabel(quote: OrderBookQuote | undefined): string {
   const ageSeconds = (Date.now() - new Date(quote.updatedAt).getTime()) / 1000;
   const ask = quote.bestAsk == null ? ', ask missing' : '';
   return `${quote.source}, ${Number.isFinite(ageSeconds) ? ageSeconds.toFixed(1) : 'unknown'}s old${ask}`;
+}
+
+function entryQueueStats(yesQuote: OrderBookQuote | undefined, noQuote: OrderBookQuote | undefined, limitPrice: number): { yesBidQueue: number | null; noBidQueue: number | null; ratio: number | null } {
+  const yesBidQueue = bidQueueAtOrAbove(yesQuote, limitPrice);
+  const noBidQueue = bidQueueAtOrAbove(noQuote, limitPrice);
+  if (yesBidQueue == null || noBidQueue == null) return { yesBidQueue, noBidQueue, ratio: null };
+  const smaller = Math.min(yesBidQueue, noBidQueue);
+  const larger = Math.max(yesBidQueue, noBidQueue);
+  if (smaller <= 0 && larger <= 0) return { yesBidQueue, noBidQueue, ratio: null };
+  if (smaller <= 0) return { yesBidQueue, noBidQueue, ratio: Infinity };
+  return { yesBidQueue, noBidQueue, ratio: larger / smaller };
+}
+
+function bidQueueAtOrAbove(quote: OrderBookQuote | undefined, limitPrice: number): number | null {
+  if (!quote?.bids?.length) return null;
+  return quote.bids
+    .filter((level) => level.price >= limitPrice)
+    .reduce((total, level) => total + level.size, 0);
+}
+
+function queueLabel(queue: { yesBidQueue: number | null; noBidQueue: number | null; ratio: number | null }, maxRatio: number): string {
+  const yes = queue.yesBidQueue == null ? 'unknown' : queue.yesBidQueue.toFixed(2);
+  const no = queue.noBidQueue == null ? 'unknown' : queue.noBidQueue.toFixed(2);
+  const ratio = queue.ratio == null ? 'unknown' : Number.isFinite(queue.ratio) ? queue.ratio.toFixed(2) : 'infinite';
+  return `YES ${yes} / NO ${no} / ratio ${ratio} / max ${maxRatio.toFixed(2)}`;
 }
 
 function condition(label: string, passed: boolean, actual: string): StrategyCondition {

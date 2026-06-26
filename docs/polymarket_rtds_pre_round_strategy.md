@@ -273,6 +273,7 @@ YES and NO books are tradable
 shares >= MIN_ORDER_SHARES
 limit price is valid
 pair cost <= MAX_PAIR_COST
+entry-limit bid queue imbalance <= MAX_ENTRY_QUEUE_IMBALANCE
 ```
 
 Orderbook tradable means:
@@ -283,6 +284,22 @@ book.source != mock
 book age <= MAX_ORDERBOOK_AGE_SECONDS
 bestAsk exists
 ```
+
+Entry queue imbalance uses YES/NO bid levels at or above `limitPrice`:
+
+```text
+yesBidQueue = sum(YES bids where price >= limitPrice)
+noBidQueue = sum(NO bids where price >= limitPrice)
+queueRatio = max(yesBidQueue, noBidQueue) / min(yesBidQueue, noBidQueue)
+```
+
+Current default:
+
+```text
+MAX_ENTRY_QUEUE_IMBALANCE=5
+```
+
+This is an extreme-case execution-quality filter, not a core prediction signal. Mild imbalance does not block entry. If the websocket currently has only top quote data and no full bid levels, the check is shown as `unknown` and does not block entry.
 
 Default execution size settings:
 

@@ -95,6 +95,7 @@ MIN_RANGE_BPS_120S=3
 MIN_BI_EXCURSION_BPS_120S=1
 MAX_DRIFT_RATIO_120S=0.45
 MAX_MOMENTUM_RATIO_30S=0.55
+MAX_ENTRY_QUEUE_IMBALANCE=5
 SINGLE_FILL_COOLDOWN_BASE_MS=1800000
 SINGLE_FILL_COOLDOWN_PRICE_CAP_MS=3600000
 SINGLE_FILL_COOLDOWN_EXECUTION_MS=7200000
@@ -117,6 +118,7 @@ Live entry orders are configured as CLOB limit order `price + size`:
 - `DUAL_LIMIT_PRICE` is the fixed fallback price when dynamic limit pricing is disabled.
 - With `DYNAMIC_SHARES_ENABLED=true`, CHOP score maps to `0.5x/1.0x/1.0x/1.25x` of `ORDER_SHARES_PER_SIDE`, capped by `MAX_ORDER_SHARES_PER_SIDE`.
 - The resulting shares value becomes the `size` sent to `createOrder` for each YES/NO side.
+- `MAX_ENTRY_QUEUE_IMBALANCE` only blocks extreme YES/NO bid-queue imbalance at the entry limit. If full bid levels are unavailable, the check stays diagnostic and does not block.
 - `SINGLE_FILL_HEDGE_MAX_PRICE` is the hard cap for the final-window missing-side hedge. `SINGLE_FILL_HEDGE_PRICE_OFFSET` lets the hedge cross the current best ask slightly while still respecting the cap.
 - Final single-fill cooldown is adaptive: base final singles pause entries for 30 minutes, price-cap hedge misses pause for 1 hour, execution/API/cancel/post failures pause for 2 hours, and repeated final singles inside 2 hours escalate to 2 hours then 4 hours.
 

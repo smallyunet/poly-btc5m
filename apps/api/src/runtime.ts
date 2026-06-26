@@ -278,6 +278,7 @@ function riskConfig(appConfig: AppConfig, dryRun: boolean, entryCooldownUntil?: 
     minBiExcursionBps120s: appConfig.minBiExcursionBps120s,
     maxDriftRatio120s: appConfig.maxDriftRatio120s,
     maxMomentumRatio30s: appConfig.maxMomentumRatio30s,
+    maxEntryQueueImbalance: appConfig.maxEntryQueueImbalance,
     entryOrderTtlSeconds: appConfig.marketConfig.decisionLeadSeconds,
     entryCooldownUntil,
     entryCooldownReason,

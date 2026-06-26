@@ -89,6 +89,7 @@ function config(): AppConfig {
     minBiExcursionBps120s: 1,
     maxDriftRatio120s: 0.45,
     maxMomentumRatio30s: 0.55,
+    maxEntryQueueImbalance: 5,
     singleFillCooldownMs: 4 * 60 * 60_000,
     singleFillCooldownBaseMs: 30 * 60_000,
     singleFillCooldownPriceCapMs: 60 * 60_000,

@@ -24,6 +24,7 @@ const risk: StrategyRiskConfig = {
   minBiExcursionBps120s: 1,
   maxDriftRatio120s: 0.45,
   maxMomentumRatio30s: 0.55,
+  maxEntryQueueImbalance: 5,
   entryOrderTtlSeconds: 30,
 };
 
@@ -119,6 +120,28 @@ test('keeps base shares for mid-score entries', () => {
   assert.equal(result.intents.length, 2);
   assert.equal(result.intents[0].limitPrice, 0.45);
   assert.equal(result.intents[0].shares, 10);
+});
+
+test('blocks entry only for extreme bid queue imbalance at the entry limit', () => {
+  const snapshot = { ...baseSnapshot(chopFeatures()), regime: 'CHOP' as const };
+  snapshot.orderbooks = [
+    quote('yes', 0.44, [{ price: 0.45, size: 1000 }]),
+    quote('no', 0.44, [{ price: 0.45, size: 100 }]),
+  ];
+
+  const result = evaluateEntry(snapshot, risk);
+
+  assert.equal(result.intents.length, 0);
+  assert.match(result.rejected[0].rejectionReason || '', /ENTRY_QUEUE_IMBALANCE/);
+  assert.equal(result.checks[0].conditions.find((item) => item.label === 'Entry queue imbalance')?.passed, false);
+});
+
+test('does not block queue imbalance when level data is unavailable', () => {
+  const snapshot = { ...baseSnapshot(chopFeatures()), regime: 'CHOP' as const };
+  const result = evaluateEntry(snapshot, risk);
+
+  assert.equal(result.intents.length, 2);
+  assert.match(result.checks[0].conditions.find((item) => item.label === 'Entry queue imbalance')?.actual || '', /unknown/);
 });
 
 test('caps dynamic shares at configured maximum', () => {
@@ -264,7 +287,7 @@ function secondsAgo(seconds: number): string {
   return new Date(Date.now() - seconds * 1000).toISOString();
 }
 
-function quote(tokenId: string, bestBid = 0.44): StateSnapshot['orderbooks'][number] {
+function quote(tokenId: string, bestBid = 0.44, bids?: StateSnapshot['orderbooks'][number]['bids']): StateSnapshot['orderbooks'][number] {
   return {
     tokenId,
     bestBid,
@@ -276,5 +299,6 @@ function quote(tokenId: string, bestBid = 0.44): StateSnapshot['orderbooks'][num
     imbalance: 0,
     updatedAt: new Date().toISOString(),
     source: 'ws',
+    bids,
   };
 }

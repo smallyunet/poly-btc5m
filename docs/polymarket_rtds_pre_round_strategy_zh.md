@@ -277,6 +277,7 @@ YES and NO books are tradable
 shares >= MIN_ORDER_SHARES
 limit price is valid
 pair cost <= MAX_PAIR_COST
+entry-limit bid queue imbalance <= MAX_ENTRY_QUEUE_IMBALANCE
 ```
 
 订单簿可交易表示：
@@ -287,6 +288,22 @@ book.source != mock
 book age <= MAX_ORDERBOOK_AGE_SECONDS
 bestAsk exists
 ```
+
+入场队列不平衡使用 YES/NO 在 `limitPrice` 及以上的 bid levels 计算：
+
+```text
+yesBidQueue = sum(YES bids where price >= limitPrice)
+noBidQueue = sum(NO bids where price >= limitPrice)
+queueRatio = max(yesBidQueue, noBidQueue) / min(yesBidQueue, noBidQueue)
+```
+
+当前默认值：
+
+```text
+MAX_ENTRY_QUEUE_IMBALANCE=5
+```
+
+这是极端情况执行质量过滤器，不是核心预测信号。轻微不平衡不会阻塞；如果 websocket 当前只有 top quote、缺少完整 bid levels，该检查只展示 `unknown`，不会阻塞入场。
 
 默认执行规模设置：
 
