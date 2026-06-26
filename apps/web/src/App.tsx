@@ -21,6 +21,10 @@ import type { DashboardState, OrderBookQuote, RuntimeLogRecord, StrategyCheck } 
 import { api, DASHBOARD_REFRESH_MS } from './lib/api';
 import { formatMoney, formatNumber, formatSeconds, modeLabel } from './lib/format';
 
+import { ScoreGauge } from './components/ScoreGauge';
+import { PriceStrikeGauge } from './components/PriceStrikeGauge';
+import { RoundTimelinePipeline } from './components/RoundTimelinePipeline';
+
 type TabType = 'terminal' | 'orderbooks' | 'activity' | 'strategy' | 'logs';
 type ActivitySubTab = 'rounds' | 'orders';
 type DashboardOrder = DashboardState['orders'][number];
@@ -713,21 +717,27 @@ export function App() {
                 <div className="scorePanel">
                   <div className="scorePanelHeader">
                     <span>Score Composition</span>
-                    <strong>{formatNumber(scoreParts.reduce((sum, part) => sum + part.value, 0), 1)} / 100</strong>
                   </div>
-                  <div className="scoreBreakdown">
-                    {scoreParts.map((part) => (
-                      <div key={part.label} className="scorePart">
-                        <div className="scorePartTop">
-                          <span>{part.label}</span>
-                          <strong>{formatNumber(part.value, 1)} / {part.max}</strong>
-                        </div>
-                        <div className="scoreTrack">
-                          <div className="scoreFill" style={{ width: `${Math.max(2, Math.min(100, (part.value / part.max) * 100))}%` }}></div>
-                        </div>
-                        <em>{part.detail}</em>
+                  <div className="scorePanelBody">
+                    <div className="scoreGaugeColumn">
+                      <ScoreGauge score={snapshot.features.chopScore} threshold={70} />
+                    </div>
+                    <div className="scoreBreakdownColumn">
+                      <div className="scoreBreakdown">
+                        {scoreParts.map((part) => (
+                          <div key={part.label} className="scorePart">
+                            <div className="scorePartTop">
+                              <span>{part.label}</span>
+                              <strong>{formatNumber(part.value, 1)} / {part.max}</strong>
+                            </div>
+                            <div className="scoreTrack">
+                              <div className="scoreFill" style={{ width: `${Math.max(2, Math.min(100, (part.value / part.max) * 100))}%` }}></div>
+                            </div>
+                            <em>{part.detail}</em>
+                          </div>
+                        ))}
                       </div>
-                    ))}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -736,29 +746,14 @@ export function App() {
               {btcPrice != null && strikePrice != null && priceDiff != null && (
                 <div className="panel">
                   <h2>BTC Price vs. Strike Position</h2>
-                  <div className="gaugeContainer">
-                    <div className="gaugeHeader">
-                      <span>Live Tracker</span>
-                      <strong className={isBtcAboveStrike ? 'pass' : 'fail'} style={{ fontSize: '13px' }}>
-                        {terminalGaugeStatus}
-                      </strong>
-                    </div>
-                    <div className="gaugeTrack">
-                      <div className="gaugeStrikeZone"></div>
-                      <div className={`gaugeFill ${isBtcAboveStrike ? 'above' : 'below'}`} style={{ 
-                        left: isBtcAboveStrike ? '50%' : `${gaugePct}%`, 
-                        width: isBtcAboveStrike ? `${gaugePct - 50}%` : `${50 - gaugePct}%` 
-                      }}></div>
-                      <div className={`gaugePointer ${isBtcAboveStrike ? 'above' : 'below'}`} style={{ left: `${gaugePct}%` }}></div>
-                    </div>
-                    <div className="gaugeLabels">
-                      <span className="gaugeSideLabel NO">DOWN ZONE (Below)</span>
-                      <span className="gaugeCenterLabel" style={{ fontSize: '12px', fontWeight: 500 }}>
-                        {strikeLabel}: <strong style={{ color: 'var(--text-primary)' }}>${formatNumber(strikePrice, 2)}</strong> | Price: <strong style={{ color: 'var(--text-primary)' }}>${formatNumber(btcPrice, 2)}</strong> ({priceDiff >= 0 ? '+' : ''}{priceDiff.toFixed(2)} USD)
-                      </span>
-                      <span className="gaugeSideLabel YES">UP ZONE (Above)</span>
-                    </div>
-                  </div>
+                  <PriceStrikeGauge
+                    btcPrice={btcPrice}
+                    strikePrice={strikePrice}
+                    priceDiff={priceDiff}
+                    strikeLabel={strikeLabel}
+                    terminalGaugeStatus={terminalGaugeStatus}
+                    gaugePct={gaugePct}
+                  />
                 </div>
               )}
 
@@ -851,15 +846,12 @@ export function App() {
               {/* Round Progress Countdown */}
               <div className="panel">
                 <h2>Round Timeline</h2>
-                <div className="progressBarContainer">
-                  <div className="progressBarLabel">
-                    <span>Phase: <strong style={{ color: 'var(--text-primary)' }}>{snapshot.round.phase.toUpperCase()}</strong></span>
-                    <span>{timelineDetail}</span>
-                  </div>
-                  <div className="progressTrack">
-                    <div className={`progressFill ${progressColorClass}`} style={{ width: `${progressPct}%` }}></div>
-                  </div>
-                </div>
+                <RoundTimelinePipeline
+                  phase={snapshot.round.phase}
+                  timelineDetail={timelineDetail}
+                  progressPct={progressPct}
+                  progressColorClass={progressColorClass}
+                />
               </div>
 
               {/* Round Details */}

@@ -1850,3 +1850,591 @@ td.mono {
     min-height: 360px;
   }
 }
+
+/* ==========================================================================
+   Premium Terminal Visualization Upgrades
+   ========================================================================== */
+
+/* --- Score Gauge (Circular SVG) --- */
+.scorePanelBody {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  gap: 20px;
+  align-items: center;
+  margin-top: 4px;
+}
+
+@media (max-width: 768px) {
+  .scorePanelBody {
+    grid-template-columns: 1fr;
+    justify-items: center;
+    gap: 16px;
+  }
+}
+
+.scoreGaugeWrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  user-select: none;
+}
+
+.scoreGaugeContainer {
+  position: relative;
+  width: 105px;
+  height: 105px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: filter 0.5s ease;
+}
+
+.scoreGaugeSvg {
+  width: 100%;
+  height: 100%;
+}
+
+.scoreGaugeTrack {
+  fill: none;
+  stroke: rgba(15, 23, 42, 0.06);
+}
+
+.scoreGaugeFill {
+  fill: none;
+  stroke-linecap: round;
+  transition: stroke-dashoffset 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.scoreGaugeThresholdTick {
+  fill: var(--color-danger);
+  stroke: #ffffff;
+  stroke-width: 0.6px;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.2));
+  z-index: 10;
+}
+
+.scoreGaugeOverlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.scoreGaugeNumber {
+  font-size: 20px;
+  font-weight: 800;
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+  line-height: 1;
+}
+
+.scoreGaugeLabel {
+  font-size: 8px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  margin-top: 3px;
+  transition: color 0.3s ease;
+}
+
+.scoreGaugeLegend {
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.scoreThresholdText {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--font-mono);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.scoreThresholdText.passed {
+  color: var(--color-success);
+  background: var(--color-success-glow);
+}
+
+.scoreThresholdText.blocked {
+  color: var(--color-danger);
+  background: var(--color-danger-glow);
+}
+
+/* --- Price vs. Strike Cockpit Gauge (Semi-Circular SVG) --- */
+.priceStrikeGaugeWrapper {
+  width: 100%;
+}
+
+.gaugeCockpitContainer {
+  background: rgba(0, 0, 0, 0.012);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.gaugeCockpitHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px dashed var(--border-color);
+  padding-bottom: 10px;
+}
+
+.gaugeTelemetryItem {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.gaugeTelemetryItem span {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  letter-spacing: 0.5px;
+}
+
+.gaugeTelemetryItem strong {
+  font-size: 15px;
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+}
+
+.gaugeTelemetryItem strong.above {
+  color: var(--color-success);
+  text-shadow: 0 0 8px var(--color-success-glow);
+}
+
+.gaugeTelemetryItem strong.below {
+  color: var(--color-danger);
+  text-shadow: 0 0 8px var(--color-danger-glow);
+}
+
+.gaugeStatusBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(15, 23, 42, 0.035);
+  border: 1px solid var(--border-color);
+  padding: 4px 10px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.pulseDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.pulseDot.above {
+  background: var(--color-success);
+  box-shadow: 0 0 6px var(--color-success);
+  animation: pulse-glow-success 1.5s infinite alternate;
+}
+
+.pulseDot.below {
+  background: var(--color-danger);
+  box-shadow: 0 0 6px var(--color-danger);
+  animation: pulse-glow-danger 1.5s infinite alternate;
+}
+
+@keyframes pulse-glow-success {
+  from { opacity: 0.6; transform: scale(0.9); }
+  to { opacity: 1; transform: scale(1.1); }
+}
+
+@keyframes pulse-glow-danger {
+  from { opacity: 0.6; transform: scale(0.9); }
+  to { opacity: 1; transform: scale(1.1); }
+}
+
+.gaugeDialFrame {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  position: relative;
+  margin-top: 5px;
+}
+
+.gaugeDialSvg {
+  width: 280px;
+  max-width: 100%;
+  height: auto;
+}
+
+.gaugeZoneTrack {
+  fill: none;
+  stroke-linecap: round;
+}
+
+.gaugeZoneTrack.down {
+  stroke: rgba(225, 29, 72, 0.05);
+}
+
+.gaugeZoneTrack.up {
+  stroke: rgba(16, 185, 129, 0.05);
+}
+
+.gaugeActiveFill {
+  fill: none;
+  stroke-linecap: round;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.1));
+}
+
+.gaugeStrikeAnchor {
+  stroke: var(--text-primary);
+  stroke-linecap: round;
+}
+
+.gaugeDialTick {
+  stroke: var(--text-muted);
+  opacity: 0.3;
+}
+
+.gaugeNeedle {
+  stroke-linecap: round;
+}
+
+.gaugeNeedle.above {
+  stroke: var(--color-success);
+}
+
+.gaugeNeedle.below {
+  stroke: var(--color-danger);
+}
+
+.gaugeNeedleTip {
+  stroke: none;
+}
+
+.gaugeNeedleTip.above {
+  fill: var(--color-success);
+}
+
+.gaugeNeedleTip.below {
+  fill: var(--color-danger);
+}
+
+.gaugeHubOuter {
+  fill: var(--text-primary);
+}
+
+.gaugeHubInner {
+  stroke: #ffffff;
+  stroke-width: 0.5px;
+}
+
+.gaugeHubInner.above {
+  fill: var(--color-success);
+}
+
+.gaugeHubInner.below {
+  fill: var(--color-danger);
+}
+
+.gaugeZoneLabels {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  margin-top: -15px;
+  z-index: 2;
+  user-select: none;
+}
+
+.gaugeSideLabel {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.gaugeSideLabel.DOWN {
+  color: var(--color-danger);
+}
+
+.gaugeSideLabel.UP {
+  color: var(--color-success);
+}
+
+.gaugeDigitalReadout {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.gaugeDiffValue {
+  font-size: 16px;
+  font-weight: 800;
+  font-family: var(--font-mono);
+  line-height: 1.2;
+}
+
+.gaugeDiffValue.above {
+  color: var(--color-success);
+}
+
+.gaugeDiffValue.below {
+  color: var(--color-danger);
+}
+
+.gaugeDiffBps {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+/* --- Round Timeline Step Pipeline --- */
+.timelinePipelineWrapper {
+  width: 100%;
+  margin: 6px 0;
+}
+
+.pipelineContainer {
+  position: relative;
+  padding: 16px 10px 10px 10px;
+}
+
+.pipelineProgressLine {
+  position: absolute;
+  top: 28px;
+  left: 40px;
+  right: 40px;
+  height: 3px;
+  transform: translateY(-50%);
+  z-index: 1;
+}
+
+.pipelineLineTrack {
+  position: absolute;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.06);
+  border-radius: 2px;
+}
+
+.pipelineLineFill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  border-radius: 2px;
+  transition: width 0.6s cubic-bezier(0.25, 1, 0.5, 1), background-color 0.5s ease;
+}
+
+.pipelineLineFill.safe {
+  background-color: var(--color-success);
+}
+
+.pipelineLineFill.warning {
+  background-color: var(--color-warning);
+}
+
+.pipelineLineFill.danger {
+  background-color: var(--color-danger);
+  animation: pulse-glow-light 1s infinite alternate;
+}
+
+.pipelineNodes {
+  display: flex;
+  justify-content: space-between;
+  position: relative;
+  z-index: 2;
+  user-select: none;
+}
+
+.pipelineNodeItem {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: 1;
+  text-align: center;
+  position: relative;
+}
+
+.pipelineNodeCircle {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #ffffff;
+  border: 2px solid var(--color-neutral);
+  transition: all 0.4s cubic-bezier(0.25, 1, 0.5, 1);
+  position: relative;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.nodeIcon {
+  font-size: 9px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  line-height: 1;
+}
+
+.nodeIcon.index {
+  color: var(--color-neutral);
+}
+
+.pipelineNodeItem.completed .pipelineNodeCircle {
+  border-color: var(--color-success);
+  background: var(--color-success);
+  box-shadow: 0 0 10px var(--color-success-glow);
+}
+
+.pipelineNodeItem.completed .nodeIcon.check {
+  color: #ffffff;
+  font-size: 11px;
+}
+
+.pipelineNodeItem.active .pipelineNodeCircle {
+  border-color: var(--color-primary);
+  background: #ffffff;
+  transform: scale(1.05);
+  box-shadow: 0 0 12px var(--color-primary-glow);
+}
+
+.pipelineNodeItem.active .nodeIcon.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  display: block;
+}
+
+.pipelineNodeItem.upcoming .pipelineNodeCircle {
+  border-color: rgba(15, 23, 42, 0.12);
+  background: #f8fafc;
+}
+
+.pipelineNodeItem.upcoming .nodeIcon.index {
+  color: var(--text-muted);
+}
+
+.pipelineNodeLabels {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-top: 10px;
+  gap: 2px;
+}
+
+.nodeLabel {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+  transition: color 0.3s ease;
+}
+
+.pipelineNodeItem.active .nodeLabel {
+  color: var(--color-primary);
+}
+
+.pipelineNodeItem.completed .nodeLabel {
+  color: var(--text-primary);
+}
+
+.nodeSubLabel {
+  font-size: 9px;
+  color: var(--text-muted);
+  max-width: 80px;
+  line-height: 1.15;
+}
+
+.nodeTelemetry {
+  font-size: 10px;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  margin-top: 5px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+  transition: all 0.3s ease;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
+}
+
+.nodeTelemetry.safe {
+  color: var(--color-success);
+  background: var(--color-success-glow);
+  border: 1px solid rgba(16, 185, 129, 0.15);
+}
+
+.nodeTelemetry.warning {
+  color: var(--color-warning);
+  background: var(--color-warning-glow);
+  border: 1px solid rgba(217, 119, 6, 0.15);
+}
+
+.nodeTelemetry.danger {
+  color: var(--color-danger);
+  background: var(--color-danger-glow);
+  border: 1px solid rgba(225, 29, 72, 0.15);
+  animation: pulse-glow-light 1s infinite alternate;
+}
+
+/* Pulsing rings for Active Node */
+.nodePulseRing {
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  border: 1.5px solid var(--color-primary);
+  opacity: 0.4;
+  animation: pipelinePulse 2s infinite ease-out;
+  pointer-events: none;
+}
+
+.nodePulseRingOuter {
+  position: absolute;
+  inset: -6px;
+  border-radius: 50%;
+  border: 1px solid var(--color-primary);
+  opacity: 0.2;
+  animation: pipelinePulseOuter 2s infinite ease-out;
+  pointer-events: none;
+}
+
+.nodePulseRing.safe { border-color: var(--color-success); }
+.nodePulseRingOuter.safe { border-color: var(--color-success); }
+.nodePulseRing.warning { border-color: var(--color-warning); }
+.nodePulseRingOuter.warning { border-color: var(--color-warning); }
+.nodePulseRing.danger { border-color: var(--color-danger); }
+.nodePulseRingOuter.danger { border-color: var(--color-danger); }
+
+@keyframes pipelinePulse {
+  0% { transform: scale(0.95); opacity: 0.6; }
+  100% { transform: scale(1.2); opacity: 0; }
+}
+
+@keyframes pipelinePulseOuter {
+  0% { transform: scale(0.9); opacity: 0.4; }
+  100% { transform: scale(1.35); opacity: 0; }
+}
+
+@media (max-width: 768px) {
+  .pipelineProgressLine {
+    left: 20px;
+    right: 20px;
+  }
+  .nodeSubLabel {
+    display: none;
+  }
+  .nodeLabel {
+    font-size: 8px;
+    letter-spacing: 0.2px;
+  }
+}
+
