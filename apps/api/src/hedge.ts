@@ -17,6 +17,7 @@ type ExecuteHedgesParams = {
 
 const HEDGE_STRATEGY = 'BTC5M_SINGLE_FILL_HEDGE';
 const FAILED_HEDGE_COOLDOWN_MS = 60_000;
+const MIN_MARKETABLE_BUY_NOTIONAL_USD = 1;
 
 export async function executeSingleFillHedges(params: ExecuteHedgesParams): Promise<string[]> {
   const diagnostics: string[] = [];
@@ -64,6 +65,7 @@ export function planSingleFillHedge(params: {
   if (bestAsk > params.appConfig.singleFillHedgeMaxPrice) return { ok: false, reason: 'HEDGE_ASK_ABOVE_CAP' };
 
   const limitPrice = roundPrice(Math.min(bestAsk + params.appConfig.singleFillHedgePriceOffset, params.appConfig.singleFillHedgeMaxPrice));
+  if (limitPrice * diff < MIN_MARKETABLE_BUY_NOTIONAL_USD) return { ok: false, reason: 'HEDGE_NOTIONAL_BELOW_MIN' };
   const pairCost = dominantAvgPrice + limitPrice;
   if (pairCost > params.appConfig.singleFillHedgeMaxPairCost + 0.000001) return { ok: false, reason: 'HEDGE_PAIR_COST_ABOVE_CAP' };
 
@@ -154,6 +156,7 @@ export function buildSingleFillHedgeCheck(params: {
       condition('Missing side identified', missingLabel != null, missingLabel ? `buy missing ${missingLabel}` : 'balanced or no fill'),
       condition('Missing-side book ready', quoteGate == null, quoteGate || quoteAgeLabel(quote)),
       condition('Hedge ask cap', quote?.bestAsk != null && quote.bestAsk <= params.appConfig.singleFillHedgeMaxPrice, quote?.bestAsk == null ? 'ask missing' : `${quote.bestAsk.toFixed(3)} / cap ${params.appConfig.singleFillHedgeMaxPrice.toFixed(3)}`),
+      condition('Hedge notional minimum', plan.ok || plan.reason !== 'HEDGE_NOTIONAL_BELOW_MIN', plan.ok ? `${(plan.intent.shares * plan.intent.limitPrice).toFixed(2)} / min ${MIN_MARKETABLE_BUY_NOTIONAL_USD.toFixed(2)}` : `blocked: ${plan.reason}`),
       condition('Pair cost cap', plan.ok || plan.reason !== 'HEDGE_PAIR_COST_ABOVE_CAP', plan.ok ? `${(plan.dominantAvgPrice + plan.intent.limitPrice).toFixed(3)} / cap ${params.appConfig.singleFillHedgeMaxPairCost.toFixed(3)}` : `blocked: ${plan.reason}`),
       condition('Duplicate hedge guard', !params.hasRecentHedgeOrder, params.hasRecentHedgeOrder ? 'recent hedge order exists' : 'clear'),
       condition('Failed hedge cooldown', !params.hasRecentFailedHedgeOrder, params.hasRecentFailedHedgeOrder ? 'recent failed hedge order exists' : 'clear'),

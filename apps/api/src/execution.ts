@@ -5,6 +5,7 @@ import type { AppConfig } from './config';
 import type { InMemoryStore } from './store';
 
 const FAILED_ORDER_COOLDOWN_MS = 5 * 60_000;
+const MIN_MARKETABLE_BUY_NOTIONAL_USD = 1;
 export type ExecuteIntentsParams = {
   appConfig: AppConfig;
   adapter: PolymarketAdapter;
@@ -30,6 +31,21 @@ export async function executeLiveIntents(params: ExecuteIntentsParams): Promise<
 
   if (runtime.status === 'degraded') {
     diagnostics.push('Live trading is blocked while runtime is degraded; generated intents were not executed.');
+    return diagnostics;
+  }
+
+  const balanceGate = await batchBuyBalanceGate(params);
+  if (!balanceGate.ok) {
+    for (const intent of params.intents) {
+      params.store.updateIntent(intent.id, { status: 'rejected', rejectionReason: balanceGate.reason });
+    }
+    params.store.recordRuntimeLog({
+      level: 'warn',
+      source: 'execution',
+      message: `Execution blocked for batch: ${balanceGate.reason}.`,
+      details: balanceGate.details,
+    });
+    diagnostics.push(`Execution blocked for batch: ${balanceGate.reason}.`);
     return diagnostics;
   }
 
@@ -96,6 +112,56 @@ async function executeOneIntent(params: ExecuteIntentsParams, intent: TradeInten
 type GateResult =
   | { ok: true; executionKey: string }
   | { ok: false; executionKey: string; reason: string; recordFailure: boolean };
+
+type BatchGateResult =
+  | { ok: true }
+  | { ok: false; reason: string; details: Record<string, unknown> };
+
+async function batchBuyBalanceGate(params: ExecuteIntentsParams): Promise<BatchGateResult> {
+  const buyIntents = params.intents.filter((intent) => intent.side === 'BUY');
+  if (!buyIntents.length) return { ok: true };
+
+  for (const intent of buyIntents) {
+    const notional = roundDownShares(intent.shares) * intent.limitPrice;
+    if (notional < MIN_MARKETABLE_BUY_NOTIONAL_USD) {
+      return {
+        ok: false,
+        reason: 'ORDER_NOTIONAL_BELOW_MIN',
+        details: { intentId: intent.id, label: intent.label, notional, minimum: MIN_MARKETABLE_BUY_NOTIONAL_USD },
+      };
+    }
+  }
+
+  try {
+    const [{ balance, allowance }, openOrders] = await Promise.all([
+      params.adapter.getCollateralBalanceAllowance(),
+      params.adapter.getOpenOrders(),
+    ]);
+    const activeBuyNotional = openOrders.reduce((total, order) => {
+      if (order.side !== 'BUY' || order.price == null || order.size == null) return total;
+      const matched = order.sizeMatched ?? 0;
+      const remaining = Math.max(0, order.size - matched);
+      return total + order.price * remaining;
+    }, 0);
+    const collateralLimit = allowance == null ? balance : Math.min(balance, allowance);
+    const availableCollateral = collateralLimit - activeBuyNotional;
+    const requiredNotional = buyIntents.reduce((total, intent) => total + roundDownShares(intent.shares) * intent.limitPrice, 0);
+    if (availableCollateral + 0.000001 < requiredNotional) {
+      return {
+        ok: false,
+        reason: 'INSUFFICIENT_AVAILABLE_COLLATERAL',
+        details: { requiredNotional, balance, allowance, activeBuyNotional, availableCollateral },
+      };
+    }
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      reason: `COLLATERAL_CHECK_FAILED: ${error instanceof Error ? error.message : String(error)}`,
+      details: {},
+    };
+  }
+}
 
 async function executionGate(params: ExecuteIntentsParams, intent: TradeIntent): Promise<GateResult> {
   const executionKey = [intent.roundId, intent.strategy, intent.tokenId, intent.side].join(':');

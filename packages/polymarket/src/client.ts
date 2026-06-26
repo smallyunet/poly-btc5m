@@ -26,8 +26,14 @@ export type OpenOrderSummary = {
   side: string;
   price: number | null;
   size: number | null;
+  sizeMatched: number | null;
   status: string;
   raw: unknown;
+};
+
+export type CollateralBalanceAllowance = {
+  balance: number;
+  allowance: number | null;
 };
 
 export type FillTarget = Pick<OrderRecord, 'roundId' | 'eventSlug' | 'marketTitle' | 'imageUrl' | 'tokenId' | 'label' | 'clobOrderId'>;
@@ -35,7 +41,7 @@ export type FillTarget = Pick<OrderRecord, 'roundId' | 'eventSlug' | 'marketTitl
 type ClobModule = {
   ClobClient: new (params: Record<string, unknown>) => any;
   Side: { BUY: unknown; SELL: unknown };
-  AssetType: { CONDITIONAL: unknown };
+  AssetType: { COLLATERAL: unknown; CONDITIONAL: unknown };
 };
 
 async function importClobClient(): Promise<ClobModule> {
@@ -87,6 +93,7 @@ export class PolymarketAdapter {
       side: String(order.side || '').toUpperCase(),
       price: finiteNumber(order.price),
       size: finiteNumber(order.original_size ?? order.size),
+      sizeMatched: finiteNumber(order.size_matched ?? order.matched_size ?? order.sizeMatched),
       status: String(order.status || ''),
       raw: order,
     }));
@@ -108,6 +115,18 @@ export class PolymarketAdapter {
       token_id: tokenId,
     });
     return Number(readBalanceRaw(response)) / 1_000_000;
+  }
+
+  async getCollateralBalanceAllowance(): Promise<CollateralBalanceAllowance> {
+    const { AssetType } = await importClobClient();
+    const client = await this.authenticatedClient();
+    const response = await client.getBalanceAllowance({
+      asset_type: AssetType.COLLATERAL,
+    });
+    return {
+      balance: Number(readBalanceRaw(response)) / 1_000_000,
+      allowance: readMinAllowance(response),
+    };
   }
 
   async getRecentFills(params: { roundId: string; eventSlug: string; tokenLabels: Map<string, 'YES' | 'NO'>; tokenId?: string; marketTitle?: string; imageUrl?: string }): Promise<FillRecord[]> {
@@ -380,4 +399,14 @@ function orderError(posted: any): string | undefined {
 
 function readBalanceRaw(response: any): string {
   return String(response?.balance || response?.balances?.[0]?.balance || response?.available || '0');
+}
+
+function readMinAllowance(response: any): number | null {
+  const allowances = response?.allowances;
+  if (!allowances || typeof allowances !== 'object') return null;
+  const values = Object.values(allowances)
+    .map((value) => Number(value) / 1_000_000)
+    .filter((value) => Number.isFinite(value));
+  if (!values.length) return null;
+  return Math.min(...values);
 }

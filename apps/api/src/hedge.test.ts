@@ -59,6 +59,21 @@ test('blocks a hedge when combined pair cost is above the configured cap', () =>
   assert.deepEqual(plan, { ok: false, reason: 'HEDGE_PAIR_COST_ABOVE_CAP' });
 });
 
+test('blocks a marketable hedge below the Polymarket minimum notional', () => {
+  const plan = planSingleFillHedge({
+    candidate: candidate(),
+    orders: [
+      order('YES', { filledSize: 10, avgFillPrice: 0.44, status: 'filled' }),
+      order('NO', { filledSize: 0, status: 'posted', clobOrderId: 'no-open' }),
+    ],
+    orderbooks: [quote('no-token', 0.01)],
+    appConfig: config(),
+    nowMs,
+  });
+
+  assert.deepEqual(plan, { ok: false, reason: 'HEDGE_NOTIONAL_BELOW_MIN' });
+});
+
 function config(): AppConfig {
   return {
     port: 8788,
