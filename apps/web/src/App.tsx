@@ -26,7 +26,7 @@ import { PriceStrikeGauge } from './components/PriceStrikeGauge';
 import { RoundTimelinePipeline } from './components/RoundTimelinePipeline';
 
 type TabType = 'terminal' | 'orderbooks' | 'activity' | 'strategy' | 'logs';
-type ActivitySubTab = 'rounds' | 'orders';
+type ActivitySubTab = 'daily' | 'rounds' | 'orders';
 type DashboardOrder = DashboardState['orders'][number];
 type DashboardFill = DashboardState['fills'][number];
 type RoundExecutionSummary = {
@@ -34,6 +34,10 @@ type RoundExecutionSummary = {
   title: string;
   imageUrl?: string;
   latestTime: number;
+  startTime: number;
+  dateKey: string;
+  dateLabel: string;
+  timeLabel: string;
   orderCount: number;
   buyOrderCount: number;
   sellOrderCount: number;
@@ -50,9 +54,26 @@ type RoundExecutionSummary = {
   settlementPnl?: number;
   settlementStatus?: DashboardState['settlements'][number]['status'];
 };
+type DailyExecutionSummary = {
+  dateKey: string;
+  dateLabel: string;
+  latestTime: number;
+  rounds: RoundExecutionSummary[];
+  roundCount: number;
+  orderCount: number;
+  buyOrderCount: number;
+  sellOrderCount: number;
+  pairedRounds: number;
+  singleRounds: number;
+  unfilledOrders: number;
+  unfilledShares: number;
+  settledRounds: number;
+  settlementPnl: number;
+};
 
 const ROUND_PAGE_SIZE = 20;
 const ORDER_PAGE_SIZE = 25;
+const DAILY_PAGE_SIZE = 7;
 const LOG_PAGE_SIZE = 75;
 const TAB_TYPES: TabType[] = ['terminal', 'orderbooks', 'activity', 'strategy', 'logs'];
 
@@ -114,6 +135,36 @@ function formatEtTime(value: string): string {
   })} ET`;
 }
 
+function formatEtClock(ms: number): string {
+  if (!Number.isFinite(ms) || ms <= 0) return 'n/a';
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(new Date(ms));
+}
+
+function formatEtDateKey(ms: number): string {
+  if (!Number.isFinite(ms) || ms <= 0) return 'unknown-date';
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/New_York',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date(ms));
+}
+
+function formatEtDateLabel(ms: number): string {
+  if (!Number.isFinite(ms) || ms <= 0) return 'Unknown date';
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    weekday: 'short',
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+  }).format(new Date(ms));
+}
+
 function formatEtRange(startMs: number, durationMs: number): string {
   const formatter = new Intl.DateTimeFormat('en-US', {
     timeZone: 'America/New_York',
@@ -131,11 +182,16 @@ function formatEtRange(startMs: number, durationMs: number): string {
   return `${formatter.format(new Date(startMs))}-${endFormatter.format(new Date(startMs + durationMs))}`;
 }
 
-function derivedRoundTitle(roundId: string): string {
+function roundStartTime(roundId: string): number {
   const match = roundId.match(/btc-updown-5m-(\d+)$/);
-  if (!match) return roundId;
+  if (!match) return 0;
   const startMs = Number(match[1]) * 1000;
-  if (!Number.isFinite(startMs)) return roundId;
+  return Number.isFinite(startMs) ? startMs : 0;
+}
+
+function derivedRoundTitle(roundId: string): string {
+  const startMs = roundStartTime(roundId);
+  if (!startMs) return roundId;
   return `Bitcoin Up or Down - ${formatEtRange(startMs, 5 * 60_000)}`;
 }
 
@@ -253,12 +309,17 @@ function buildRoundExecutionSummaries(state: DashboardState): RoundExecutionSumm
       ...record.settlements.map((settlement) => toSortTime(settlement.resolvedAt)),
       0,
     );
+    const startTime = roundStartTime(roundId) || latestTime;
 
     return {
       roundId,
       title: metadataSource?.marketTitle || derivedRoundTitle(roundId),
       imageUrl: metadataSource?.imageUrl,
       latestTime,
+      startTime,
+      dateKey: formatEtDateKey(startTime),
+      dateLabel: formatEtDateLabel(startTime),
+      timeLabel: formatEtClock(startTime),
       orderCount: record.orders.length,
       buyOrderCount: record.orders.filter((order) => order.side === 'BUY').length,
       sellOrderCount: record.orders.filter((order) => order.side === 'SELL').length,
@@ -274,6 +335,36 @@ function buildRoundExecutionSummaries(state: DashboardState): RoundExecutionSumm
       unfilledShares: sumShares(unfilledByOrder),
       settlementPnl: settlement?.pnl,
       settlementStatus: settlement?.status,
+    };
+  }).sort((a, b) => b.latestTime - a.latestTime);
+}
+
+function buildDailyExecutionSummaries(rounds: RoundExecutionSummary[]): DailyExecutionSummary[] {
+  const byDate = new Map<string, RoundExecutionSummary[]>();
+  rounds.forEach((round) => {
+    const existing = byDate.get(round.dateKey);
+    if (existing) existing.push(round);
+    else byDate.set(round.dateKey, [round]);
+  });
+
+  return [...byDate.entries()].map(([dateKey, dayRounds]) => {
+    const sortedRounds = [...dayRounds].sort((a, b) => b.startTime - a.startTime);
+    const settlementPnl = sortedRounds.reduce((total, round) => total + (round.settlementPnl ?? 0), 0);
+    return {
+      dateKey,
+      dateLabel: sortedRounds[0]?.dateLabel || dateKey,
+      latestTime: Math.max(...sortedRounds.map((round) => round.latestTime), 0),
+      rounds: sortedRounds,
+      roundCount: sortedRounds.length,
+      orderCount: sortedRounds.reduce((total, round) => total + round.orderCount, 0),
+      buyOrderCount: sortedRounds.reduce((total, round) => total + round.buyOrderCount, 0),
+      sellOrderCount: sortedRounds.reduce((total, round) => total + round.sellOrderCount, 0),
+      pairedRounds: sortedRounds.filter((round) => fillStateLabel(round.filledBuyYes, round.filledBuyNo) === 'paired').length,
+      singleRounds: sortedRounds.filter((round) => fillStateLabel(round.filledBuyYes, round.filledBuyNo) === 'single').length,
+      unfilledOrders: sortedRounds.reduce((total, round) => total + round.unfilledOrders, 0),
+      unfilledShares: sortedRounds.reduce((total, round) => total + round.unfilledShares, 0),
+      settledRounds: sortedRounds.filter((round) => round.settlementStatus === 'settled').length,
+      settlementPnl,
     };
   }).sort((a, b) => b.latestTime - a.latestTime);
 }
@@ -304,7 +395,7 @@ export function App() {
   
   // Navigation Tab State
   const [activeTab, setActiveTab] = React.useState<TabType>(() => tabFromUrl());
-  const [activitySubTab, setActivitySubTab] = React.useState<ActivitySubTab>('rounds');
+  const [activitySubTab, setActivitySubTab] = React.useState<ActivitySubTab>('daily');
 
   // Logs Search & Filter States
   const [logSearch, setLogSearch] = React.useState('');
@@ -360,12 +451,15 @@ export function App() {
   }, [state?.runtimeLogs, logSearch, logLevel, logSource]);
 
   const roundSummaries = React.useMemo(() => state ? buildRoundExecutionSummaries(state) : [], [state]);
+  const dailySummaries = React.useMemo(() => buildDailyExecutionSummaries(roundSummaries), [roundSummaries]);
 
+  const dailyPagination = usePaginatedRows(dailySummaries, DAILY_PAGE_SIZE);
   const roundPagination = usePaginatedRows(roundSummaries, ROUND_PAGE_SIZE);
   const ordersPagination = usePaginatedRows(state?.orders ?? [], ORDER_PAGE_SIZE);
   const logsPagination = usePaginatedRows(filteredLogs, LOG_PAGE_SIZE);
 
   React.useEffect(() => {
+    dailyPagination.setPage(1);
     roundPagination.setPage(1);
   }, [roundSummaries.length]);
 
@@ -1025,6 +1119,14 @@ export function App() {
               <div className="subTabBar">
                 <button
                   type="button"
+                  className={`subTabBtn ${activitySubTab === 'daily' ? 'active' : ''}`}
+                  onClick={() => setActivitySubTab('daily')}
+                >
+                  Daily
+                  <span>{dailySummaries.length}</span>
+                </button>
+                <button
+                  type="button"
                   className={`subTabBtn ${activitySubTab === 'rounds' ? 'active' : ''}`}
                   onClick={() => setActivitySubTab('rounds')}
                 >
@@ -1040,6 +1142,93 @@ export function App() {
                   <span>{state.orders.length}</span>
                 </button>
               </div>
+
+              {activitySubTab === 'daily' && (
+                dailySummaries.length > 0 ? (
+                  <>
+                    <div className="dailyArchive">
+                      {dailyPagination.pageRows.map((day) => (
+                        <section key={day.dateKey} className="dailyGroup">
+                          <div className="dailyGroupHeader">
+                            <div>
+                              <h3>{day.dateLabel}</h3>
+                              <p>
+                                {day.roundCount} recorded rounds / {day.orderCount} orders
+                                <span className="mutedInline"> {day.buyOrderCount} buy / {day.sellOrderCount} sell</span>
+                              </p>
+                            </div>
+                            <div className="dailyStats">
+                              <span><strong>{day.pairedRounds}</strong> paired</span>
+                              <span><strong>{day.singleRounds}</strong> single</span>
+                              <span><strong>{day.unfilledOrders}</strong> unfilled</span>
+                              <span><strong>{day.settledRounds}</strong> settled</span>
+                              <span className={day.settlementPnl >= 0 ? 'pass' : 'fail'}>
+                                {day.settlementPnl >= 0 ? '+' : ''}{formatMoney(day.settlementPnl)}
+                              </span>
+                            </div>
+                          </div>
+
+                          <DataTable headers={['Time (ET)', 'Market', 'Orders', 'Submitted Buy Orders', 'Filled Buy Shares', 'Unfilled', 'Settlement PnL']}>
+                            {day.rounds.map((round) => {
+                              const hasUnfilled = round.unfilledOrders > 0;
+                              const fillLabel = fillStateLabel(round.filledBuyYes, round.filledBuyNo);
+                              return (
+                                <tr key={round.roundId}>
+                                  <td className="mono">{round.timeLabel}</td>
+                                  <td>
+                                    <div className="marketCell">
+                                      {round.imageUrl ? (
+                                        <img src={round.imageUrl} alt="" className="marketThumb" />
+                                      ) : (
+                                        <span className="marketThumb marketThumbFallback">₿</span>
+                                      )}
+                                      <span className="marketTitle">{round.title}</span>
+                                    </div>
+                                  </td>
+                                  <td>
+                                    <span className="mono">{round.orderCount}</span>
+                                    <span className="mutedInline"> {round.buyOrderCount} buy / {round.sellOrderCount} sell</span>
+                                  </td>
+                                  <td className="mono" style={{ whiteSpace: 'normal' }}>
+                                    {formatSubmittedLeg('UP', round.orderedYes, round.orderedYesPrice)}
+                                    <br />
+                                    {formatSubmittedLeg('DOWN', round.orderedNo, round.orderedNoPrice)}
+                                  </td>
+                                  <td className="mono">
+                                    UP {formatShares(round.filledBuyYes)} / DOWN {formatShares(round.filledBuyNo)}
+                                    {' '}
+                                    <Badge tone={fillStateTone(round.filledBuyYes, round.filledBuyNo)}>{fillLabel}</Badge>
+                                  </td>
+                                  <td>
+                                    <Badge tone={hasUnfilled ? 'warn' : 'good'}>
+                                      {hasUnfilled ? `${round.unfilledOrders} orders / ${formatShares(round.unfilledShares)} shares` : 'none'}
+                                    </Badge>
+                                  </td>
+                                  <td className={`mono ${round.settlementPnl == null ? '' : round.settlementPnl >= 0 ? 'pass' : 'fail'}`}>
+                                    {round.settlementPnl == null ? '-' : `${round.settlementPnl >= 0 ? '+' : ''}${formatMoney(round.settlementPnl)}`}
+                                    {round.settlementStatus && <span className="mutedInline"> {round.settlementStatus}</span>}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </DataTable>
+                        </section>
+                      ))}
+                    </div>
+                    <PaginationControls
+                      page={dailyPagination.page}
+                      totalPages={dailyPagination.totalPages}
+                      totalRows={dailySummaries.length}
+                      pageSize={DAILY_PAGE_SIZE}
+                      onPageChange={dailyPagination.setPage}
+                    />
+                  </>
+                ) : (
+                  <div className="empty" style={{ minHeight: '150px' }}>
+                    <p className="emptyText">No daily execution records found</p>
+                  </div>
+                )
+              )}
 
               {activitySubTab === 'rounds' && (
                 roundSummaries.length > 0 ? (

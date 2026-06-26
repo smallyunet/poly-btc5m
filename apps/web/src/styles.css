@@ -1001,6 +1001,72 @@ td.mono {
   white-space: nowrap;
 }
 
+.pass {
+  color: var(--color-success);
+}
+
+.fail {
+  color: var(--color-danger);
+}
+
+.dailyArchive {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.dailyGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.45);
+}
+
+.dailyGroupHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.dailyGroupHeader h3 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.dailyGroupHeader p {
+  margin: 4px 0 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.dailyStats {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.dailyStats span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 26px;
+  padding: 3px 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.65);
+  white-space: nowrap;
+}
+
 .paginationBar {
   display: flex;
   justify-content: space-between;
@@ -2437,4 +2503,3 @@ td.mono {
     letter-spacing: 0.2px;
   }
 }
-
