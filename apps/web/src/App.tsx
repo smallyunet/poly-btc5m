@@ -41,6 +41,8 @@ type RoundExecutionSummary = {
   orderCount: number;
   buyOrderCount: number;
   sellOrderCount: number;
+  failedOrderCount: number;
+  firstOrderError?: string;
   orderedYes: number;
   orderedNo: number;
   orderedYesPrice?: number;
@@ -53,6 +55,11 @@ type RoundExecutionSummary = {
   unfilledShares: number;
   settlementPnl?: number;
   settlementStatus?: DashboardState['settlements'][number]['status'];
+};
+type RoundStatusSummary = {
+  label: string;
+  tone: 'good' | 'warn' | 'bad' | 'neutral';
+  detail: string;
 };
 type DailyExecutionSummary = {
   dateKey: string;
@@ -122,6 +129,34 @@ function fillStateLabel(yesShares: number, noShares: number): 'paired' | 'single
   if (yesShares > 0 && noShares > 0) return 'paired';
   if (yesShares > 0 || noShares > 0) return 'single';
   return 'none';
+}
+
+function roundStatusSummary(round: RoundExecutionSummary): RoundStatusSummary {
+  if (round.failedOrderCount > 0) {
+    return {
+      label: 'failed order',
+      tone: 'bad',
+      detail: round.firstOrderError || `${round.failedOrderCount} failed orders`,
+    };
+  }
+  if (round.unfilledOrders > 0) {
+    return {
+      label: 'unfilled',
+      tone: 'warn',
+      detail: `${round.unfilledOrders} orders / ${formatShares(round.unfilledShares)} shares`,
+    };
+  }
+  const fillLabel = fillStateLabel(round.filledBuyYes, round.filledBuyNo);
+  if (fillLabel === 'paired') {
+    return { label: 'paired', tone: 'good', detail: `UP ${formatShares(round.filledBuyYes)} / DOWN ${formatShares(round.filledBuyNo)}` };
+  }
+  if (fillLabel === 'single') {
+    return { label: 'single', tone: 'warn', detail: `UP ${formatShares(round.filledBuyYes)} / DOWN ${formatShares(round.filledBuyNo)}` };
+  }
+  if (round.settlementStatus === 'settled') {
+    return { label: 'settled', tone: 'neutral', detail: round.settlementPnl == null ? 'settled without local fills' : formatMoney(round.settlementPnl) };
+  }
+  return { label: 'recorded', tone: 'neutral', detail: `${round.orderCount} orders` };
 }
 
 function formatEtTime(value: string): string {
@@ -276,6 +311,19 @@ function orderMarketTitle(order: DashboardOrder): string {
   return order.marketTitle || derivedRoundTitle(order.roundId);
 }
 
+function orderFailureReason(order: DashboardOrder): string {
+  if (order.error) return order.error;
+  if (order.status === 'cancelled') return 'closed after round ended';
+  if (order.status === 'failed') return 'failed without stored reason';
+  return '-';
+}
+
+function isRoutineHeartbeatLog(log: RuntimeLogRecord): boolean {
+  const message = log.message.toLowerCase();
+  return log.level === 'info'
+    && (message === 'scheduled tick completed.' || message === 'scheduled tick completed');
+}
+
 function buildRoundExecutionSummaries(state: DashboardState): RoundExecutionSummary[] {
   const byRound = new Map<string, {
     orders: DashboardOrder[];
@@ -323,6 +371,8 @@ function buildRoundExecutionSummaries(state: DashboardState): RoundExecutionSumm
       orderCount: record.orders.length,
       buyOrderCount: record.orders.filter((order) => order.side === 'BUY').length,
       sellOrderCount: record.orders.filter((order) => order.side === 'SELL').length,
+      failedOrderCount: record.orders.filter((order) => order.status === 'failed').length,
+      firstOrderError: record.orders.find((order) => order.error)?.error,
       orderedYes: sumShares(yesBuyOrders.map((order) => order.size)),
       orderedNo: sumShares(noBuyOrders.map((order) => order.size)),
       orderedYesPrice: weightedAverageOrderPrice(yesBuyOrders),
@@ -401,6 +451,7 @@ export function App() {
   const [logSearch, setLogSearch] = React.useState('');
   const [logLevel, setLogLevel] = React.useState<string>('all');
   const [logSource, setLogSource] = React.useState<string>('all');
+  const [hideRoutineLogs, setHideRoutineLogs] = React.useState(true);
 
   // Ref for auto-scrolling the log console
   const consoleRef = React.useRef<HTMLDivElement>(null);
@@ -446,9 +497,10 @@ export function App() {
         : true;
       const matchesLevel = logLevel === 'all' ? true : log.level === logLevel;
       const matchesSource = logSource === 'all' ? true : log.source === logSource;
-      return matchesSearch && matchesLevel && matchesSource;
+      const matchesSignalMode = hideRoutineLogs ? !isRoutineHeartbeatLog(log) : true;
+      return matchesSearch && matchesLevel && matchesSource && matchesSignalMode;
     });
-  }, [state?.runtimeLogs, logSearch, logLevel, logSource]);
+  }, [state?.runtimeLogs, logSearch, logLevel, logSource, hideRoutineLogs]);
 
   const roundSummaries = React.useMemo(() => state ? buildRoundExecutionSummaries(state) : [], [state]);
   const dailySummaries = React.useMemo(() => buildDailyExecutionSummaries(roundSummaries), [roundSummaries]);
@@ -469,7 +521,7 @@ export function App() {
 
   React.useEffect(() => {
     logsPagination.setPage(1);
-  }, [logSearch, logLevel, logSource]);
+  }, [logSearch, logLevel, logSource, hideRoutineLogs]);
 
   // Auto-scroll log console to bottom when new logs arrive
   React.useEffect(() => {
@@ -536,6 +588,8 @@ export function App() {
     || (state.runtime.executionMode === 'monitor' && order.status === 'local')
   )).length;
   const pnl = state.settlements.reduce((sum, item) => sum + item.pnl, 0);
+  const signalLogCount = state.runtimeLogs.filter((log) => !isRoutineHeartbeatLog(log)).length;
+  const alertLogCount = state.runtimeLogs.filter((log) => log.level === 'warn' || log.level === 'error').length;
 
   // Time progress bar calculation
   const secondsToEnd = snapshot.round.secondsToEnd;
@@ -675,62 +729,75 @@ export function App() {
 
       {/* Top Status Cards / Digest */}
       <section className="digest">
-        <Digest 
-          icon={<Activity size={16} />} 
-          label="Runtime" 
-          value={state.runtime.status.toUpperCase()} 
-          detail={modeLabel(state.runtime.executionMode)} 
-          tone={state.runtime.executionMode === 'live' ? 'warn' : 'neutral'} 
-        />
-        <Digest 
-          icon={<Radio size={16} />} 
-          label="Feeds Connection" 
-          value={state.feed.source.toUpperCase()} 
-          detail={`BINANCE: ${state.feed.binanceConnected ? 'ON' : 'OFF'} / CLOB: ${state.feed.clobConnected ? 'ON' : 'OFF'}`}
-          tone={state.feed.source === 'live' && state.feed.binanceConnected ? 'good' : 'warn'}
-        />
-        <Digest 
-          icon={<Timer size={16} />} 
-          label="Round Phase" 
-          value={snapshot.round.phase.toUpperCase()} 
-          detail={roundPhaseDetail} 
-          tone={snapshot.round.phase === 'decision' || snapshot.round.phase === 'posting' ? 'warn' : 'neutral'} 
-        />
-        <Digest 
-          icon={<TrendingUp size={16} />} 
-          label="Market Regime" 
-          value={snapshot.regime} 
-          detail={`Score ${formatNumber(snapshot.features.chopScore, 1)} / ${entryEligibleLabel}`}
-          tone={snapshot.regime === 'CHOP' ? 'good' : snapshot.regime === 'TREND' ? 'bad' : 'neutral'} 
-        />
-        <Digest
-          icon={<Users size={16} />}
-          label="Participation"
-          value={participationStatus.toUpperCase()}
-          detail={participationSummary}
-          tone={participationTone}
-        />
-        <Digest 
-          icon={<Shield size={16} />} 
-          label="Active Trades" 
-          value={`${activeOrders} Orders`} 
-          detail={`${state.fills.length} fills / ${state.orders.length} total`} 
-          tone={activeOrders ? 'warn' : 'neutral'} 
-        />
-        <Digest
-          icon={<Timer size={16} />}
-          label="Entry Cooldown"
-          value={entryCooldownActive ? 'ACTIVE' : 'INACTIVE'}
-          detail={entryCooldownActive ? `${entryCooldownRemaining} / ${entryCooldownReason}` : entryCooldownReason}
-          tone={entryCooldownActive ? 'warn' : 'neutral'}
-        />
-        <Digest 
-          icon={<CheckCircle2 size={16} />} 
-          label="Net Realized PnL" 
-          value={formatMoney(pnl)} 
-          detail={`${state.settlements.length} settled rounds`} 
-          tone={pnl > 0 ? 'good' : pnl < 0 ? 'bad' : 'neutral'} 
-        />
+        <div className="digestGroup action">
+          <span className="digestGroupLabel">Action</span>
+          <Digest
+            icon={<Timer size={16} />}
+            label="Round Phase"
+            value={snapshot.round.phase.toUpperCase()}
+            detail={roundPhaseDetail}
+            tone={snapshot.round.phase === 'decision' || snapshot.round.phase === 'posting' ? 'warn' : 'neutral'}
+            priority="primary"
+          />
+          <Digest
+            icon={<TrendingUp size={16} />}
+            label="Market Regime"
+            value={snapshot.regime}
+            detail={`Score ${formatNumber(snapshot.features.chopScore, 1)} / ${entryEligibleLabel}`}
+            tone={snapshot.regime === 'CHOP' ? 'good' : snapshot.regime === 'TREND' ? 'bad' : 'neutral'}
+            priority="primary"
+          />
+          <Digest
+            icon={<Timer size={16} />}
+            label="Entry Cooldown"
+            value={entryCooldownActive ? 'ACTIVE' : 'INACTIVE'}
+            detail={entryCooldownActive ? `${entryCooldownRemaining} / ${entryCooldownReason}` : entryCooldownReason}
+            tone={entryCooldownActive ? 'warn' : 'neutral'}
+            priority="primary"
+          />
+          <Digest
+            icon={<Shield size={16} />}
+            label="Active Trades"
+            value={`${activeOrders} Orders`}
+            detail={`${state.fills.length} fills / ${state.orders.length} total`}
+            tone={activeOrders ? 'warn' : 'neutral'}
+            priority="primary"
+          />
+        </div>
+        <div className="digestGroup system">
+          <span className="digestGroupLabel">System</span>
+          <Digest
+            icon={<Activity size={16} />}
+            label="Runtime"
+            value={state.runtime.status.toUpperCase()}
+            detail={modeLabel(state.runtime.executionMode)}
+            tone={state.runtime.executionMode === 'live' ? 'warn' : 'neutral'}
+          />
+          <Digest
+            icon={<Radio size={16} />}
+            label="Feeds Connection"
+            value={state.feed.source.toUpperCase()}
+            detail={`BINANCE: ${state.feed.binanceConnected ? 'ON' : 'OFF'} / CLOB: ${state.feed.clobConnected ? 'ON' : 'OFF'}`}
+            tone={state.feed.source === 'live' && state.feed.binanceConnected ? 'good' : 'warn'}
+          />
+        </div>
+        <div className="digestGroup result">
+          <span className="digestGroupLabel">Results</span>
+          <Digest
+            icon={<CheckCircle2 size={16} />}
+            label="Net Realized PnL"
+            value={formatMoney(pnl)}
+            detail={`${state.settlements.length} settled rounds`}
+            tone={pnl > 0 ? 'good' : pnl < 0 ? 'bad' : 'neutral'}
+          />
+          <Digest
+            icon={<Users size={16} />}
+            label="Participation"
+            value={participationStatus.toUpperCase()}
+            detail={participationSummary}
+            tone={participationTone}
+          />
+        </div>
       </section>
 
       {/* Main Tabbed Area */}
@@ -752,6 +819,13 @@ export function App() {
                     <span className="decisionKicker">Current Action</span>
                     <strong>{decisionState.label}</strong>
                     <p>{decisionState.detail}</p>
+                    {failedEntryConditions.length > 0 && (
+                      <div className="blockerChips">
+                        {failedEntryConditions.slice(0, 3).map((condition) => (
+                          <span key={condition.label}>{condition.label}</span>
+                        ))}
+                      </div>
+                    )}
                   </div>
                   <div className="decisionSummaryMeta">
                     <span>{entryCheck?.reason || 'Strategy check has not loaded yet'}</span>
@@ -808,10 +882,11 @@ export function App() {
                     tone={failedEntryConditions.length ? 'warn' : 'good'}
                   />
                 </div>
-                <div className="scorePanel">
-                  <div className="scorePanelHeader">
+                <details className="collapsiblePanel">
+                  <summary>
                     <span>Score Composition</span>
-                  </div>
+                    <strong>{formatNumber(snapshot.features.chopScore, 1)} / 70</strong>
+                  </summary>
                   <div className="scorePanelBody">
                     <div className="scoreGaugeColumn">
                       <ScoreGauge score={snapshot.features.chopScore} threshold={70} />
@@ -833,7 +908,7 @@ export function App() {
                       </div>
                     </div>
                   </div>
-                </div>
+                </details>
               </div>
               
               {/* BTC Price vs Strike Visualizer */}
@@ -906,8 +981,11 @@ export function App() {
               </div>
 
               {/* Strategy Checks */}
-              <div className="panel">
-                <h2>Strategy Eligibility & Entry Checks</h2>
+              <details className="panel collapsiblePanel checksPanel">
+                <summary>
+                  <span>Strategy Eligibility & Entry Checks</span>
+                  <strong>{failedEntryConditions.length ? `${failedEntryConditions.length} blockers` : 'clear'}</strong>
+                </summary>
                 <div className="checks">
                   {state.strategyChecks.map((check) => (
                     <article key={check.strategy} className={`checkCard ${check.status}`}>
@@ -931,7 +1009,7 @@ export function App() {
                     </article>
                   ))}
                 </div>
-              </div>
+              </details>
             </div>
 
             {/* Right Column (Side status metrics) */}
@@ -1102,6 +1180,7 @@ export function App() {
         {activeTab === 'orderbooks' && (
           <div className="panel">
             <h2>Polymarket CLOB Order Books</h2>
+            <OrderbookExecutionSummary quotes={snapshot.orderbooks} yesTokenId={snapshot.round.yesTokenId} noTokenId={snapshot.round.noTokenId} />
             <OrderbookTable quotes={snapshot.orderbooks} yesTokenId={snapshot.round.yesTokenId} noTokenId={snapshot.round.noTokenId} />
           </div>
         )}
@@ -1168,10 +1247,11 @@ export function App() {
                             </div>
                           </div>
 
-                          <DataTable headers={['Time (ET)', 'Market', 'Orders', 'Submitted Buy Orders', 'Filled Buy Shares', 'Unfilled', 'Settlement PnL']}>
+                          <DataTable headers={['Time (ET)', 'Market', 'Round Status', 'Orders', 'Submitted Buy Orders', 'Filled Buy Shares', 'Unfilled', 'Settlement PnL']}>
                             {day.rounds.map((round) => {
                               const hasUnfilled = round.unfilledOrders > 0;
                               const fillLabel = fillStateLabel(round.filledBuyYes, round.filledBuyNo);
+                              const status = roundStatusSummary(round);
                               return (
                                 <tr key={round.roundId}>
                                   <td className="mono">{round.timeLabel}</td>
@@ -1184,6 +1264,10 @@ export function App() {
                                       )}
                                       <span className="marketTitle">{round.title}</span>
                                     </div>
+                                  </td>
+                                  <td>
+                                    <Badge tone={status.tone}>{status.label}</Badge>
+                                    <span className="mutedBlock">{status.detail}</span>
                                   </td>
                                   <td>
                                     <span className="mono">{round.orderCount}</span>
@@ -1233,10 +1317,11 @@ export function App() {
               {activitySubTab === 'rounds' && (
                 roundSummaries.length > 0 ? (
                   <>
-                    <DataTable headers={['Market', 'Round ID', 'Orders', 'Submitted Buy Orders', 'Filled Buy Shares', 'Filled Sell Shares', 'Unfilled', 'Settlement PnL']}>
+                    <DataTable headers={['Market', 'Round ID', 'Round Status', 'Orders', 'Submitted Buy Orders', 'Filled Buy Shares', 'Filled Sell Shares', 'Unfilled', 'Settlement PnL']}>
                       {roundPagination.pageRows.map((round) => {
                         const hasUnfilled = round.unfilledOrders > 0;
                         const fillLabel = fillStateLabel(round.filledBuyYes, round.filledBuyNo);
+                        const status = roundStatusSummary(round);
                         return (
                           <tr key={round.roundId}>
                             <td>
@@ -1250,6 +1335,10 @@ export function App() {
                               </div>
                             </td>
                             <td className="mono" style={{ fontSize: '11px' }}>{round.roundId}</td>
+                            <td>
+                              <Badge tone={status.tone}>{status.label}</Badge>
+                              <span className="mutedBlock">{status.detail}</span>
+                            </td>
                             <td>
                               <span className="mono">{round.orderCount}</span>
                               <span className="mutedInline"> {round.buyOrderCount} buy / {round.sellOrderCount} sell</span>
@@ -1298,7 +1387,7 @@ export function App() {
               {activitySubTab === 'orders' && (
                 state.orders.length > 0 ? (
                   <>
-                    <DataTable headers={['Time (ET)', 'Market', 'Round ID', 'Outcome', 'Side', 'Price', 'Size', 'Status', 'Polymarket CLOB Order ID']}>
+                    <DataTable headers={['Time (ET)', 'Market', 'Round ID', 'Outcome', 'Side', 'Price', 'Size', 'Status', 'Reason', 'Polymarket CLOB Order ID']}>
                       {ordersPagination.pageRows.map((order) => (
                         <tr key={order.id}>
                           <td className="mono">{formatEtTime(order.createdAt)}</td>
@@ -1318,6 +1407,9 @@ export function App() {
                             <Badge tone={order.status === 'failed' ? 'bad' : order.status === 'filled' ? 'good' : order.status === 'posted' ? 'warn' : 'neutral'}>
                               {order.status}
                             </Badge>
+                          </td>
+                          <td className="mono" style={{ fontSize: '11px', maxWidth: '260px', whiteSpace: 'normal' }}>
+                            {orderFailureReason(order)}
                           </td>
                           <td className="mono" style={{ fontSize: '11px' }} title={order.clobOrderId || ''}>
                             {order.clobOrderId ? shortenTokenId(order.clobOrderId) : '-'}
@@ -1428,10 +1520,20 @@ export function App() {
                   <option value="operator">Operator</option>
                 </select>
 
+                <button
+                  type="button"
+                  className={`logModeButton ${hideRoutineLogs ? 'active' : ''}`}
+                  onClick={() => setHideRoutineLogs((value) => !value)}
+                >
+                  {hideRoutineLogs ? 'Signal View' : 'Raw View'}
+                </button>
+
                 {/* Counter */}
-                <span style={{ fontSize: '12px', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>
-                  {filteredLogs.length} of {state.runtimeLogs.length} logs
-                </span>
+                <div className="logCounters">
+                  <span>{filteredLogs.length} of {state.runtimeLogs.length} logs</span>
+                  <strong>{alertLogCount} alerts</strong>
+                  <span>{signalLogCount} signal</span>
+                </div>
               </div>
 
               {/* Console log box */}
@@ -1476,16 +1578,18 @@ function Digest({
   label, 
   value, 
   detail, 
-  tone 
+  tone,
+  priority = 'secondary',
 }: { 
   icon: React.ReactNode; 
   label: string; 
   value: string; 
   detail: string; 
-  tone: 'good' | 'warn' | 'bad' | 'neutral' 
+  tone: 'good' | 'warn' | 'bad' | 'neutral';
+  priority?: 'primary' | 'secondary';
 }) {
   return (
-    <div className={`digestCard ${tone}`}>
+    <div className={`digestCard ${tone} ${priority}`}>
       <div className="digestHeader">
         {icon}
         <span>{label}</span>
@@ -1515,6 +1619,54 @@ function DecisionMetric({
       <span>{label}</span>
       <strong>{value}</strong>
       <em>{detail}</em>
+    </div>
+  );
+}
+
+function OrderbookExecutionSummary({ quotes, yesTokenId, noTokenId }: { quotes: OrderBookQuote[]; yesTokenId: string; noTokenId: string }) {
+  const yesQuote = quotes.find((quote) => quote.tokenId === yesTokenId);
+  const noQuote = quotes.find((quote) => quote.tokenId === noTokenId);
+  const pairAskCost = yesQuote?.bestAsk != null && noQuote?.bestAsk != null ? yesQuote.bestAsk + noQuote.bestAsk : null;
+  const pairEdge = pairAskCost == null ? null : 1 - pairAskCost;
+  const spreadState = quotes.length === 0 ? 'UNKNOWN' : quotes.every((quote) => quote.spread != null && quote.spread <= 0.02) ? 'TIGHT' : 'WIDE';
+  const yesDepth = yesQuote ? yesQuote.askDepth + yesQuote.bidDepth : 0;
+  const noDepth = noQuote ? noQuote.askDepth + noQuote.bidDepth : 0;
+  const depthRatio = yesDepth > 0 && noDepth > 0 ? Math.max(yesDepth, noDepth) / Math.min(yesDepth, noDepth) : null;
+  const imbalanceLabel = depthRatio == null ? 'UNKNOWN' : depthRatio >= 2 ? 'IMBALANCED' : 'BALANCED';
+  const newestQuoteAt = quotes.length ? Math.max(...quotes.map((quote) => toSortTime(quote.updatedAt)), 0) : 0;
+
+  return (
+    <div className="orderbookSummary">
+      <DecisionMetric
+        label="Pair Ask Cost"
+        value={pairAskCost == null ? '-' : pairAskCost.toFixed(3)}
+        detail={pairEdge == null ? 'waiting for both books' : `edge ${pairEdge.toFixed(3)}`}
+        tone={pairEdge == null ? 'neutral' : pairEdge >= 0.08 ? 'good' : 'warn'}
+      />
+      <DecisionMetric
+        label="Executable Pair"
+        value={pairAskCost == null ? 'MISSING' : pairAskCost <= 0.9 ? 'AVAILABLE' : 'EXPENSIVE'}
+        detail={`UP ${yesQuote?.bestAsk == null ? '-' : yesQuote.bestAsk.toFixed(3)} / DOWN ${noQuote?.bestAsk == null ? '-' : noQuote.bestAsk.toFixed(3)}`}
+        tone={pairAskCost == null ? 'bad' : pairAskCost <= 0.9 ? 'good' : 'warn'}
+      />
+      <DecisionMetric
+        label="Spread State"
+        value={spreadState}
+        detail={quotes.length ? quotes.map((quote) => quote.spread == null ? '-' : quote.spread.toFixed(3)).join(' / ') : 'no quotes'}
+        tone={spreadState === 'TIGHT' ? 'good' : spreadState === 'WIDE' ? 'warn' : 'neutral'}
+      />
+      <DecisionMetric
+        label="Liquidity Balance"
+        value={imbalanceLabel}
+        detail={depthRatio == null ? 'depth unavailable' : `${depthRatio.toFixed(2)}x depth ratio`}
+        tone={imbalanceLabel === 'BALANCED' ? 'good' : imbalanceLabel === 'IMBALANCED' ? 'warn' : 'neutral'}
+      />
+      <DecisionMetric
+        label="Book Freshness"
+        value={quotes.length === 0 ? 'UNKNOWN' : quotes.every((quote) => quote.source === 'ws') ? 'LIVE WS' : 'MIXED'}
+        detail={newestQuoteAt ? formatEtTime(new Date(newestQuoteAt).toISOString()) : 'not updated'}
+        tone={quotes.length > 0 && quotes.every((quote) => quote.source === 'ws') ? 'good' : 'neutral'}
+      />
     </div>
   );
 }
