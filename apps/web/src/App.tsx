@@ -410,8 +410,8 @@ export function App() {
   }
 
   const snapshot = state.latestSnapshot;
-  const eligible = state.strategyChecks.filter((check) => check.status === 'eligible').length;
   const entryCheck = state.strategyChecks.find((check) => check.strategy === 'BTC5M_DUAL_45');
+  const entryEligibleLabel = entryCheck?.status === 'eligible' ? 'entry eligible' : 'entry blocked';
   const entryConditions = entryCheck?.conditions || [];
   const conditionByLabel = (label: string) => entryConditions.find((condition) => condition.label === label);
   const failedEntryConditions = entryConditions.filter((condition) => !condition.passed);
@@ -606,7 +606,7 @@ export function App() {
           icon={<TrendingUp size={16} />} 
           label="Market Regime" 
           value={snapshot.regime} 
-          detail={`Score ${formatNumber(snapshot.features.chopScore, 1)} / ${eligible} eligible`}
+          detail={`Score ${formatNumber(snapshot.features.chopScore, 1)} / ${entryEligibleLabel}`}
           tone={snapshot.regime === 'CHOP' ? 'good' : snapshot.regime === 'TREND' ? 'bad' : 'neutral'} 
         />
         <Digest

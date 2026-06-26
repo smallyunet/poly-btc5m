@@ -1,8 +1,8 @@
 import type { BtcRoundConfig, FillRecord, PositionSnapshot, RoundPhase, RoundSnapshot, SettlementRecord, StateSnapshot } from '../../../packages/shared/src';
-import { classifyRegime, evaluateEntry, type StrategyRiskConfig } from '../../../packages/strategy/src';
+import { classifyRegime, evaluateEntry, evaluateExit, type StrategyRiskConfig } from '../../../packages/strategy/src';
 import { PolymarketAdapter, type FillTarget } from '../../../packages/polymarket/src';
 import type { AppConfig } from './config';
-import { executeSingleFillHedges } from './hedge';
+import { buildSingleFillHedgeCheck, executeSingleFillHedges, planSingleFillHedge } from './hedge';
 import { executeLiveIntents } from './execution';
 import type { MarketDataService } from './marketData';
 import type { ParticipationService } from './participation';
@@ -57,12 +57,41 @@ export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, dat
     : [];
   const hedgeOrderbooks = data.refreshOrderbooksForTokenIds(hedgeCandidates.flatMap((candidate) => [candidate.yesTokenId, candidate.noTokenId]));
   const hedgeDiagnostics = await executeSingleFillHedges({ appConfig, adapter, store, candidates: hedgeCandidates, orderbooks: hedgeOrderbooks });
+  const exit = evaluateExit(snapshot, positions, risk, { orders: store.roundOrders(snapshot.round.id), fills: store.roundFills(snapshot.round.id) });
+  const hedgeCheck = buildCurrentRoundHedgeCheck(appConfig, store, snapshot, [...orderbooks, ...hedgeOrderbooks]);
   await reconcileSettlements(appConfig, store, diagnostics);
   maybeRecordEstimatedSettlement(store, snapshot);
   const finalSnapshot = { ...snapshot, diagnostics: [...diagnostics, ...entry.diagnostics, ...executionDiagnostics, ...hedgeDiagnostics] };
   store.recordSnapshot(finalSnapshot, data.status());
-  store.recordStrategyChecks([...entry.checks]);
+  store.recordStrategyChecks([...entry.checks, ...exit.checks, hedgeCheck]);
   return finalSnapshot;
+}
+
+function buildCurrentRoundHedgeCheck(appConfig: AppConfig, store: InMemoryStore, snapshot: StateSnapshot, orderbooks: StateSnapshot['orderbooks']) {
+  const candidate = {
+    roundId: snapshot.round.id,
+    eventSlug: snapshot.round.eventSlug,
+    marketTitle: snapshot.round.title,
+    imageUrl: snapshot.round.imageUrl,
+    startAt: snapshot.round.startAt,
+    endAt: snapshot.round.endAt,
+    secondsToEnd: snapshot.round.secondsToEnd,
+    yesTokenId: snapshot.round.yesTokenId,
+    noTokenId: snapshot.round.noTokenId,
+  };
+  const orders = store.roundOrders(snapshot.round.id);
+  const plan = planSingleFillHedge({ candidate, orders, orderbooks, appConfig });
+  const executionKey = plan.ok ? [plan.intent.roundId, plan.intent.strategy, plan.intent.tokenId, plan.intent.side].join(':') : undefined;
+  return buildSingleFillHedgeCheck({
+    candidate,
+    orders,
+    orderbooks,
+    appConfig,
+    runtimeStatus: store.getRuntime().status,
+    outcome: store.getSingleFillHedgeOutcome(snapshot.round.id),
+    hasRecentHedgeOrder: executionKey ? store.hasRecentOrder(executionKey, appConfig.singleFillHedgeWindowSeconds * 1000) : false,
+    hasRecentFailedHedgeOrder: executionKey ? store.hasRecentFailedOrder(executionKey, 60_000) : false,
+  });
 }
 
 function captureOpeningStrike(round: BtcRoundConfig, store: InMemoryStore, latestPrice: number | null): BtcRoundConfig {

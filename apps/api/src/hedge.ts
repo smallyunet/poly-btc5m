@@ -1,4 +1,4 @@
-import type { OrderBookQuote, OrderRecord, TradeIntent } from '../../../packages/shared/src';
+import type { OrderBookQuote, OrderRecord, StrategyCheck, TradeIntent } from '../../../packages/shared/src';
 import type { PolymarketAdapter, FillTarget } from '../../../packages/polymarket/src';
 import type { AppConfig } from './config';
 import type { InMemoryStore, SingleFillHedgeCandidate } from './store';
@@ -91,6 +91,74 @@ export function planSingleFillHedge(params: {
     missingShares: diff,
     bestAsk,
     expectedPnlPerShare: 1 - pairCost,
+  };
+}
+
+export function buildSingleFillHedgeCheck(params: {
+  candidate: SingleFillHedgeCandidate;
+  orders: OrderRecord[];
+  orderbooks: OrderBookQuote[];
+  appConfig: AppConfig;
+  runtimeStatus: 'running' | 'degraded';
+  outcome?: { status: 'posted' | 'blocked' | 'failed' | 'monitor'; reason: string; recordedAt: string };
+  hasRecentHedgeOrder?: boolean;
+  hasRecentFailedHedgeOrder?: boolean;
+  nowMs?: number;
+}): StrategyCheck {
+  const nowMs = params.nowMs ?? Date.now();
+  const secondsToEnd = (new Date(params.candidate.endAt).getTime() - nowMs) / 1000;
+  const buyFills = params.orders.flatMap((order) => matchingBuyFills(order));
+  const yes = exposure(buyFills.filter((fill) => fill.label === 'YES'));
+  const no = exposure(buyFills.filter((fill) => fill.label === 'NO'));
+  const diff = roundShares(Math.abs(yes.shares - no.shares));
+  const dominantLabel = yes.shares > no.shares ? 'YES' : no.shares > yes.shares ? 'NO' : null;
+  const missingLabel = dominantLabel === 'YES' ? 'NO' : dominantLabel === 'NO' ? 'YES' : null;
+  const missingTokenId = missingLabel === 'YES' ? params.candidate.yesTokenId : missingLabel === 'NO' ? params.candidate.noTokenId : '';
+  const quote = missingTokenId ? params.orderbooks.find((item) => item.tokenId === missingTokenId) : undefined;
+  const quoteGate = missingLabel ? buyQuoteGate(quote, params.appConfig.maxOrderbookAgeSeconds) : 'NO_MATERIAL_SINGLE_FILL_EXPOSURE';
+  const plan = params.appConfig.singleFillHedgeEnabled && params.runtimeStatus !== 'degraded'
+    ? planSingleFillHedge(params)
+    : { ok: false as const, reason: params.appConfig.singleFillHedgeEnabled ? 'RUNTIME_DEGRADED' : 'HEDGE_DISABLED' };
+  const outcome = params.outcome;
+  const executionPassed = !outcome || outcome.status === 'posted' || outcome.status === 'monitor';
+  const blockers = [
+    ...(!params.appConfig.singleFillHedgeEnabled ? ['HEDGE_DISABLED'] : []),
+    ...(params.runtimeStatus === 'degraded' ? ['RUNTIME_DEGRADED'] : []),
+    ...(!plan.ok ? [plan.reason] : []),
+    ...(params.hasRecentHedgeOrder ? ['RECENT_HEDGE_ORDER_EXISTS'] : []),
+    ...(params.hasRecentFailedHedgeOrder ? ['RECENT_FAILED_HEDGE_ORDER'] : []),
+    ...(outcome && !executionPassed ? [`EXECUTION_${outcome.status.toUpperCase()}`] : []),
+  ];
+  const status: StrategyCheck['status'] = outcome && (outcome.status === 'posted' || outcome.status === 'monitor')
+    ? 'eligible'
+    : plan.ok && !params.hasRecentHedgeOrder && !params.hasRecentFailedHedgeOrder
+      ? 'eligible'
+      : benignHedgeReason(!plan.ok ? plan.reason : undefined)
+        ? 'not-applicable'
+        : 'blocked';
+
+  return {
+    strategy: HEDGE_STRATEGY,
+    title: 'BTC 5m Single-Fill Hedge',
+    status,
+    summary: 'When one side fills and the other does not, buy the missing side in the final round window using a capped aggressive limit order.',
+    reason: hedgeCheckReason(plan, outcome, params.hasRecentHedgeOrder, params.hasRecentFailedHedgeOrder),
+    blockers,
+    amountUsd: plan.ok ? plan.intent.shares * plan.intent.limitPrice : undefined,
+    limitPrice: plan.ok ? plan.intent.limitPrice : undefined,
+    conditions: [
+      condition('Hedge enabled', params.appConfig.singleFillHedgeEnabled, params.appConfig.singleFillHedgeEnabled ? 'enabled' : 'disabled'),
+      condition('Runtime healthy', params.runtimeStatus !== 'degraded', params.runtimeStatus),
+      condition('Final hedge window', secondsToEnd <= params.appConfig.singleFillHedgeWindowSeconds && secondsToEnd > params.appConfig.singleFillHedgeMinSecondsToEnd, `${secondsToEnd.toFixed(1)}s to end / window ${params.appConfig.singleFillHedgeWindowSeconds}s / min ${params.appConfig.singleFillHedgeMinSecondsToEnd}s`),
+      condition('Single-fill exposure', diff >= params.appConfig.minOrderShares, `YES ${yes.shares.toFixed(2)} / NO ${no.shares.toFixed(2)} / diff ${diff.toFixed(2)} / min ${params.appConfig.minOrderShares.toFixed(2)}`),
+      condition('Missing side identified', missingLabel != null, missingLabel ? `buy missing ${missingLabel}` : 'balanced or no fill'),
+      condition('Missing-side book ready', quoteGate == null, quoteGate || quoteAgeLabel(quote)),
+      condition('Hedge ask cap', quote?.bestAsk != null && quote.bestAsk <= params.appConfig.singleFillHedgeMaxPrice, quote?.bestAsk == null ? 'ask missing' : `${quote.bestAsk.toFixed(3)} / cap ${params.appConfig.singleFillHedgeMaxPrice.toFixed(3)}`),
+      condition('Pair cost cap', plan.ok || plan.reason !== 'HEDGE_PAIR_COST_ABOVE_CAP', plan.ok ? `${(plan.dominantAvgPrice + plan.intent.limitPrice).toFixed(3)} / cap ${params.appConfig.singleFillHedgeMaxPairCost.toFixed(3)}` : `blocked: ${plan.reason}`),
+      condition('Duplicate hedge guard', !params.hasRecentHedgeOrder, params.hasRecentHedgeOrder ? 'recent hedge order exists' : 'clear'),
+      condition('Failed hedge cooldown', !params.hasRecentFailedHedgeOrder, params.hasRecentFailedHedgeOrder ? 'recent failed hedge order exists' : 'clear'),
+      condition('Execution result', executionPassed, outcome ? `${outcome.status}: ${outcome.reason} @ ${outcome.recordedAt}` : 'no execution attempt yet'),
+    ],
   };
 }
 
@@ -281,6 +349,29 @@ function buyQuoteGate(quote: OrderBookQuote | undefined, maxAgeSeconds: number):
   if (!Number.isFinite(ageMs) || ageMs > maxAgeSeconds * 1000) return 'HEDGE_ORDERBOOK_STALE';
   if (quote.bestAsk == null) return 'BEST_ASK_MISSING';
   return null;
+}
+
+function condition(label: string, passed: boolean, actual: string) {
+  return { label, passed, actual };
+}
+
+function benignHedgeReason(reason: string | undefined): boolean {
+  return !reason || ['NO_MATERIAL_SINGLE_FILL_EXPOSURE', 'NOT_IN_HEDGE_WINDOW', 'HEDGE_TOO_CLOSE_TO_EXPIRY'].includes(reason);
+}
+
+function hedgeCheckReason(plan: HedgePlan, outcome: { status: 'posted' | 'blocked' | 'failed' | 'monitor'; reason: string; recordedAt: string } | undefined, hasRecentHedgeOrder?: boolean, hasRecentFailedHedgeOrder?: boolean): string {
+  if (outcome) return `Latest hedge outcome is ${outcome.status}: ${outcome.reason}.`;
+  if (hasRecentHedgeOrder) return 'Single-fill hedge already has a recent order for the missing side.';
+  if (hasRecentFailedHedgeOrder) return 'Single-fill hedge is paused by the short failed-order cooldown.';
+  if (!plan.ok) return `Single-fill hedge is not triggerable: ${plan.reason}.`;
+  return `Single-fill hedge is triggerable: buy missing ${plan.intent.label} @ ${plan.intent.limitPrice.toFixed(3)}.`;
+}
+
+function quoteAgeLabel(quote: OrderBookQuote | undefined): string {
+  if (!quote) return 'missing';
+  const ageSeconds = (Date.now() - new Date(quote.updatedAt).getTime()) / 1000;
+  const ask = quote.bestAsk == null ? ', ask missing' : `, ask ${quote.bestAsk.toFixed(3)}`;
+  return `${quote.source}, ${Number.isFinite(ageSeconds) ? ageSeconds.toFixed(1) : 'unknown'}s old${ask}`;
 }
 
 function localHedgeOrder(candidate: SingleFillHedgeCandidate, intent: TradeIntent, executionKey: string): OrderRecord {

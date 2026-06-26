@@ -344,6 +344,10 @@ export class InMemoryStore {
     this.persistState();
   }
 
+  getSingleFillHedgeOutcome(roundId: string): SingleFillHedgeOutcome | undefined {
+    return this.singleFillHedgeOutcomes.get(roundId);
+  }
+
   maybeStartSingleFillCooldown(newFills: FillRecord[], cooldown: number | SingleFillCooldownPolicy, nowMs = Date.now()): SingleFillCooldownRecord | null {
     const policy = normalizeCooldownPolicy(cooldown);
     let dirty = false;
