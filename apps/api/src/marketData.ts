@@ -7,12 +7,13 @@ import type { InMemoryStore } from './store';
 export class MarketDataService {
   private readonly priceTicks: PriceTick[] = [];
   private readonly orderbooks = new Map<string, OrderBookQuote>();
-  private rtds?: WebSocket;
+  private binance?: WebSocket;
   private clob?: WebSocket;
   private clobTokenKey = '';
   private clobReconnect?: NodeJS.Timeout;
-  private rtdsConnected = false;
+  private binanceConnected = false;
   private clobConnected = false;
+  private lastBinanceSampleAt = 0;
 
   constructor(
     private readonly config: AppConfig,
@@ -20,7 +21,7 @@ export class MarketDataService {
   ) {}
 
   start(): void {
-    this.connectRtds();
+    this.connectBinance();
   }
 
   syncClobRound(round: BtcRoundConfig, extraTokenIds: string[] = []): void {
@@ -49,8 +50,8 @@ export class MarketDataService {
 
   features(round: BtcRoundConfig): BtcFeatureSnapshot {
     const now = Date.now();
-    const ticks = this.priceTicks.filter((tick) => now - new Date(tick.receivedAt).getTime() <= 120_000);
-    const ticks300s = this.priceTicks.filter((tick) => now - new Date(tick.receivedAt).getTime() <= 300_000);
+    const ticks = this.binanceConnected ? this.priceTicks.filter((tick) => now - new Date(tick.receivedAt).getTime() <= 120_000) : [];
+    const ticks300s = this.binanceConnected ? this.priceTicks.filter((tick) => now - new Date(tick.receivedAt).getTime() <= 300_000) : [];
     const latest = ticks.at(-1);
     const samples120s = ticks.length;
     let cross120s = 0;
@@ -127,12 +128,12 @@ export class MarketDataService {
     const latestPrice = this.priceTicks.at(-1);
     const latestBook = [...this.orderbooks.values()].sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())[0];
     return {
-      rtdsConnected: this.rtdsConnected,
+      binanceConnected: this.binanceConnected,
       clobConnected: this.clobConnected,
       lastPriceAt: latestPrice?.receivedAt,
       lastOrderbookAt: latestBook?.updatedAt,
       priceSamples: this.priceTicks.length,
-      source: this.rtdsConnected ? 'live' : 'unavailable',
+      source: this.binanceConnected ? 'live' : 'unavailable',
     };
   }
 
@@ -140,40 +141,27 @@ export class MarketDataService {
     return this.priceTicks.at(-1)?.price ?? null;
   }
 
-  private connectRtds(): void {
-    if (this.rtds) return;
+  private connectBinance(): void {
+    if (this.binance) return;
     try {
-      const ws = new WebSocket(this.config.rtdsWsUrl);
-      this.rtds = ws;
+      const ws = new WebSocket(this.config.binanceWsUrl);
+      this.binance = ws;
       ws.on('open', () => {
-        this.rtdsConnected = true;
-        this.store.recordRuntimeLog({ level: 'info', source: 'market-data', message: 'RTDS websocket connected.' });
-        ws.send(JSON.stringify({
-          action: 'subscribe',
-          subscriptions: [
-            {
-              topic: 'crypto_prices',
-              type: 'update',
-            },
-          ],
-        }));
+        this.binanceConnected = true;
+        this.store.recordRuntimeLog({ level: 'info', source: 'market-data', message: 'Binance BTC websocket connected.' });
       });
-      ws.on('message', (data) => this.handlePriceMessage(data.toString()));
+      ws.on('message', (data) => this.handleBinancePriceMessage(data.toString()));
       ws.on('close', () => {
-        this.rtdsConnected = false;
-        this.rtds = undefined;
-        setTimeout(() => this.connectRtds(), 5_000).unref?.();
+        this.binanceConnected = false;
+        this.binance = undefined;
+        setTimeout(() => this.connectBinance(), 5_000).unref?.();
       });
       ws.on('error', (error) => {
-        this.rtdsConnected = false;
-        this.store.recordRuntimeLog({ level: 'warn', source: 'market-data', message: `RTDS websocket error: ${error.message}` });
+        this.binanceConnected = false;
+        this.store.recordRuntimeLog({ level: 'warn', source: 'market-data', message: `Binance BTC websocket error: ${error.message}` });
       });
-      const ping = setInterval(() => {
-        if (ws.readyState === WebSocket.OPEN) ws.send('PING');
-      }, 5_000);
-      ws.on('close', () => clearInterval(ping));
     } catch (error) {
-      this.store.recordRuntimeLog({ level: 'warn', source: 'market-data', message: `RTDS websocket failed: ${error instanceof Error ? error.message : String(error)}` });
+      this.store.recordRuntimeLog({ level: 'warn', source: 'market-data', message: `Binance BTC websocket failed: ${error instanceof Error ? error.message : String(error)}` });
     }
   }
 
@@ -231,16 +219,25 @@ export class MarketDataService {
     this.clobConnected = false;
   }
 
-  private handlePriceMessage(data: unknown): void {
+  private handleBinancePriceMessage(data: unknown): void {
     try {
       const parsed = JSON.parse(String(data));
-      const symbol = String(parsed?.payload?.symbol || parsed?.symbol || '').toLowerCase();
-      if (symbol && symbol !== 'btcusdt' && symbol !== 'btc/usd') return;
-      const price = findNumber(parsed, ['value']);
-      if (price != null) this.recordPrice(price, 'rtds');
+      const streamPayload = parsed?.data && typeof parsed.data === 'object' ? parsed.data : parsed;
+      const symbol = String(streamPayload?.s || streamPayload?.symbol || '').toLowerCase();
+      if (symbol && symbol !== 'btcusdt') return;
+      const price = finiteNumber(streamPayload?.p ?? streamPayload?.c ?? streamPayload?.price);
+      if (price != null) this.recordSampledBinancePrice(price);
     } catch {
-      // RTDS price frames are JSON. Ignore non-JSON frames such as server pongs.
+      // Ignore malformed websocket frames; missing price samples block strategy entry.
     }
+  }
+
+  private recordSampledBinancePrice(price: number): void {
+    if (!Number.isFinite(price) || price <= 0) return;
+    const now = Date.now();
+    if (now - this.lastBinanceSampleAt < this.config.binancePriceSampleMs) return;
+    this.lastBinanceSampleAt = now;
+    this.recordPrice(price, 'binance', new Date(now).toISOString());
   }
 
   private handleOrderbookMessage(data: unknown): void {
@@ -290,10 +287,10 @@ export class MarketDataService {
     });
   }
 
-  private recordPrice(price: number, source: PriceTick['source']): void {
+  private recordPrice(price: number, source: PriceTick['source'], receivedAt = new Date().toISOString()): void {
     if (!Number.isFinite(price) || price <= 0) return;
     const cutoff = Date.now() - 10 * 60_000;
-    this.priceTicks.push({ price, source, receivedAt: new Date().toISOString() });
+    this.priceTicks.push({ price, source, receivedAt });
     while (this.priceTicks.length && new Date(this.priceTicks[0].receivedAt).getTime() < cutoff) {
       this.priceTicks.shift();
     }
@@ -357,22 +354,6 @@ export function scoreChop(input: {
 function clamp(value: number): number {
   if (!Number.isFinite(value)) return 0;
   return Math.max(0, Math.min(1, value));
-}
-
-function findNumber(value: any, keys: string[]): number | null {
-  for (const key of keys) {
-    const parsed = Number(value?.[key]);
-    if (Number.isFinite(parsed)) return parsed;
-  }
-  if (value && typeof value === 'object') {
-    for (const nested of Object.values(value)) {
-      if (nested && typeof nested === 'object') {
-        const found = findNumber(nested, keys);
-        if (found != null) return found;
-      }
-    }
-  }
-  return null;
 }
 
 function finiteNumber(value: unknown): number | null {

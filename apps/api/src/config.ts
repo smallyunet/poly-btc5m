@@ -16,7 +16,8 @@ export type AppConfig = {
   tickIntervalMs: number;
   runtimeStatePath: string;
   runtimeMaxRecords: number;
-  rtdsWsUrl: string;
+  binanceWsUrl: string;
+  binancePriceSampleMs: number;
   clobWsUrl: string;
   dualLimitPrice: number;
   dynamicLimitEnabled: boolean;
@@ -76,7 +77,8 @@ export function loadConfig(): AppConfig {
     tickIntervalMs: parsePositiveInteger(process.env.BOT_TICK_MS, 2_000),
     runtimeStatePath: process.env.RUNTIME_STATE_PATH || path.resolve(process.cwd(), 'data/runtime-state.json'),
     runtimeMaxRecords: parsePositiveInteger(process.env.RUNTIME_MAX_RECORDS, 1_000),
-    rtdsWsUrl: rtdsWsUrl(process.env.POLYMARKET_RTDS_WS_URL),
+    binanceWsUrl: binanceWsUrl(process.env.BINANCE_BTC_WS_URL),
+    binancePriceSampleMs: parsePositiveInteger(process.env.BINANCE_PRICE_SAMPLE_MS, 1_000),
     clobWsUrl: clobWsUrl(process.env.POLYMARKET_CLOB_WS_URL),
     dualLimitPrice: numberEnv('DUAL_LIMIT_PRICE', 0.45),
     dynamicLimitEnabled: booleanEnv('DYNAMIC_LIMIT_ENABLED', true),
@@ -154,9 +156,9 @@ function booleanEnv(name: string, fallback: boolean): boolean {
   return fallback;
 }
 
-function rtdsWsUrl(value: string | undefined): string {
-  const url = value?.trim() || 'wss://ws-live-data.polymarket.com';
-  if (!url.startsWith('wss://')) throw new Error('POLYMARKET_RTDS_WS_URL must be a wss:// URL.');
+function binanceWsUrl(value: string | undefined): string {
+  const url = value?.trim() || 'wss://stream.binance.com:9443/ws/btcusdt@aggTrade';
+  if (!url.startsWith('wss://')) throw new Error('BINANCE_BTC_WS_URL must be a wss:// URL.');
   return url;
 }
 

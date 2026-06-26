@@ -48,7 +48,7 @@ export type BtcMarketConfig = {
 
 export type PriceTick = {
   price: number;
-  source: 'rtds';
+  source: 'binance';
   receivedAt: string;
 };
 
@@ -272,7 +272,7 @@ export type RuntimeLogRecord = {
 };
 
 export type DataFeedStatus = {
-  rtdsConnected: boolean;
+  binanceConnected: boolean;
   clobConnected: boolean;
   lastPriceAt?: string;
   lastOrderbookAt?: string;

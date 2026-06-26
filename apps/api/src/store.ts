@@ -82,7 +82,7 @@ const BENIGN_HEDGE_REASONS = new Set(['NO_MATERIAL_SINGLE_FILL_EXPOSURE', 'NOT_I
 export class InMemoryStore {
   private runtime: BotRuntimeStatus;
   private latestSnapshot: StateSnapshot | null = null;
-  private latestFeed: DataFeedStatus = { rtdsConnected: false, clobConnected: false, priceSamples: 0, source: 'unavailable' };
+  private latestFeed: DataFeedStatus = { binanceConnected: false, clobConnected: false, priceSamples: 0, source: 'unavailable' };
   private intents: TradeIntent[] = [];
   private orders: OrderRecord[] = [];
   private fills: FillRecord[] = [];

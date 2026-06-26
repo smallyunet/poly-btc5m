@@ -14,7 +14,15 @@ No exchange-level expiration is attached to the limit orders. Local `ttlSeconds`
 
 ### 1.1 BTC Price Feed
 
-BTC price comes from Polymarket RTDS over `wss://ws-live-data.polymarket.com`.
+BTC price comes from Binance public BTCUSDT aggTrade websocket over `wss://stream.binance.com:9443/ws/btcusdt@aggTrade`.
+
+The websocket is a raw public trade feed, but the strategy does not consume every trade as a separate path sample. The worker records the latest Binance trade at a fixed cadence controlled by:
+
+```text
+BINANCE_PRICE_SAMPLE_MS=1000
+```
+
+This preserves Binance as the higher-quality price source while keeping `cross120s`, `samples120s`, and the CHOP score comparable to the previous seconds-level path semantics. The default dynamic thresholds therefore do not need to be scaled up just because Binance emits more raw messages.
 
 The strategy uses BTC price to compute:
 

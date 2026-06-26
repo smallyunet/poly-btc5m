@@ -2,12 +2,12 @@
 
 Deployable Polymarket BTC 5-minute strategy worker and operator dashboard.
 
-The strategy is based on `docs/polymarket_rtds_pre_round_strategy.md`: it does not predict BTC direction. It classifies the next 5-minute round as `CHOP`, `TREND`, or `LOW_ACTIVITY`, and only in `CHOP` does it prepare paired YES/NO limit orders using the score-based dynamic limit policy.
+The strategy is based on `docs/binance_btc_pre_round_strategy.md`: it does not predict BTC direction. It classifies the next 5-minute round as `CHOP`, `TREND`, or `LOW_ACTIVITY`, and only in `CHOP` does it prepare paired YES/NO limit orders using the score-based dynamic limit policy.
 
 ## Structure
 
 ```text
-apps/api              Express API, worker loop, RTDS/CLOB data service
+apps/api              Express API, worker loop, Binance/CLOB data service
 apps/web              React dashboard served by the API in production
 packages/shared       Shared schemas and dashboard/runtime types
 packages/strategy     Pure BTC 5m regime and order-intent engine
@@ -37,7 +37,7 @@ The default mode is `EXECUTION_MODE=monitor`. In monitor mode the worker records
 The worker runs every `BOT_TICK_MS` and produces one `DashboardState` snapshot:
 
 - Discovers the next BTC 5m round from deterministic `btc-updown-5m-<roundStartSec>` slugs and Gamma `/markets/slug/:slug`.
-- Maintains recent BTC price samples only from Polymarket RTDS over `wss://ws-live-data.polymarket.com`.
+- Maintains recent BTC price samples only from Binance public BTCUSDT aggTrade websocket over `wss://stream.binance.com:9443/ws/btcusdt@aggTrade`.
 - Maintains YES/NO CLOB orderbooks only from the Polymarket CLOB market websocket.
 - Computes BTC path features including `cross120s`, realized range bps, two-sided excursion bps, drift/momentum ratios, range percentile, and a `chopScore`.
 - Classifies the round regime.
@@ -60,7 +60,8 @@ OWNER_PRIVATE_KEY=...
 Recommended live feed settings:
 
 ```dotenv
-POLYMARKET_RTDS_WS_URL=wss://ws-live-data.polymarket.com
+BINANCE_BTC_WS_URL=wss://stream.binance.com:9443/ws/btcusdt@aggTrade
+BINANCE_PRICE_SAMPLE_MS=1000
 POLYMARKET_CLOB_WS_URL=wss://ws-subscriptions-clob.polymarket.com/ws/market
 POLYMARKET_GAMMA_API_URL=https://gamma-api.polymarket.com
 POLYMARKET_DATA_API_URL=https://data-api.polymarket.com
@@ -69,10 +70,12 @@ MAX_ORDERBOOK_AGE_SECONDS=5
 RUNTIME_MAX_RECORDS=1000
 ```
 
-BTC price has no HTTP/manual/simulated fallback. The worker subscribes to the RTDS `crypto_prices` stream and only accepts `btcusdt` updates. If RTDS is not connected or no `btcusdt` tick has arrived, the regime remains `UNKNOWN` and entry orders are blocked.
+BTC price has no HTTP/manual/simulated fallback. The worker subscribes to the Binance `btcusdt@aggTrade` stream and only accepts `btcusdt` updates. It samples the latest trade into the strategy path every `BINANCE_PRICE_SAMPLE_MS` milliseconds by default, so the CHOP thresholds keep a stable seconds-level meaning instead of scaling with raw trade count. If Binance is not connected or no `btcusdt` trade has arrived, the regime remains `UNKNOWN` and entry orders are blocked.
 Orderbook price also has no REST fallback. The worker discovers the next 5-minute BTC Up/Down market from Gamma, maps `Up` to the local `YES` side and `Down` to the local `NO` side, then subscribes to both token IDs over the CLOB market websocket. If discovery fails, the CLOB websocket is not connected, or books are missing/stale, entry orders are blocked.
 
-The round strike is the BTC price at the beginning of the 5-minute Polymarket range. Before the next round starts, the dashboard shows the latest RTDS BTC price as an estimate. Once the round starts, the first available RTDS BTC price is persisted as that round's opening strike.
+The round strike is the BTC price at the beginning of the 5-minute Polymarket range. Before the next round starts, the dashboard shows the latest Binance BTC price as an estimate. Once the round starts, the first available sampled Binance BTC price is persisted as that round's opening strike.
+
+The current dynamic BTC path thresholds are intentionally kept unchanged after the Binance switch because the runtime feeds the strategy with sampled Binance prices, not every raw trade. `rangeBps`, two-sided excursion, drift ratio, and momentum ratio are price-path measures and remain comparable. `cross120s` also remains comparable because the 1s sampling prevents high-frequency trade noise from multiplying strike crosses.
 
 `RUNTIME_MAX_RECORDS` bounds retained intents, orders, fills, and settlement records in memory and in `runtime-state.json`. The dashboard paginates long activity and log lists so the UI does not render the full retained history at once.
 
@@ -172,7 +175,7 @@ The included local certificate is self-signed for `b.dark20.xyz`. With that cert
 
 ## Safety
 
-- Keep `EXECUTION_MODE=monitor` until RTDS, Gamma round discovery, CLOB token subscriptions, balances, and signed-order posting are verified.
+- Keep `EXECUTION_MODE=monitor` until Binance price feed, Gamma round discovery, CLOB token subscriptions, balances, and signed-order posting are verified.
 - Do not commit `.env`, private keys, or deposit-wallet secrets.
 - Do not expose the dashboard publicly without authentication or a private network boundary.
 - Treat local `settlement` rows as estimates until validated against Polymarket final resolution data.

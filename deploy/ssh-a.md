@@ -31,4 +31,4 @@ cd ~/apps/poly-btc5m
 nano .env
 ```
 
-Keep `EXECUTION_MODE=monitor` until RTDS, CLOB token IDs, balances, and signed-order posting have been verified.
+Keep `EXECUTION_MODE=monitor` until Binance price feed, CLOB token IDs, balances, and signed-order posting have been verified.

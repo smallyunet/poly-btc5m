@@ -592,8 +592,8 @@ export function App() {
           icon={<Radio size={16} />} 
           label="Feeds Connection" 
           value={state.feed.source.toUpperCase()} 
-          detail={`RTDS: ${state.feed.rtdsConnected ? 'ON' : 'OFF'} / CLOB: ${state.feed.clobConnected ? 'ON' : 'OFF'}`} 
-          tone={state.feed.source === 'live' && state.feed.rtdsConnected ? 'good' : 'warn'} 
+          detail={`BINANCE: ${state.feed.binanceConnected ? 'ON' : 'OFF'} / CLOB: ${state.feed.clobConnected ? 'ON' : 'OFF'}`}
+          tone={state.feed.source === 'live' && state.feed.binanceConnected ? 'good' : 'warn'}
         />
         <Digest 
           icon={<Timer size={16} />} 

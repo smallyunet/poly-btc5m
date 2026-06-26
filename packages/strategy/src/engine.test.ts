@@ -290,7 +290,7 @@ function baseSnapshot(features: Partial<StateSnapshot['features']>): StateSnapsh
       rangePercentile120s: null,
       chopScore: 0,
       samples120s: 0,
-      source: 'rtds',
+      source: 'binance',
       updatedAt: now,
       ...features,
     },
