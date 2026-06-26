@@ -4,7 +4,7 @@
 
 This strategy does **not** trade BTC direction.
 
-The worker only targets the **next BTC 5-minute round**. It may place paired YES/NO BUY limit orders before the round starts. After the round starts, it does not add, exit, rebalance, or post any new trade intent. After start, the worker only reconciles fills and records estimated settlement/PnL.
+The worker primarily targets the **next BTC 5-minute round**. It may place paired YES/NO BUY limit orders before the round starts. After the round starts, the default mode is still settlement-only. The only exception is the optional `BTC5M_SINGLE_FILL_HEDGE` risk control: if only one side has filled in the final window, the worker may cancel stale missing-side limit orders and submit a capped aggressive BUY LIMIT for the missing side. It never sells and never sends an uncapped market order.
 
 No exchange-level expiration is attached to the limit orders. Local `ttlSeconds` is only used for local intent/order dedupe windows.
 
@@ -66,13 +66,13 @@ Current default:
 decisionLeadSeconds = 30
 ```
 
-Execution also enforces a hard post-start gate:
+Normal entry execution also enforces a hard post-start gate:
 
 ```text
 Date.now() < round.startAt
 ```
 
-If this is false, execution rejects with:
+If this is false, normal entry execution rejects with:
 
 ```text
 ROUND_ALREADY_STARTED
@@ -82,6 +82,20 @@ All SELL intents are rejected with:
 
 ```text
 SELL_DISABLED_SETTLEMENT_ONLY
+```
+
+The final-window single-fill hedge uses a separate time gate:
+
+```text
+secondsToEnd <= SINGLE_FILL_HEDGE_WINDOW_SECONDS
+secondsToEnd > SINGLE_FILL_HEDGE_MIN_SECONDS_TO_END
+```
+
+Current defaults:
+
+```text
+SINGLE_FILL_HEDGE_WINDOW_SECONDS=30
+SINGLE_FILL_HEDGE_MIN_SECONDS_TO_END=5
 ```
 
 ---
@@ -416,7 +430,7 @@ Intent fields:
 
 ## 10. Execution Gates
 
-Before posting an intent live, execution checks:
+Before posting a normal entry intent live, execution checks:
 
 ```text
 token is in the target round
@@ -434,13 +448,31 @@ no recent failed duplicate exists
 no open Polymarket order exists for the same token
 ```
 
-For BUY, orderbook must have best ask. For SELL, execution rejects before orderbook checks because settlement-only mode disables all SELL actions.
+For BUY, orderbook must have best ask. For SELL, execution rejects before orderbook checks because this strategy disables all SELL actions.
+
+Single-fill hedge execution additionally checks:
+
+```text
+SINGLE_FILL_HEDGE_ENABLED=true
+round is running and inside the hedge window
+one BUY side exceeds the other side by at least MIN_ORDER_SHARES
+missing-side book is live/fresh
+missing-side bestAsk <= SINGLE_FILL_HEDGE_MAX_PRICE
+dominant average fill price + hedge limit <= SINGLE_FILL_HEDGE_MAX_PAIR_COST
+no recent local hedge duplicate exists
+```
+
+The hedge is not a market order. It is a capped aggressive limit:
+
+```text
+hedgeLimitPrice = min(bestAsk + SINGLE_FILL_HEDGE_PRICE_OFFSET, SINGLE_FILL_HEDGE_MAX_PRICE)
+```
 
 ---
 
 ## 11. After Round Start
 
-After round start, the worker does not:
+After round start, the worker normally does not:
 
 - add to either side
 - sell
@@ -448,7 +480,21 @@ After round start, the worker does not:
 - rebalance
 - post new trade intents
 
-It only:
+The only exception is final-window single-fill hedging. Trigger conditions:
+
+- the active round has started and is inside `SINGLE_FILL_HEDGE_WINDOW_SECONDS`
+- more than `SINGLE_FILL_HEDGE_MIN_SECONDS_TO_END` remains
+- one BUY side materially exceeds the other side
+- the missing-side live best ask is not above `SINGLE_FILL_HEDGE_MAX_PRICE`
+- dominant-side average fill price plus hedge limit is not above `SINGLE_FILL_HEDGE_MAX_PAIR_COST`
+
+When triggered, the worker:
+
+- cancels stale missing-side BUY limit orders
+- reconciles fills again
+- submits a capped aggressive BUY LIMIT for the missing-side share gap
+
+Otherwise it only:
 
 - syncs market data
 - reads positions when wallet is configured
@@ -481,7 +527,7 @@ profit = 1 - pairCost
 
 ### One Side Fills
 
-The position becomes directional exposure. The worker still does not exit after start.
+The position becomes directional exposure. The old strategy held it through settlement; the optional single-fill hedge now tries to buy the missing side in the final window with a price cap, turning directional exposure into a near-fixed outcome.
 
 For one share at price `p`:
 
@@ -501,6 +547,23 @@ p=0.46 => win +0.54, lose -0.46
 
 This is the main risk of the strategy. Dynamic pricing is designed to use lower prices for weaker CHOP scores and only raise price when the CHOP signal is stronger.
 
+If the final-window hedge buys the missing side, the outcome becomes:
+
+```text
+hedgedPnlPerShare = 1 - originalAvgPrice - hedgeLimitPrice
+```
+
+Example with original average fill price `0.44`:
+
+```text
+hedgeLimit=0.55 => +0.01/share
+hedgeLimit=0.65 => -0.09/share
+hedgeLimit=0.80 => -0.24/share
+no hedge and original side loses => -0.44/share
+```
+
+The hedge is therefore a tail-loss reducer, not an unconditional return enhancer. If the cap is exceeded, the worker does not chase.
+
 ---
 
 ## 13. Dashboard Surfaces
@@ -513,7 +576,7 @@ The dashboard shows:
 - pair cost and pair edge
 - orderbook tradability status
 - current blockers
-- post-start action mode: `SETTLEMENT ONLY`
+- post-start action mode: default settlement-only, with capped single-fill hedge activity visible in logs
 - detailed strategy conditions
 
 The page is intended to make the current decision and blockers visible without reading logs.

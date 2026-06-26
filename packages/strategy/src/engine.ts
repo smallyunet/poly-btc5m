@@ -138,15 +138,15 @@ export function evaluateExit(snapshot: StateSnapshot, positions: PositionSnapsho
 
   const checks: StrategyCheck[] = [{
     strategy: 'BTC5M_SINGLE_EXIT',
-    title: 'BTC 5m Settlement-Only After Start',
+    title: 'BTC 5m Post-Start Exit Policy',
     status: 'not-applicable',
-    summary: 'Sell-side exits are disabled; after round start the bot only reconciles fills and records settlement estimates.',
-    reason: 'No add, exit, or rebalance actions are generated after round start.',
+    summary: 'Sell-side exits are disabled; regular post-start add/rebalance actions are disabled, except for the independent capped single-fill hedge rule.',
+    reason: 'No sell-side exit or regular rebalance action is generated after round start.',
     blockers: [],
     conditions: [
-      condition('Sell-side exits disabled', true, 'settlement-only'),
+      condition('Sell-side exits disabled', true, 'buy-only risk control'),
       condition('Active positions observed', true, `${activePositions}`),
-      condition('Trade generation after start', true, 'disabled'),
+      condition('Regular trade generation after start', true, 'disabled; hedge rule is separate'),
     ],
   }];
 

@@ -143,7 +143,7 @@ test('does not generate sell intents for single-sided exposure', () => {
   assert.equal(result.intents.length, 0);
   assert.equal(result.rejected.length, 0);
   assert.equal(result.checks[0].status, 'not-applicable');
-  assert.match(result.checks[0].reason, /No add, exit, or rebalance/);
+  assert.match(result.checks[0].reason, /No sell-side exit/);
 });
 
 test('does not sell only because the data source is unavailable', () => {

@@ -42,6 +42,7 @@ The worker runs every `BOT_TICK_MS` and produces one `DashboardState` snapshot:
 - Computes BTC path features including `cross120s`, realized range bps, two-sided excursion bps, drift/momentum ratios, range percentile, and a `chopScore`.
 - Classifies the round regime.
 - Generates paired score-based entry intents during the pre-round decision window when the regime is `CHOP`.
+- Optionally performs a capped final-window BUY hedge when one side filled and the other side did not.
 - Reconciles recent fills and estimates settlement/PnL after a round has ended.
 
 ## Configuration
@@ -94,9 +95,15 @@ MIN_RANGE_BPS_120S=3
 MIN_BI_EXCURSION_BPS_120S=1
 MAX_DRIFT_RATIO_120S=0.45
 MAX_MOMENTUM_RATIO_30S=0.55
+SINGLE_FILL_HEDGE_ENABLED=true
+SINGLE_FILL_HEDGE_WINDOW_SECONDS=30
+SINGLE_FILL_HEDGE_MIN_SECONDS_TO_END=5
+SINGLE_FILL_HEDGE_MAX_PRICE=0.65
+SINGLE_FILL_HEDGE_PRICE_OFFSET=0.01
+SINGLE_FILL_HEDGE_MAX_PAIR_COST=1.10
 ```
 
-The worker targets the next BTC 5m round only. It posts paired BUY limit orders before round start, does not set an exchange-level expiration on those limit orders, and rejects all trade intents after the round has started. The runtime does not generate sell-side exits; after start it only reconciles fills and records settlement estimates.
+The worker targets the next BTC 5m round for entry. It posts paired BUY limit orders before round start and does not set an exchange-level expiration on those limit orders. After start, it normally only reconciles fills and records settlement estimates. The optional single-fill hedge is the only post-start trade path: in the final window it can cancel stale missing-side BUY orders and submit a capped aggressive BUY LIMIT for the missing side. It never sends SELL orders or uncapped market orders.
 
 Live entry orders are configured as CLOB limit order `price + size`:
 
@@ -104,6 +111,7 @@ Live entry orders are configured as CLOB limit order `price + size`:
 - `DUAL_LIMIT_PRICE` is the fixed fallback price when dynamic limit pricing is disabled.
 - With `DYNAMIC_SHARES_ENABLED=true`, CHOP score maps to `0.5x/1.0x/1.0x/1.25x` of `ORDER_SHARES_PER_SIDE`, capped by `MAX_ORDER_SHARES_PER_SIDE`.
 - The resulting shares value becomes the `size` sent to `createOrder` for each YES/NO side.
+- `SINGLE_FILL_HEDGE_MAX_PRICE` is the hard cap for the final-window missing-side hedge. `SINGLE_FILL_HEDGE_PRICE_OFFSET` lets the hedge cross the current best ask slightly while still respecting the cap.
 
 ## Docker
 

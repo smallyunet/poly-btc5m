@@ -9,6 +9,18 @@ type OpenOrderLike = {
   tokenId: string;
 };
 
+export type SingleFillHedgeCandidate = {
+  roundId: string;
+  eventSlug: string;
+  marketTitle?: string;
+  imageUrl?: string;
+  startAt: string;
+  endAt: string;
+  secondsToEnd: number;
+  yesTokenId: string;
+  noTokenId: string;
+};
+
 type StoreOptions = {
   persistencePath?: string | false;
   maxRecords?: number;
@@ -172,6 +184,41 @@ export class InMemoryStore {
     return this.orders.filter((order) => order.roundId === roundId);
   }
 
+  hedgeWatchTokenIds(windowSeconds: number, minSecondsToEnd: number, nowMs = Date.now()): string[] {
+    return this.singleFillHedgeCandidates(windowSeconds, minSecondsToEnd, nowMs)
+      .flatMap((candidate) => [candidate.yesTokenId, candidate.noTokenId])
+      .filter(Boolean);
+  }
+
+  singleFillHedgeCandidates(windowSeconds: number, minSecondsToEnd: number, nowMs = Date.now()): SingleFillHedgeCandidate[] {
+    const byRound = new Map<string, SingleFillHedgeCandidate>();
+    for (const order of this.orders) {
+      if (order.side !== 'BUY') continue;
+      const startMs = roundStartMs(order.roundId);
+      if (startMs == null) continue;
+      const endMs = startMs + 5 * 60_000;
+      const secondsToEnd = (endMs - nowMs) / 1000;
+      if (nowMs < startMs || secondsToEnd > windowSeconds || secondsToEnd <= minSecondsToEnd) continue;
+
+      const existing = byRound.get(order.roundId);
+      const candidate: SingleFillHedgeCandidate = existing || {
+        roundId: order.roundId,
+        eventSlug: order.eventSlug,
+        marketTitle: order.marketTitle,
+        imageUrl: order.imageUrl,
+        startAt: new Date(startMs).toISOString(),
+        endAt: new Date(endMs).toISOString(),
+        secondsToEnd,
+        yesTokenId: '',
+        noTokenId: '',
+      };
+      if (order.label === 'YES') candidate.yesTokenId = order.tokenId;
+      if (order.label === 'NO') candidate.noTokenId = order.tokenId;
+      byRound.set(order.roundId, candidate);
+    }
+    return [...byRound.values()].filter((candidate) => candidate.yesTokenId && candidate.noTokenId);
+  }
+
   ordersNeedingReconciliation(limit = 200): OrderRecord[] {
     return this.orders
       .filter((order) => order.status === 'posted' || order.status === 'partially_filled')
@@ -220,6 +267,20 @@ export class InMemoryStore {
         filledSize: filledSize > 0 ? filledSize : order.filledSize,
         updatedAt: new Date().toISOString(),
       };
+    });
+    if (updated) this.persistState();
+    return updated;
+  }
+
+  markOrdersCancelled(clobOrderIds: string[], nowIso = new Date().toISOString()): number {
+    const ids = new Set(clobOrderIds.filter(Boolean));
+    if (!ids.size) return 0;
+    let updated = 0;
+    this.orders = this.orders.map((order) => {
+      if (!order.clobOrderId || !ids.has(order.clobOrderId)) return order;
+      if (order.status !== 'posted' && order.status !== 'partially_filled') return order;
+      updated += 1;
+      return { ...order, status: 'cancelled', updatedAt: nowIso };
     });
     if (updated) this.persistState();
     return updated;

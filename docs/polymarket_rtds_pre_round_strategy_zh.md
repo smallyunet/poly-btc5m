@@ -4,7 +4,7 @@
 
 该策略**不**交易 BTC 方向。
 
-worker 只面向**下一轮 BTC 5 分钟市场**。它可以在轮次开始前同时挂出 YES/NO 两侧 BUY 限价单。轮次开始后，它不会加仓、退出、再平衡，也不会发布任何新的交易意图。开始后，worker 只负责对账成交，并记录预估结算/PnL。
+worker 主要面向**下一轮 BTC 5 分钟市场**。它可以在轮次开始前同时挂出 YES/NO 两侧 BUY 限价单。轮次开始后，默认仍然是 settlement-only；唯一例外是可选的 `BTC5M_SINGLE_FILL_HEDGE` 风控：如果最后窗口内仍然只有一侧成交，worker 可以取消缺失侧旧限价单，并在价格上限内用 aggressive BUY LIMIT 补买缺失侧。它不会 SELL，也不会发送无上限 market order。
 
 限价单不会附带交易所层面的过期时间。本地 `ttlSeconds` 只用于本地 intent/order 去重窗口。
 
@@ -70,13 +70,13 @@ worker 不会因为本地已有订单或成交而继续锁定当前轮次。
 decisionLeadSeconds = 30
 ```
 
-执行层还会强制检查开始后的硬门槛：
+普通入场执行层还会强制检查开始后的硬门槛：
 
 ```text
 Date.now() < round.startAt
 ```
 
-如果不满足，执行会拒绝并返回：
+普通入场如果不满足，执行会拒绝并返回：
 
 ```text
 ROUND_ALREADY_STARTED
@@ -86,6 +86,20 @@ ROUND_ALREADY_STARTED
 
 ```text
 SELL_DISABLED_SETTLEMENT_ONLY
+```
+
+最后窗口单侧补单使用独立时间门槛：
+
+```text
+secondsToEnd <= SINGLE_FILL_HEDGE_WINDOW_SECONDS
+secondsToEnd > SINGLE_FILL_HEDGE_MIN_SECONDS_TO_END
+```
+
+当前默认值：
+
+```text
+SINGLE_FILL_HEDGE_WINDOW_SECONDS=30
+SINGLE_FILL_HEDGE_MIN_SECONDS_TO_END=5
 ```
 
 ---
@@ -420,7 +434,7 @@ Intent 字段：
 
 ## 10. 执行门槛
 
-在实盘发布 intent 前，执行层会检查：
+在实盘发布普通入场 intent 前，执行层会检查：
 
 ```text
 token is in the target round
@@ -438,13 +452,31 @@ no recent failed duplicate exists
 no open Polymarket order exists for the same token
 ```
 
-对 BUY 来说，订单簿必须有 best ask。对 SELL 来说，执行会在订单簿检查前拒绝，因为 settlement-only 模式禁用了所有 SELL 动作。
+对 BUY 来说，订单簿必须有 best ask。对 SELL 来说，执行会在订单簿检查前拒绝，因为该策略禁用了所有 SELL 动作。
+
+单侧补单执行层额外检查：
+
+```text
+SINGLE_FILL_HEDGE_ENABLED=true
+round is running and inside the hedge window
+one BUY side exceeds the other side by at least MIN_ORDER_SHARES
+missing-side book is live/fresh
+missing-side bestAsk <= SINGLE_FILL_HEDGE_MAX_PRICE
+dominant average fill price + hedge limit <= SINGLE_FILL_HEDGE_MAX_PAIR_COST
+no recent local hedge duplicate exists
+```
+
+补单价格不是 market order，而是 capped aggressive limit：
+
+```text
+hedgeLimitPrice = min(bestAsk + SINGLE_FILL_HEDGE_PRICE_OFFSET, SINGLE_FILL_HEDGE_MAX_PRICE)
+```
 
 ---
 
 ## 11. 轮次开始后
 
-轮次开始后，worker 不会：
+轮次开始后，worker 通常不会：
 
 - 增加任一侧仓位
 - 卖出
@@ -452,7 +484,21 @@ no open Polymarket order exists for the same token
 - 再平衡
 - 发布新的交易意图
 
-它只会：
+唯一例外是最后窗口单侧补单风控。触发条件：
+
+- 当前轮次已开始且进入 `SINGLE_FILL_HEDGE_WINDOW_SECONDS`
+- 距离结束仍大于 `SINGLE_FILL_HEDGE_MIN_SECONDS_TO_END`
+- 一侧 BUY 成交 shares 明显大于另一侧
+- 缺失侧 live best ask 不超过 `SINGLE_FILL_HEDGE_MAX_PRICE`
+- 已成交侧均价加补单限价不超过 `SINGLE_FILL_HEDGE_MAX_PAIR_COST`
+
+触发后，worker 会：
+
+- 取消缺失侧仍未成交的旧 BUY limit order
+- 再次对账 fills
+- 用 capped aggressive BUY LIMIT 补买缺失侧差额
+
+除此之外，它只会：
 
 - 同步市场数据
 - 在配置钱包时读取仓位
@@ -485,7 +531,7 @@ profit = 1 - pairCost
 
 ### 单侧成交
 
-仓位会变成方向性敞口。worker 在开始后仍然不会退出。
+仓位会变成方向性敞口。旧策略会一直持有到结算；现在可选的单侧补单风控会在最后窗口尝试用价格上限买入缺失侧，把方向性敞口转成接近固定结果。
 
 对于价格为 `p` 的一份份额：
 
@@ -505,6 +551,23 @@ p=0.46 => win +0.54, lose -0.46
 
 这是策略的主要风险。动态定价的设计是：CHOP 分数较弱时使用更低价格，只有在 CHOP 信号更强时才提高价格。
 
+如果最后窗口补入缺失侧，结果变为：
+
+```text
+hedgedPnlPerShare = 1 - originalAvgPrice - hedgeLimitPrice
+```
+
+示例，已成交一侧均价为 `0.44`：
+
+```text
+hedgeLimit=0.55 => +0.01/share
+hedgeLimit=0.65 => -0.09/share
+hedgeLimit=0.80 => -0.24/share
+no hedge and original side loses => -0.44/share
+```
+
+因此补单风控的目标是降低 single-fill 尾部损失，而不是无条件提高收益。价格超过上限时，worker 不会追单。
+
 ---
 
 ## 13. Dashboard 展示面
@@ -517,7 +580,7 @@ dashboard 展示：
 - pair cost 和 pair edge
 - 订单簿可交易状态
 - 当前 blockers
-- 开始后动作模式：`SETTLEMENT ONLY`
+- 开始后动作模式：默认 settlement-only，最后窗口可显示 capped single-fill hedge 日志
 - 详细策略条件
 
 该页面的目标是在不读日志的情况下展示当前决策和 blockers。

@@ -6,7 +6,7 @@ export type RoundPhase = 'observing' | 'decision' | 'posting' | 'monitoring' | '
 
 export type Regime = 'CHOP' | 'TREND' | 'LOW_ACTIVITY' | 'UNKNOWN';
 
-export type StrategyId = 'BTC5M_DUAL_45' | 'BTC5M_SINGLE_EXIT';
+export type StrategyId = 'BTC5M_DUAL_45' | 'BTC5M_SINGLE_FILL_HEDGE' | 'BTC5M_SINGLE_EXIT';
 
 export type BotRuntimeStatus = {
   status: 'running' | 'degraded';

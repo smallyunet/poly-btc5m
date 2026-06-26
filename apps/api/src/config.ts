@@ -36,6 +36,12 @@ export type AppConfig = {
   maxDriftRatio120s: number;
   maxMomentumRatio30s: number;
   singleFillCooldownMs: number;
+  singleFillHedgeEnabled: boolean;
+  singleFillHedgeWindowSeconds: number;
+  singleFillHedgeMinSecondsToEnd: number;
+  singleFillHedgeMaxPrice: number;
+  singleFillHedgePriceOffset: number;
+  singleFillHedgeMaxPairCost: number;
   marketConfig: BtcMarketConfig;
 };
 
@@ -74,6 +80,12 @@ export function loadConfig(): AppConfig {
     maxDriftRatio120s: numberEnv('MAX_DRIFT_RATIO_120S', 0.45),
     maxMomentumRatio30s: numberEnv('MAX_MOMENTUM_RATIO_30S', 0.55),
     singleFillCooldownMs: parsePositiveInteger(process.env.SINGLE_FILL_COOLDOWN_MS, 4 * 60 * 60_000),
+    singleFillHedgeEnabled: booleanEnv('SINGLE_FILL_HEDGE_ENABLED', true),
+    singleFillHedgeWindowSeconds: parsePositiveInteger(process.env.SINGLE_FILL_HEDGE_WINDOW_SECONDS, 30),
+    singleFillHedgeMinSecondsToEnd: parsePositiveInteger(process.env.SINGLE_FILL_HEDGE_MIN_SECONDS_TO_END, 5),
+    singleFillHedgeMaxPrice: numberEnv('SINGLE_FILL_HEDGE_MAX_PRICE', 0.65),
+    singleFillHedgePriceOffset: numberEnv('SINGLE_FILL_HEDGE_PRICE_OFFSET', 0.01),
+    singleFillHedgeMaxPairCost: numberEnv('SINGLE_FILL_HEDGE_MAX_PAIR_COST', 1.1),
     marketConfig: loadMarketConfig(),
   };
 }

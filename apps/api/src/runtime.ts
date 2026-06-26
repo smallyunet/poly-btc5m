@@ -2,6 +2,7 @@ import type { BtcRoundConfig, FillRecord, PositionSnapshot, RoundPhase, RoundSna
 import { classifyRegime, evaluateEntry, type StrategyRiskConfig } from '../../../packages/strategy/src';
 import { PolymarketAdapter, type FillTarget } from '../../../packages/polymarket/src';
 import type { AppConfig } from './config';
+import { executeSingleFillHedges } from './hedge';
 import { executeLiveIntents } from './execution';
 import type { MarketDataService } from './marketData';
 import type { Btc5mRoundDiscovery } from './roundDiscovery';
@@ -15,7 +16,10 @@ export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, dat
   });
   diagnostics.push(...discovered.diagnostics);
   const round = captureOpeningStrike(discovered.round, store, data.latestPrice());
-  data.syncClobRound(round);
+  const hedgeWatchTokenIds = appConfig.singleFillHedgeEnabled
+    ? store.hedgeWatchTokenIds(appConfig.singleFillHedgeWindowSeconds, appConfig.singleFillHedgeMinSecondsToEnd)
+    : [];
+  data.syncClobRound(round, hedgeWatchTokenIds);
   const orderbooks = await data.refreshOrderbooks(round);
   const features = data.features(round);
   const roundSnapshot = roundToSnapshot(appConfig, store, round);
@@ -44,9 +48,14 @@ export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, dat
   const executionDiagnostics = await executeLiveIntents({ appConfig, adapter, store, snapshot, intents, risk });
   await reconcileFills(appConfig, adapter, store, roundSnapshot, tokenLabels, diagnostics);
   await reconcileTrackedOrders(appConfig, adapter, store, diagnostics);
+  const hedgeCandidates = appConfig.singleFillHedgeEnabled
+    ? store.singleFillHedgeCandidates(appConfig.singleFillHedgeWindowSeconds, appConfig.singleFillHedgeMinSecondsToEnd)
+    : [];
+  const hedgeOrderbooks = data.refreshOrderbooksForTokenIds(hedgeCandidates.flatMap((candidate) => [candidate.yesTokenId, candidate.noTokenId]));
+  const hedgeDiagnostics = await executeSingleFillHedges({ appConfig, adapter, store, candidates: hedgeCandidates, orderbooks: hedgeOrderbooks });
   await reconcileSettlements(appConfig, store, diagnostics);
   maybeRecordEstimatedSettlement(store, snapshot);
-  const finalSnapshot = { ...snapshot, diagnostics: [...diagnostics, ...entry.diagnostics, ...executionDiagnostics] };
+  const finalSnapshot = { ...snapshot, diagnostics: [...diagnostics, ...entry.diagnostics, ...executionDiagnostics, ...hedgeDiagnostics] };
   store.recordSnapshot(finalSnapshot, data.status());
   store.recordStrategyChecks([...entry.checks]);
   return finalSnapshot;

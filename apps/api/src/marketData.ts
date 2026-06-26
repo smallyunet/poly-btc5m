@@ -23,8 +23,8 @@ export class MarketDataService {
     this.connectRtds();
   }
 
-  syncClobRound(round: BtcRoundConfig): void {
-    const tokenIds = [round.yesTokenId, round.noTokenId].filter(Boolean);
+  syncClobRound(round: BtcRoundConfig, extraTokenIds: string[] = []): void {
+    const tokenIds = dedupe([round.yesTokenId, round.noTokenId, ...extraTokenIds].filter(Boolean));
     const nextKey = tokenIds.join('|');
     if (tokenIds.length < 2) {
       if (!this.clobTokenKey) return;
@@ -41,6 +41,10 @@ export class MarketDataService {
   refreshOrderbooks(round: BtcRoundConfig): OrderBookQuote[] {
     const tokenIds = [round.yesTokenId, round.noTokenId].filter(Boolean);
     return tokenIds.map((tokenId) => this.orderbooks.get(tokenId)).filter((item): item is OrderBookQuote => Boolean(item));
+  }
+
+  refreshOrderbooksForTokenIds(tokenIds: string[]): OrderBookQuote[] {
+    return dedupe(tokenIds.filter(Boolean)).map((tokenId) => this.orderbooks.get(tokenId)).filter((item): item is OrderBookQuote => Boolean(item));
   }
 
   features(round: BtcRoundConfig): BtcFeatureSnapshot {
@@ -374,4 +378,8 @@ function findNumber(value: any, keys: string[]): number | null {
 function finiteNumber(value: unknown): number | null {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function dedupe(values: string[]): string[] {
+  return [...new Set(values)];
 }
