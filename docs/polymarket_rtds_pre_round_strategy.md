@@ -274,6 +274,7 @@ shares >= MIN_ORDER_SHARES
 limit price is valid
 pair cost <= MAX_PAIR_COST
 entry-limit bid queue imbalance <= MAX_ENTRY_QUEUE_IMBALANCE
+PM participation gate passes when data is available
 ```
 
 Orderbook tradable means:
@@ -300,6 +301,38 @@ MAX_ENTRY_QUEUE_IMBALANCE=5
 ```
 
 This is an extreme-case execution-quality filter, not a core prediction signal. Mild imbalance does not block entry. If the websocket currently has only top quote data and no full bid levels, the check is shown as `unknown` and does not block entry.
+
+The participation gate uses Polymarket data-api data tied to the Gamma `conditionId`:
+
+```text
+holders?market=<conditionId>
+positions?market=<conditionId>&user=<top-holder-wallet>
+```
+
+It checks the top holder set on both outcomes and limited per-holder positions:
+
+```text
+holder count per side >= MIN_PARTICIPATION_HOLDERS_PER_SIDE
+top holder shares per side >= MIN_PARTICIPATION_TOP_HOLDER_SHARES_PER_SIDE
+largest holder share ratio <= MAX_PARTICIPATION_HOLDER_CONCENTRATION
+max visible position PnL >= MIN_PARTICIPATION_TOP_POSITION_PNL
+visible position PnL sum >= MIN_PARTICIPATION_POSITION_PNL_SUM
+```
+
+Current defaults:
+
+```text
+PARTICIPATION_ENABLED=true
+PARTICIPATION_CACHE_MS=30000
+PARTICIPATION_TOP_HOLDERS_PER_SIDE=8
+MIN_PARTICIPATION_HOLDERS_PER_SIDE=3
+MIN_PARTICIPATION_TOP_HOLDER_SHARES_PER_SIDE=300
+MIN_PARTICIPATION_TOP_POSITION_PNL=40
+MIN_PARTICIPATION_POSITION_PNL_SUM=100
+MAX_PARTICIPATION_HOLDER_CONCENTRATION=0.75
+```
+
+This is a conservative liquidity/activity filter. If participation data is disabled, missing, or temporarily unavailable, the dashboard shows that state and the strategy does not block solely because of the missing data.
 
 Default execution size settings:
 

@@ -278,6 +278,7 @@ shares >= MIN_ORDER_SHARES
 limit price is valid
 pair cost <= MAX_PAIR_COST
 entry-limit bid queue imbalance <= MAX_ENTRY_QUEUE_IMBALANCE
+PM participation gate passes when data is available
 ```
 
 订单簿可交易表示：
@@ -304,6 +305,38 @@ MAX_ENTRY_QUEUE_IMBALANCE=5
 ```
 
 这是极端情况执行质量过滤器，不是核心预测信号。轻微不平衡不会阻塞；如果 websocket 当前只有 top quote、缺少完整 bid levels，该检查只展示 `unknown`，不会阻塞入场。
+
+参与度 gate 使用绑定到 Gamma `conditionId` 的 Polymarket data-api 数据：
+
+```text
+holders?market=<conditionId>
+positions?market=<conditionId>&user=<top-holder-wallet>
+```
+
+它会检查两边 outcome 的头部 holder 和有限的 holder-position 数据：
+
+```text
+holder count per side >= MIN_PARTICIPATION_HOLDERS_PER_SIDE
+top holder shares per side >= MIN_PARTICIPATION_TOP_HOLDER_SHARES_PER_SIDE
+largest holder share ratio <= MAX_PARTICIPATION_HOLDER_CONCENTRATION
+max visible position PnL >= MIN_PARTICIPATION_TOP_POSITION_PNL
+visible position PnL sum >= MIN_PARTICIPATION_POSITION_PNL_SUM
+```
+
+当前默认值：
+
+```text
+PARTICIPATION_ENABLED=true
+PARTICIPATION_CACHE_MS=30000
+PARTICIPATION_TOP_HOLDERS_PER_SIDE=8
+MIN_PARTICIPATION_HOLDERS_PER_SIDE=3
+MIN_PARTICIPATION_TOP_HOLDER_SHARES_PER_SIDE=300
+MIN_PARTICIPATION_TOP_POSITION_PNL=40
+MIN_PARTICIPATION_POSITION_PNL_SUM=100
+MAX_PARTICIPATION_HOLDER_CONCENTRATION=0.75
+```
+
+这是一个偏保守的流动性/活跃度过滤器。如果 participation 数据被关闭、缺失或短暂不可用，dashboard 会展示该状态，但策略不会只因为数据缺失而阻塞入场。
 
 默认执行规模设置：
 

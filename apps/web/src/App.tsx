@@ -13,7 +13,8 @@ import {
   Terminal,
   Cpu,
   Search,
-  Info
+  Info,
+  Users
 } from 'lucide-react';
 
 import type { DashboardState, OrderBookQuote, RuntimeLogRecord, StrategyCheck } from '../../../packages/shared/src';
@@ -152,6 +153,14 @@ function formatCooldownRemaining(until: string | undefined): string {
   const minutes = totalMinutes % 60;
   if (hours <= 0) return `${minutes}m left`;
   return minutes > 0 ? `${hours}h ${minutes}m left` : `${hours}h left`;
+}
+
+function formatNullableMoney(value: number | null | undefined): string {
+  return value == null ? 'unknown' : formatMoney(value);
+}
+
+function formatRatioPct(value: number | null | undefined): string {
+  return value == null || !Number.isFinite(value) ? 'unknown' : `${formatNumber(value * 100, 1)}%`;
 }
 
 function sumShares(values: number[]): number {
@@ -389,6 +398,15 @@ export function App() {
   ].map(conditionByLabel).filter((condition): condition is StrategyCheck['conditions'][number] => Boolean(condition));
   const btcDecisionPassed = btcDecisionConditions.length > 0 && btcDecisionConditions.every((condition) => condition.passed);
   const orderbookDecisionPassed = orderbookDecisionConditions.length > 0 && orderbookDecisionConditions.every((condition) => condition.passed);
+  const participationConditions = [
+    'Participation data',
+    'Holder count depth',
+    'Top holder shares',
+    'Holder concentration',
+    'Top position PnL',
+    'Visible position PnL sum',
+  ].map(conditionByLabel).filter((condition): condition is StrategyCheck['conditions'][number] => Boolean(condition));
+  const participationDecisionPassed = participationConditions.length > 0 && participationConditions.every((condition) => condition.passed);
   const activeOrders = state.orders.filter((order) => (
     order.status === 'posted'
     || order.status === 'partially_filled'
@@ -443,6 +461,15 @@ export function App() {
   const entryCooldownActive = Boolean(state.runtime.entryCooldownUntil && new Date(state.runtime.entryCooldownUntil).getTime() > Date.now());
   const entryCooldownRemaining = formatCooldownRemaining(state.runtime.entryCooldownUntil);
   const entryCooldownReason = state.runtime.entryCooldownReason || 'no single-fill lockout';
+  const participation = snapshot.participation;
+  const participationStatus = participation?.status || 'missing';
+  const participationTone = participationStatus === 'enabled'
+    ? (participationDecisionPassed ? 'good' : 'warn')
+    : participationStatus === 'unavailable' ? 'warn' : 'neutral';
+  const participationMaxPnl = participation?.maxPositionPnl;
+  const participationSummary = participationStatus === 'enabled' && participation
+    ? `top PnL ${formatNullableMoney(participationMaxPnl)} / visible sum ${formatMoney(participation.totalPositionPnl)}`
+    : `${participationStatus}; not blocking`;
 
   return (
     <Shell>
@@ -517,6 +544,13 @@ export function App() {
           detail={`Score ${formatNumber(snapshot.features.chopScore, 1)} / ${eligible} eligible`}
           tone={snapshot.regime === 'CHOP' ? 'good' : snapshot.regime === 'TREND' ? 'bad' : 'neutral'} 
         />
+        <Digest
+          icon={<Users size={16} />}
+          label="Participation"
+          value={participationStatus.toUpperCase()}
+          detail={participationSummary}
+          tone={participationTone}
+        />
         <Digest 
           icon={<Shield size={16} />} 
           label="Active Trades" 
@@ -578,6 +612,12 @@ export function App() {
                     value={orderbookDecisionPassed ? 'TRADABLE' : 'NOT TRADABLE'}
                     detail="live/fresh token books with buy ask only"
                     tone={orderbookDecisionPassed ? 'good' : 'bad'}
+                  />
+                  <DecisionMetric
+                    label="Participation Gate"
+                    value={participationDecisionPassed ? 'PASS' : 'WEAK'}
+                    detail={participationSummary}
+                    tone={participationDecisionPassed ? 'good' : 'warn'}
                   />
                   <DecisionMetric
                     label="Post-Start Actions"
@@ -752,6 +792,48 @@ export function App() {
                     <span className="metricLabel">End Time</span>
                     <span className="metricValue">{formatEtTime(snapshot.round.endAt)}</span>
                   </div>
+                </div>
+              </div>
+
+              <div className="panel">
+                <h2>Market Participation</h2>
+                <div className="metrics">
+                  <div className="metricRow">
+                    <span className="metricLabel">Data Status</span>
+                    <span className="metricValue"><Badge tone={participationTone}>{participationStatus}</Badge></span>
+                  </div>
+                  <div className="metricRow">
+                    <span className="metricLabel">Top Position PnL</span>
+                    <span className="metricValue">{formatNullableMoney(participation?.maxPositionPnl)}</span>
+                  </div>
+                  <div className="metricRow">
+                    <span className="metricLabel">Visible Position PnL Sum</span>
+                    <span className="metricValue">{participation ? formatMoney(participation.totalPositionPnl) : 'unknown'}</span>
+                  </div>
+                  <div className="metricRow">
+                    <span className="metricLabel">Top Holder Shares</span>
+                    <span className="metricValue">{participation ? formatNumber(participation.totalTopHolderShares, 1) : 'unknown'}</span>
+                  </div>
+                  {participation?.sides.map((side) => (
+                    <React.Fragment key={side.label}>
+                      <div className="metricRow">
+                        <span className="metricLabel">{outcomeLabel(side.label)} Holders</span>
+                        <span className="metricValue">{side.holderCount} / top {participation.topHoldersPerSide}</span>
+                      </div>
+                      <div className="metricRow">
+                        <span className="metricLabel">{outcomeLabel(side.label)} Top Shares</span>
+                        <span className="metricValue">{formatNumber(side.topHolderShares, 1)}</span>
+                      </div>
+                      <div className="metricRow">
+                        <span className="metricLabel">{outcomeLabel(side.label)} Concentration</span>
+                        <span className="metricValue">{formatRatioPct(side.largestHolderShareRatio)}</span>
+                      </div>
+                      <div className="metricRow">
+                        <span className="metricLabel">{outcomeLabel(side.label)} Position PnL</span>
+                        <span className="metricValue">{formatMoney(side.positionPnlSum)} / top {formatNullableMoney(side.topPositionPnl)}</span>
+                      </div>
+                    </React.Fragment>
+                  ))}
                 </div>
               </div>
 

@@ -25,6 +25,11 @@ const risk: StrategyRiskConfig = {
   maxDriftRatio120s: 0.45,
   maxMomentumRatio30s: 0.55,
   maxEntryQueueImbalance: 5,
+  minParticipationHoldersPerSide: 3,
+  minParticipationTopHolderSharesPerSide: 300,
+  minParticipationTopPositionPnl: 40,
+  minParticipationPositionPnlSum: 100,
+  maxParticipationHolderConcentration: 0.75,
   entryOrderTtlSeconds: 30,
 };
 
@@ -144,6 +149,51 @@ test('does not block queue imbalance when level data is unavailable', () => {
   assert.match(result.checks[0].conditions.find((item) => item.label === 'Entry queue imbalance')?.actual || '', /unknown/);
 });
 
+test('blocks entry when visible participation is weak', () => {
+  const snapshot = { ...baseSnapshot(chopFeatures()), regime: 'CHOP' as const };
+  snapshot.participation = {
+    status: 'enabled',
+    updatedAt: new Date().toISOString(),
+    topHoldersPerSide: 8,
+    maxPositionPnl: 12,
+    totalTopHolderShares: 140,
+    totalPositionPnl: 22,
+    diagnostics: [],
+    sides: [
+      participationSide('YES', { holderCount: 2, topHolderShares: 80, topPositionPnl: 12, positionPnlSum: 14 }),
+      participationSide('NO', { holderCount: 1, topHolderShares: 60, topPositionPnl: 8, positionPnlSum: 8 }),
+    ],
+  };
+
+  const result = evaluateEntry(snapshot, risk);
+
+  assert.equal(result.intents.length, 0);
+  assert.match(result.rejected[0].rejectionReason || '', /PARTICIPATION_WEAK/);
+  assert.equal(result.checks[0].conditions.find((item) => item.label === 'Holder count depth')?.passed, false);
+});
+
+test('does not block entry when participation data is unavailable', () => {
+  const snapshot = { ...baseSnapshot(chopFeatures()), regime: 'CHOP' as const };
+  snapshot.participation = {
+    status: 'unavailable',
+    updatedAt: new Date().toISOString(),
+    topHoldersPerSide: 8,
+    maxPositionPnl: null,
+    totalTopHolderShares: 0,
+    totalPositionPnl: 0,
+    diagnostics: ['temporary failure'],
+    sides: [
+      participationSide('YES'),
+      participationSide('NO'),
+    ],
+  };
+
+  const result = evaluateEntry(snapshot, risk);
+
+  assert.equal(result.intents.length, 2);
+  assert.equal(result.checks[0].conditions.find((item) => item.label === 'Participation data')?.passed, true);
+});
+
 test('caps dynamic shares at configured maximum', () => {
   const snapshot = { ...baseSnapshot({ ...chopFeatures(), chopScore: 98 }), regime: 'CHOP' as const };
   const result = evaluateEntry(snapshot, { ...risk, orderSharesPerSide: 20, maxOrderSharesPerSide: 22 });
@@ -256,6 +306,21 @@ function chopFeatures(): Partial<StateSnapshot['features']> {
 
 function exitSnapshot(features: Partial<StateSnapshot['features']>): StateSnapshot {
   return { ...baseSnapshot({ samples120s: 20, ...features }), regime: 'TREND' };
+}
+
+function participationSide(label: 'YES' | 'NO', values: Partial<NonNullable<StateSnapshot['participation']>['sides'][number]> = {}): NonNullable<StateSnapshot['participation']>['sides'][number] {
+  return {
+    label,
+    holderCount: 8,
+    topHolderShares: 500,
+    largestHolderShares: 180,
+    largestHolderShareRatio: 0.36,
+    positionCount: 8,
+    topPositionPnl: 60,
+    positionPnlSum: 120,
+    positionCurrentValueSum: 500,
+    ...values,
+  };
 }
 
 function position(label: 'YES' | 'NO'): StateSnapshot['positions'][number] {

@@ -9,6 +9,7 @@ export type AppConfig = {
   executionMode: ExecutionMode;
   clobApiUrl: string;
   gammaApiUrl: string;
+  dataApiUrl: string;
   chainId: number;
   ownerPrivateKey?: string;
   depositWallet?: string;
@@ -36,6 +37,14 @@ export type AppConfig = {
   maxDriftRatio120s: number;
   maxMomentumRatio30s: number;
   maxEntryQueueImbalance: number;
+  participationEnabled: boolean;
+  participationCacheMs: number;
+  participationTopHoldersPerSide: number;
+  minParticipationHoldersPerSide: number;
+  minParticipationTopHolderSharesPerSide: number;
+  minParticipationTopPositionPnl: number;
+  minParticipationPositionPnlSum: number;
+  maxParticipationHolderConcentration: number;
   singleFillCooldownMs: number;
   singleFillCooldownBaseMs: number;
   singleFillCooldownPriceCapMs: number;
@@ -60,6 +69,7 @@ export function loadConfig(): AppConfig {
     executionMode: parseExecutionMode(process.env.EXECUTION_MODE),
     clobApiUrl: process.env.POLYMARKET_CLOB_API_URL || 'https://clob.polymarket.com',
     gammaApiUrl: process.env.POLYMARKET_GAMMA_API_URL || 'https://gamma-api.polymarket.com',
+    dataApiUrl: process.env.POLYMARKET_DATA_API_URL || 'https://data-api.polymarket.com',
     chainId: Number(process.env.POLYMARKET_CHAIN_ID || 137),
     ownerPrivateKey: process.env.OWNER_PRIVATE_KEY,
     depositWallet: process.env.POLYMARKET_DEPOSIT_WALLET,
@@ -87,6 +97,14 @@ export function loadConfig(): AppConfig {
     maxDriftRatio120s: numberEnv('MAX_DRIFT_RATIO_120S', 0.45),
     maxMomentumRatio30s: numberEnv('MAX_MOMENTUM_RATIO_30S', 0.55),
     maxEntryQueueImbalance: numberEnv('MAX_ENTRY_QUEUE_IMBALANCE', 5),
+    participationEnabled: booleanEnv('PARTICIPATION_ENABLED', true),
+    participationCacheMs: parsePositiveInteger(process.env.PARTICIPATION_CACHE_MS, 30_000),
+    participationTopHoldersPerSide: parsePositiveInteger(process.env.PARTICIPATION_TOP_HOLDERS_PER_SIDE, 8),
+    minParticipationHoldersPerSide: parsePositiveInteger(process.env.MIN_PARTICIPATION_HOLDERS_PER_SIDE, 3),
+    minParticipationTopHolderSharesPerSide: numberEnv('MIN_PARTICIPATION_TOP_HOLDER_SHARES_PER_SIDE', 300),
+    minParticipationTopPositionPnl: numberEnv('MIN_PARTICIPATION_TOP_POSITION_PNL', 40),
+    minParticipationPositionPnlSum: numberEnv('MIN_PARTICIPATION_POSITION_PNL_SUM', 100),
+    maxParticipationHolderConcentration: numberEnv('MAX_PARTICIPATION_HOLDER_CONCENTRATION', 0.75),
     singleFillCooldownMs: parsePositiveInteger(process.env.SINGLE_FILL_COOLDOWN_MS, 4 * 60 * 60_000),
     singleFillCooldownBaseMs: parsePositiveInteger(process.env.SINGLE_FILL_COOLDOWN_BASE_MS, 30 * 60_000),
     singleFillCooldownPriceCapMs: parsePositiveInteger(process.env.SINGLE_FILL_COOLDOWN_PRICE_CAP_MS, 60 * 60_000),

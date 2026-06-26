@@ -5,10 +5,11 @@ import type { AppConfig } from './config';
 import { executeSingleFillHedges } from './hedge';
 import { executeLiveIntents } from './execution';
 import type { MarketDataService } from './marketData';
+import type { ParticipationService } from './participation';
 import type { Btc5mRoundDiscovery } from './roundDiscovery';
 import type { InMemoryStore } from './store';
 
-export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, data: MarketDataService, adapter: PolymarketAdapter, discovery: Btc5mRoundDiscovery): Promise<StateSnapshot> {
+export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, data: MarketDataService, adapter: PolymarketAdapter, discovery: Btc5mRoundDiscovery, participationService: ParticipationService): Promise<StateSnapshot> {
   const diagnostics: string[] = [];
   const discovered = await discovery.discover({
     latestPrice: data.latestPrice(),
@@ -21,6 +22,8 @@ export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, dat
     : [];
   data.syncClobRound(round, hedgeWatchTokenIds);
   const orderbooks = await data.refreshOrderbooks(round);
+  const participation = await participationService.refresh(round);
+  diagnostics.push(...participation.diagnostics);
   const features = data.features(round);
   const roundSnapshot = roundToSnapshot(appConfig, store, round);
   const tokenLabels = new Map<string, 'YES' | 'NO'>([
@@ -37,6 +40,7 @@ export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, dat
     orderbooks,
     positions,
     positionReadStatus: appConfig.depositWallet?.trim() ? 'enabled' : 'disabled',
+    participation,
     diagnostics,
   };
   const activeCooldown = store.getActiveEntryCooldown();
@@ -78,6 +82,7 @@ function roundToSnapshot(appConfig: AppConfig, store: InMemoryStore, round: BtcR
     id: round.eventSlug,
     phase: roundPhase(now, start, end, appConfig.marketConfig.decisionLeadSeconds, appConfig.marketConfig.avoidExpirySeconds),
     eventSlug: round.eventSlug,
+    conditionId: round.conditionId,
     title: round.title,
     startAt: round.startAt,
     endAt: round.endAt,
@@ -279,6 +284,11 @@ function riskConfig(appConfig: AppConfig, dryRun: boolean, entryCooldownUntil?: 
     maxDriftRatio120s: appConfig.maxDriftRatio120s,
     maxMomentumRatio30s: appConfig.maxMomentumRatio30s,
     maxEntryQueueImbalance: appConfig.maxEntryQueueImbalance,
+    minParticipationHoldersPerSide: appConfig.minParticipationHoldersPerSide,
+    minParticipationTopHolderSharesPerSide: appConfig.minParticipationTopHolderSharesPerSide,
+    minParticipationTopPositionPnl: appConfig.minParticipationTopPositionPnl,
+    minParticipationPositionPnlSum: appConfig.minParticipationPositionPnlSum,
+    maxParticipationHolderConcentration: appConfig.maxParticipationHolderConcentration,
     entryOrderTtlSeconds: appConfig.marketConfig.decisionLeadSeconds,
     entryCooldownUntil,
     entryCooldownReason,

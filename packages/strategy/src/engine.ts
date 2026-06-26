@@ -21,6 +21,11 @@ export type StrategyRiskConfig = {
   maxDriftRatio120s: number;
   maxMomentumRatio30s: number;
   maxEntryQueueImbalance: number;
+  minParticipationHoldersPerSide: number;
+  minParticipationTopHolderSharesPerSide: number;
+  minParticipationTopPositionPnl: number;
+  minParticipationPositionPnlSum: number;
+  maxParticipationHolderConcentration: number;
   entryOrderTtlSeconds: number;
   entryCooldownUntil?: string;
   entryCooldownReason?: string;
@@ -71,6 +76,7 @@ export function evaluateEntry(snapshot: StateSnapshot, config: StrategyRiskConfi
   const pairCost = limitPrice * 2;
   const pairEdge = 1 - pairCost;
   const queue = entryQueueStats(yesQuote, noQuote, limitPrice);
+  const participation = participationStats(snapshot, config);
   const cooldownUntilMs = config.entryCooldownUntil ? new Date(config.entryCooldownUntil).getTime() : 0;
   const cooldownActive = Number.isFinite(cooldownUntilMs) && cooldownUntilMs > Date.now();
 
@@ -82,6 +88,7 @@ export function evaluateEntry(snapshot: StateSnapshot, config: StrategyRiskConfi
   if (limitPrice <= 0 || limitPrice >= 1) reasons.push('INVALID_DUAL_LIMIT_PRICE');
   if (pairCost > config.maxPairCost + 0.000001) reasons.push('PAIR_COST_TOO_HIGH');
   if (queue.ratio != null && queue.ratio > config.maxEntryQueueImbalance) reasons.push('ENTRY_QUEUE_IMBALANCE');
+  if (participation.blocked) reasons.push('PARTICIPATION_WEAK');
 
   const base = [
     makeIntent(snapshot, 'YES', snapshot.round.yesTokenId, shares, limitPrice, config),
@@ -116,6 +123,12 @@ export function evaluateEntry(snapshot: StateSnapshot, config: StrategyRiskConfi
       condition('YES book tradable', buyQuoteReady(yesQuote, config), quoteAgeLabel(yesQuote)),
       condition('NO book tradable', buyQuoteReady(noQuote, config), quoteAgeLabel(noQuote)),
       condition('Entry queue imbalance', queue.ratio == null || queue.ratio <= config.maxEntryQueueImbalance, queueLabel(queue, config.maxEntryQueueImbalance)),
+      condition('Participation data', participation.dataPassed, participation.dataLabel),
+      condition('Holder count depth', participation.holderCountPassed, participation.holderCountLabel),
+      condition('Top holder shares', participation.topHolderSharesPassed, participation.topHolderSharesLabel),
+      condition('Holder concentration', participation.concentrationPassed, participation.concentrationLabel),
+      condition('Top position PnL', participation.topPositionPnlPassed, participation.topPositionPnlLabel),
+      condition('Visible position PnL sum', participation.positionPnlSumPassed, participation.positionPnlSumLabel),
       condition('Dynamic limit price', limitPrice > 0 && limitPrice < 1, `${limitPrice.toFixed(3)} (${config.dynamicLimitEnabled ? 'score policy' : 'fixed'})`),
       condition('Pair cost cap', pairCost <= config.maxPairCost + 0.000001, `${pairCost.toFixed(3)} / ${config.maxPairCost.toFixed(3)}, edge ${pairEdge.toFixed(3)}`),
       condition('Dynamic shares', shares >= config.minOrderShares, `${shares.toFixed(2)} / base ${config.orderSharesPerSide.toFixed(2)} / max ${config.maxOrderSharesPerSide.toFixed(2)} (${config.dynamicSharesEnabled ? 'score policy' : 'fixed'})`),
@@ -124,6 +137,70 @@ export function evaluateEntry(snapshot: StateSnapshot, config: StrategyRiskConfi
   }];
 
   return { intents, rejected, diagnostics, checks };
+}
+
+type ParticipationStats = {
+  blocked: boolean;
+  dataPassed: boolean;
+  dataLabel: string;
+  holderCountPassed: boolean;
+  holderCountLabel: string;
+  topHolderSharesPassed: boolean;
+  topHolderSharesLabel: string;
+  concentrationPassed: boolean;
+  concentrationLabel: string;
+  topPositionPnlPassed: boolean;
+  topPositionPnlLabel: string;
+  positionPnlSumPassed: boolean;
+  positionPnlSumLabel: string;
+};
+
+function participationStats(snapshot: StateSnapshot, config: StrategyRiskConfig): ParticipationStats {
+  const data = snapshot.participation;
+  if (!data || data.status !== 'enabled') {
+    const status = data?.status || 'missing';
+    return {
+      blocked: false,
+      dataPassed: true,
+      dataLabel: `${status}; not blocking`,
+      holderCountPassed: true,
+      holderCountLabel: 'unknown; not blocking',
+      topHolderSharesPassed: true,
+      topHolderSharesLabel: 'unknown; not blocking',
+      concentrationPassed: true,
+      concentrationLabel: 'unknown; not blocking',
+      topPositionPnlPassed: true,
+      topPositionPnlLabel: 'unknown; not blocking',
+      positionPnlSumPassed: true,
+      positionPnlSumLabel: 'unknown; not blocking',
+    };
+  }
+
+  const yes = data.sides.find((side) => side.label === 'YES');
+  const no = data.sides.find((side) => side.label === 'NO');
+  const holderCountPassed = Boolean(yes && no && yes.holderCount >= config.minParticipationHoldersPerSide && no.holderCount >= config.minParticipationHoldersPerSide);
+  const topHolderSharesPassed = Boolean(yes && no && yes.topHolderShares >= config.minParticipationTopHolderSharesPerSide && no.topHolderShares >= config.minParticipationTopHolderSharesPerSide);
+  const maxConcentration = Math.max(yes?.largestHolderShareRatio ?? 0, no?.largestHolderShareRatio ?? 0);
+  const concentrationPassed = maxConcentration <= config.maxParticipationHolderConcentration;
+  const topPositionPnl = data.maxPositionPnl;
+  const topPositionPnlPassed = topPositionPnl != null && topPositionPnl >= config.minParticipationTopPositionPnl;
+  const positionPnlSumPassed = data.totalPositionPnl >= config.minParticipationPositionPnlSum;
+
+  return {
+    blocked: !(holderCountPassed && topHolderSharesPassed && concentrationPassed && topPositionPnlPassed && positionPnlSumPassed),
+    dataPassed: true,
+    dataLabel: `enabled, top ${data.topHoldersPerSide}/side @ ${ageLabel(data.updatedAt)}`,
+    holderCountPassed,
+    holderCountLabel: `YES ${yes?.holderCount ?? 0} / NO ${no?.holderCount ?? 0} / min ${config.minParticipationHoldersPerSide}`,
+    topHolderSharesPassed,
+    topHolderSharesLabel: `YES ${formatCompact(yes?.topHolderShares ?? 0)} / NO ${formatCompact(no?.topHolderShares ?? 0)} / min ${formatCompact(config.minParticipationTopHolderSharesPerSide)}`,
+    concentrationPassed,
+    concentrationLabel: `max ${formatRatio(maxConcentration)} / cap ${formatRatio(config.maxParticipationHolderConcentration)}`,
+    topPositionPnlPassed,
+    topPositionPnlLabel: `${moneyLabel(topPositionPnl)} / min ${moneyLabel(config.minParticipationTopPositionPnl)}`,
+    positionPnlSumPassed,
+    positionPnlSumLabel: `${moneyLabel(data.totalPositionPnl)} / min ${moneyLabel(config.minParticipationPositionPnlSum)}`,
+  };
 }
 
 function cooldownLabel(until: string | undefined, reason: string | undefined): string {
@@ -251,6 +328,26 @@ function queueLabel(queue: { yesBidQueue: number | null; noBidQueue: number | nu
   const no = queue.noBidQueue == null ? 'unknown' : queue.noBidQueue.toFixed(2);
   const ratio = queue.ratio == null ? 'unknown' : Number.isFinite(queue.ratio) ? queue.ratio.toFixed(2) : 'infinite';
   return `YES ${yes} / NO ${no} / ratio ${ratio} / max ${maxRatio.toFixed(2)}`;
+}
+
+function ageLabel(value: string): string {
+  const ageSeconds = (Date.now() - new Date(value).getTime()) / 1000;
+  return Number.isFinite(ageSeconds) ? `${ageSeconds.toFixed(0)}s old` : 'unknown age';
+}
+
+function formatCompact(value: number): string {
+  if (!Number.isFinite(value)) return 'n/a';
+  if (Math.abs(value) >= 1_000) return `${(value / 1_000).toFixed(1)}k`;
+  return value.toFixed(value % 1 === 0 ? 0 : 1);
+}
+
+function formatRatio(value: number): string {
+  return Number.isFinite(value) ? value.toFixed(2) : 'n/a';
+}
+
+function moneyLabel(value: number | null): string {
+  if (value == null || !Number.isFinite(value)) return 'unknown';
+  return `${value < 0 ? '-' : ''}$${Math.abs(value).toFixed(2)}`;
 }
 
 function condition(label: string, passed: boolean, actual: string): StrategyCondition {

@@ -63,6 +63,7 @@ Recommended live feed settings:
 POLYMARKET_RTDS_WS_URL=wss://ws-live-data.polymarket.com
 POLYMARKET_CLOB_WS_URL=wss://ws-subscriptions-clob.polymarket.com/ws/market
 POLYMARKET_GAMMA_API_URL=https://gamma-api.polymarket.com
+POLYMARKET_DATA_API_URL=https://data-api.polymarket.com
 BOT_TICK_MS=2000
 MAX_ORDERBOOK_AGE_SECONDS=5
 RUNTIME_MAX_RECORDS=1000
@@ -96,6 +97,14 @@ MIN_BI_EXCURSION_BPS_120S=1
 MAX_DRIFT_RATIO_120S=0.45
 MAX_MOMENTUM_RATIO_30S=0.55
 MAX_ENTRY_QUEUE_IMBALANCE=5
+PARTICIPATION_ENABLED=true
+PARTICIPATION_CACHE_MS=30000
+PARTICIPATION_TOP_HOLDERS_PER_SIDE=8
+MIN_PARTICIPATION_HOLDERS_PER_SIDE=3
+MIN_PARTICIPATION_TOP_HOLDER_SHARES_PER_SIDE=300
+MIN_PARTICIPATION_TOP_POSITION_PNL=40
+MIN_PARTICIPATION_POSITION_PNL_SUM=100
+MAX_PARTICIPATION_HOLDER_CONCENTRATION=0.75
 SINGLE_FILL_COOLDOWN_BASE_MS=1800000
 SINGLE_FILL_COOLDOWN_PRICE_CAP_MS=3600000
 SINGLE_FILL_COOLDOWN_EXECUTION_MS=7200000
@@ -119,6 +128,7 @@ Live entry orders are configured as CLOB limit order `price + size`:
 - With `DYNAMIC_SHARES_ENABLED=true`, CHOP score maps to `0.5x/1.0x/1.0x/1.25x` of `ORDER_SHARES_PER_SIDE`, capped by `MAX_ORDER_SHARES_PER_SIDE`.
 - The resulting shares value becomes the `size` sent to `createOrder` for each YES/NO side.
 - `MAX_ENTRY_QUEUE_IMBALANCE` only blocks extreme YES/NO bid-queue imbalance at the entry limit. If full bid levels are unavailable, the check stays diagnostic and does not block.
+- `PARTICIPATION_*` adds a conservative PM data-api gate using event `conditionId`, top holders, and limited per-holder positions. It blocks only when fetched data shows clearly weak participation; missing/unavailable data is visible in the dashboard and does not block.
 - `SINGLE_FILL_HEDGE_MAX_PRICE` is the hard cap for the final-window missing-side hedge. `SINGLE_FILL_HEDGE_PRICE_OFFSET` lets the hedge cross the current best ask slightly while still respecting the cap.
 - Final single-fill cooldown is adaptive: base final singles pause entries for 30 minutes, price-cap hedge misses pause for 1 hour, execution/API/cancel/post failures pause for 2 hours, and repeated final singles inside 2 hours escalate to 2 hours then 4 hours.
 

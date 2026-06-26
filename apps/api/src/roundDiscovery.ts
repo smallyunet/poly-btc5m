@@ -9,6 +9,7 @@ type GammaMarket = Record<string, unknown> & {
   endDate?: string;
   outcomes?: unknown;
   clobTokenIds?: unknown;
+  conditionId?: unknown;
   active?: boolean;
   closed?: boolean;
   acceptingOrders?: boolean;
@@ -88,6 +89,7 @@ export class Btc5mRoundDiscovery {
 
     return {
       eventSlug: slug,
+      conditionId: stringValue(market.conditionId),
       title: String(market.question || `${this.config.marketConfig.title} ${new Date(roundStartSec * 1000).toISOString()}`),
       startAt,
       endAt,
@@ -98,6 +100,12 @@ export class Btc5mRoundDiscovery {
       imageUrl: imageUrlFrom(market),
     };
   }
+}
+
+function stringValue(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  return trimmed || undefined;
 }
 
 function upcomingRoundWindow(anchorRoundStartSec: number, futureCount: number): Array<{ slug: string; roundStartSec: number }> {

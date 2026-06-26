@@ -23,6 +23,7 @@ export type BotRuntimeStatus = {
 
 export type BtcRoundConfig = {
   eventSlug: string;
+  conditionId?: string;
   title?: string;
   startAt: string;
   endAt: string;
@@ -101,6 +102,7 @@ export type RoundSnapshot = {
   id: string;
   phase: RoundPhase;
   eventSlug: string;
+  conditionId?: string;
   title?: string;
   startAt: string;
   endAt: string;
@@ -125,6 +127,29 @@ export type PositionSnapshot = {
   lastTradeAt?: string;
 };
 
+export type ParticipationSideSnapshot = {
+  label: 'YES' | 'NO';
+  holderCount: number;
+  topHolderShares: number;
+  largestHolderShares: number;
+  largestHolderShareRatio: number | null;
+  positionCount: number;
+  topPositionPnl: number | null;
+  positionPnlSum: number;
+  positionCurrentValueSum: number;
+};
+
+export type MarketParticipationSnapshot = {
+  status: 'enabled' | 'disabled' | 'missing-condition' | 'unavailable';
+  updatedAt: string;
+  topHoldersPerSide: number;
+  maxPositionPnl: number | null;
+  totalTopHolderShares: number;
+  totalPositionPnl: number;
+  sides: ParticipationSideSnapshot[];
+  diagnostics: string[];
+};
+
 export type StateSnapshot = {
   id: string;
   capturedAt: string;
@@ -134,6 +159,7 @@ export type StateSnapshot = {
   orderbooks: OrderBookQuote[];
   positions: PositionSnapshot[];
   positionReadStatus: 'enabled' | 'disabled';
+  participation?: MarketParticipationSnapshot;
   diagnostics: string[];
 };
 
