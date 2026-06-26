@@ -1,4 +1,4 @@
-import type { BtcRoundConfig, FillRecord, PositionSnapshot, RoundPhase, RoundSnapshot, SettlementRecord, StateSnapshot } from '../../../packages/shared/src';
+import type { BtcRoundConfig, FillRecord, PositionSnapshot, RoundPhase, RoundSnapshot, SettlementRecord, StateSnapshot, StrategyCheck, TradeIntent } from '../../../packages/shared/src';
 import { classifyRegime, evaluateEntry, evaluateExit, type StrategyRiskConfig } from '../../../packages/strategy/src';
 import { PolymarketAdapter, type FillTarget } from '../../../packages/polymarket/src';
 import type { AppConfig } from './config';
@@ -46,7 +46,9 @@ export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, dat
   const activeCooldown = store.getActiveEntryCooldown();
   const risk = riskConfig(appConfig, store.getRuntime().executionMode !== 'live', activeCooldown?.expiresAt, activeCooldown ? `single fill on ${activeCooldown.roundId}` : undefined);
   const snapshot: StateSnapshot = { ...baseSnapshot, regime: classifyRegime(baseSnapshot, risk) };
-  const entry = evaluateEntry(snapshot, risk);
+  const evaluatedEntry = evaluateEntry(snapshot, risk);
+  const entrySignalCount = store.recordEntrySignal(snapshot.round.id, evaluatedEntry.intents.length > 0);
+  const entry = applyEntryConfirmation(evaluatedEntry, entrySignalCount, appConfig.entryConfirmTicks);
   const intents = [...entry.intents];
   store.recordIntents([...intents, ...entry.rejected]);
   const executionDiagnostics = await executeLiveIntents({ appConfig, adapter, store, snapshot, intents, risk });
@@ -65,6 +67,32 @@ export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, dat
   store.recordSnapshot(finalSnapshot, data.status());
   store.recordStrategyChecks([...entry.checks, ...exit.checks, hedgeCheck]);
   return finalSnapshot;
+}
+
+function applyEntryConfirmation(entry: ReturnType<typeof evaluateEntry>, signalCount: number, requiredTicks: number): ReturnType<typeof evaluateEntry> {
+  const confirmed = signalCount >= requiredTicks;
+  const check = entry.checks[0];
+  const confirmationCondition = {
+    label: 'Entry signal confirmation',
+    passed: confirmed,
+    actual: `${signalCount} / ${requiredTicks} consecutive eligible ticks`,
+  };
+  if (!entry.intents.length) {
+    return { ...entry, checks: [{ ...check, conditions: [...check.conditions, confirmationCondition] }] };
+  }
+  if (confirmed) {
+    return { ...entry, checks: [{ ...check, conditions: [...check.conditions, confirmationCondition] }] };
+  }
+  const reason = 'ENTRY_SIGNAL_CONFIRMING';
+  const rejected = entry.intents.map((intent): TradeIntent => ({ ...intent, status: 'rejected', rejectionReason: reason }));
+  const blockedCheck: StrategyCheck = {
+    ...check,
+    status: 'blocked',
+    reason: `${check.reason}; waiting for entry signal confirmation.`,
+    blockers: [...check.blockers, reason],
+    conditions: [...check.conditions, confirmationCondition],
+  };
+  return { ...entry, intents: [], rejected: [...entry.rejected, ...rejected], checks: [blockedCheck] };
 }
 
 function buildCurrentRoundHedgeCheck(appConfig: AppConfig, store: InMemoryStore, snapshot: StateSnapshot, orderbooks: StateSnapshot['orderbooks']) {
@@ -313,6 +341,7 @@ function riskConfig(appConfig: AppConfig, dryRun: boolean, entryCooldownUntil?: 
     maxDriftRatio120s: appConfig.maxDriftRatio120s,
     maxMomentumRatio30s: appConfig.maxMomentumRatio30s,
     maxEntryQueueImbalance: appConfig.maxEntryQueueImbalance,
+    minLiveChopScore: appConfig.minLiveChopScore,
     minParticipationHoldersPerSide: appConfig.minParticipationHoldersPerSide,
     minParticipationTopHolderSharesPerSide: appConfig.minParticipationTopHolderSharesPerSide,
     minParticipationTopPositionPnl: appConfig.minParticipationTopPositionPnl,

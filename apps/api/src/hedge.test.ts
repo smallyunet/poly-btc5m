@@ -92,6 +92,8 @@ function config(): AppConfig {
     maxDriftRatio120s: 0.45,
     maxMomentumRatio30s: 0.55,
     maxEntryQueueImbalance: 5,
+    minLiveChopScore: 80,
+    entryConfirmTicks: 3,
     participationEnabled: true,
     participationCacheMs: 30_000,
     participationTopHoldersPerSide: 8,

@@ -283,7 +283,18 @@ limit price is valid
 pair cost <= MAX_PAIR_COST
 entry-limit bid queue imbalance <= MAX_ENTRY_QUEUE_IMBALANCE
 PM participation gate passes when data is available
+live mode chopScore >= MIN_LIVE_CHOP_SCORE
+entry setup stays eligible for ENTRY_CONFIRM_TICKS consecutive bot ticks
 ```
+
+The live score floor is intentionally stricter than the base CHOP classifier. The classifier may still label a 70-79 score as CHOP for diagnostics and monitor mode, but live trading requires:
+
+```text
+MIN_LIVE_CHOP_SCORE=80
+ENTRY_CONFIRM_TICKS=3
+```
+
+This prevents short-lived or edge-score 42c setups from immediately posting real paired orders.
 
 Orderbook tradable means:
 
@@ -519,6 +530,8 @@ missing-side bestAsk <= SINGLE_FILL_HEDGE_MAX_PRICE
 dominant average fill price + hedge limit <= SINGLE_FILL_HEDGE_MAX_PAIR_COST
 no recent local hedge duplicate exists
 ```
+
+Every final-window hedge candidate records a structured outcome when it is blocked, fails, or posts. Duplicate-order and short failed-order cooldown guards also record explicit outcomes, so a final single-fill round should not remain blank in the dashboard.
 
 The hedge is not a market order. It is a capped aggressive limit:
 

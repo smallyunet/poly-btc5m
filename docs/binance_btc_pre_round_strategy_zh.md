@@ -287,7 +287,18 @@ limit price is valid
 pair cost <= MAX_PAIR_COST
 entry-limit bid queue imbalance <= MAX_ENTRY_QUEUE_IMBALANCE
 PM participation gate passes when data is available
+live mode chopScore >= MIN_LIVE_CHOP_SCORE
+entry setup stays eligible for ENTRY_CONFIRM_TICKS consecutive bot ticks
 ```
+
+live 模式比基础 CHOP 分类更严格。70-79 分仍可作为 CHOP 诊断和 monitor 观察，但真实下单要求：
+
+```text
+MIN_LIVE_CHOP_SCORE=80
+ENTRY_CONFIRM_TICKS=3
+```
+
+这样可以防止短暂翻成 CHOP 或边缘 42c 档位立即发真实订单。
 
 订单簿可交易表示：
 
@@ -523,6 +534,8 @@ missing-side bestAsk <= SINGLE_FILL_HEDGE_MAX_PRICE
 dominant average fill price + hedge limit <= SINGLE_FILL_HEDGE_MAX_PAIR_COST
 no recent local hedge duplicate exists
 ```
+
+每个最终窗口内的 hedge candidate 都会记录结构化 outcome。无论是 blocked、failed 还是 posted，dashboard 都应能看到结果；重复订单保护和短失败冷却也会记录明确 outcome，避免 final single-fill 轮次在页面上没有原因。
 
 补单价格不是 market order，而是 capped aggressive limit：
 

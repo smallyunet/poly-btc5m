@@ -100,6 +100,8 @@ MIN_BI_EXCURSION_BPS_120S=1
 MAX_DRIFT_RATIO_120S=0.45
 MAX_MOMENTUM_RATIO_30S=0.55
 MAX_ENTRY_QUEUE_IMBALANCE=5
+MIN_LIVE_CHOP_SCORE=80
+ENTRY_CONFIRM_TICKS=3
 PARTICIPATION_ENABLED=true
 PARTICIPATION_CACHE_MS=30000
 PARTICIPATION_TOP_HOLDERS_PER_SIDE=8
@@ -127,6 +129,8 @@ The worker targets the next BTC 5m round for entry. It posts paired BUY limit or
 Live entry orders are configured as CLOB limit order `price + size`:
 
 - With `DYNAMIC_LIMIT_ENABLED=true`, CHOP score maps to 42c/44c/45c/46c, capped by `MAX_PAIR_COST`.
+- In live mode, `MIN_LIVE_CHOP_SCORE=80` blocks edge-score 42c setups from posting real orders.
+- `ENTRY_CONFIRM_TICKS=3` requires the full entry setup to remain eligible across three consecutive bot ticks before orders are posted.
 - `DUAL_LIMIT_PRICE` is the fixed fallback price when dynamic limit pricing is disabled.
 - With `DYNAMIC_SHARES_ENABLED=true`, CHOP score maps to `0.5x/1.0x/1.0x/1.25x` of `ORDER_SHARES_PER_SIDE`, capped by `MAX_ORDER_SHARES_PER_SIDE`.
 - The resulting shares value becomes the `size` sent to `createOrder` for each YES/NO side.

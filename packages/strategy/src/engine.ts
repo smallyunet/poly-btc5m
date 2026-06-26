@@ -21,6 +21,7 @@ export type StrategyRiskConfig = {
   maxDriftRatio120s: number;
   maxMomentumRatio30s: number;
   maxEntryQueueImbalance: number;
+  minLiveChopScore: number;
   minParticipationHoldersPerSide: number;
   minParticipationTopHolderSharesPerSide: number;
   minParticipationTopPositionPnl: number;
@@ -88,6 +89,7 @@ export function evaluateEntry(snapshot: StateSnapshot, config: StrategyRiskConfi
   if (limitPrice <= 0 || limitPrice >= 1) reasons.push('INVALID_DUAL_LIMIT_PRICE');
   if (pairCost > config.maxPairCost + 0.000001) reasons.push('PAIR_COST_TOO_HIGH');
   if (queue.ratio != null && queue.ratio > config.maxEntryQueueImbalance) reasons.push('ENTRY_QUEUE_IMBALANCE');
+  if (!config.dryRun && snapshot.features.chopScore < config.minLiveChopScore) reasons.push('ENTRY_SCORE_TOO_LOW_FOR_LIVE');
   if (participation.blocked) reasons.push('PARTICIPATION_WEAK');
 
   const base = [
@@ -120,6 +122,7 @@ export function evaluateEntry(snapshot: StateSnapshot, config: StrategyRiskConfi
       condition('two-sided excursion', snapshot.features.minBiExcursionBps120s >= config.minBiExcursionBps120s, `${snapshot.features.minBiExcursionBps120s.toFixed(2)}bps / ${config.minBiExcursionBps120s}`),
       condition('drift ratio capped', snapshot.features.driftRatio120s <= config.maxDriftRatio120s, `${snapshot.features.driftRatio120s.toFixed(2)} / ${config.maxDriftRatio120s}`),
       condition('momentum ratio capped', snapshot.features.momentumRatio30s <= config.maxMomentumRatio30s, `${snapshot.features.momentumRatio30s.toFixed(2)} / ${config.maxMomentumRatio30s}`),
+      condition('Live score floor', config.dryRun || snapshot.features.chopScore >= config.minLiveChopScore, config.dryRun ? 'monitor mode' : `${snapshot.features.chopScore.toFixed(1)} / ${config.minLiveChopScore}`),
       condition('YES book tradable', buyQuoteReady(yesQuote, config), quoteAgeLabel(yesQuote)),
       condition('NO book tradable', buyQuoteReady(noQuote, config), quoteAgeLabel(noQuote)),
       condition('Entry queue imbalance', queue.ratio == null || queue.ratio <= config.maxEntryQueueImbalance, queueLabel(queue, config.maxEntryQueueImbalance)),

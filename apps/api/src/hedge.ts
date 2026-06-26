@@ -181,8 +181,24 @@ async function executeOneHedge(params: ExecuteHedgesParams, candidate: SingleFil
   }
 
   const executionKey = [plan.intent.roundId, plan.intent.strategy, plan.intent.tokenId, plan.intent.side].join(':');
-  if (params.store.hasRecentOrder(executionKey, params.appConfig.singleFillHedgeWindowSeconds * 1000)) return null;
-  if (params.store.hasRecentFailedOrder(executionKey, FAILED_HEDGE_COOLDOWN_MS)) return null;
+  if (params.store.hasRecentOrder(executionKey, params.appConfig.singleFillHedgeWindowSeconds * 1000)) {
+    params.store.recordSingleFillHedgeOutcome({
+      roundId: candidate.roundId,
+      status: 'blocked',
+      reason: 'RECENT_HEDGE_ORDER_EXISTS',
+      recordedAt: new Date().toISOString(),
+    });
+    return null;
+  }
+  if (params.store.hasRecentFailedOrder(executionKey, FAILED_HEDGE_COOLDOWN_MS)) {
+    params.store.recordSingleFillHedgeOutcome({
+      roundId: candidate.roundId,
+      status: 'blocked',
+      reason: 'RECENT_FAILED_HEDGE_ORDER',
+      recordedAt: new Date().toISOString(),
+    });
+    return null;
+  }
 
   const cancelResult = await cancelMissingSideOrders(params, candidate.roundId, plan.intent.label);
   if (!cancelResult.ok) {

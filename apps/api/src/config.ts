@@ -38,6 +38,8 @@ export type AppConfig = {
   maxDriftRatio120s: number;
   maxMomentumRatio30s: number;
   maxEntryQueueImbalance: number;
+  minLiveChopScore: number;
+  entryConfirmTicks: number;
   participationEnabled: boolean;
   participationCacheMs: number;
   participationTopHoldersPerSide: number;
@@ -99,6 +101,8 @@ export function loadConfig(): AppConfig {
     maxDriftRatio120s: numberEnv('MAX_DRIFT_RATIO_120S', 0.45),
     maxMomentumRatio30s: numberEnv('MAX_MOMENTUM_RATIO_30S', 0.55),
     maxEntryQueueImbalance: numberEnv('MAX_ENTRY_QUEUE_IMBALANCE', 5),
+    minLiveChopScore: numberEnv('MIN_LIVE_CHOP_SCORE', 80),
+    entryConfirmTicks: parsePositiveInteger(process.env.ENTRY_CONFIRM_TICKS, 3),
     participationEnabled: booleanEnv('PARTICIPATION_ENABLED', true),
     participationCacheMs: parsePositiveInteger(process.env.PARTICIPATION_CACHE_MS, 30_000),
     participationTopHoldersPerSide: parsePositiveInteger(process.env.PARTICIPATION_TOP_HOLDERS_PER_SIDE, 8),

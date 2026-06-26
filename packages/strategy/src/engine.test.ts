@@ -25,6 +25,7 @@ const risk: StrategyRiskConfig = {
   maxDriftRatio120s: 0.45,
   maxMomentumRatio30s: 0.55,
   maxEntryQueueImbalance: 5,
+  minLiveChopScore: 80,
   minParticipationHoldersPerSide: 3,
   minParticipationTopHolderSharesPerSide: 300,
   minParticipationTopPositionPnl: 40,
@@ -117,6 +118,15 @@ test('uses 42c for edge-score entries', () => {
   assert.equal(result.intents.length, 2);
   assert.equal(result.intents[0].limitPrice, 0.42);
   assert.equal(result.intents[0].shares, 5);
+});
+
+test('blocks edge-score entries in live mode', () => {
+  const snapshot = { ...baseSnapshot({ ...chopFeatures(), chopScore: 75 }), regime: 'CHOP' as const };
+  const result = evaluateEntry(snapshot, { ...risk, dryRun: false });
+  assert.equal(result.intents.length, 0);
+  assert.equal(result.rejected.length, 2);
+  assert.match(result.rejected[0].rejectionReason || '', /ENTRY_SCORE_TOO_LOW_FOR_LIVE/);
+  assert.equal(result.checks[0].conditions.find((item) => item.label === 'Live score floor')?.passed, false);
 });
 
 test('keeps base shares for mid-score entries', () => {

@@ -93,6 +93,7 @@ export class InMemoryStore {
   private pendingSingleFillReviewRoundIds = new Set<string>();
   private singleFillHedgeOutcomes = new Map<string, SingleFillHedgeOutcome>();
   private singleFillCooldownEvents: SingleFillCooldownEvent[] = [];
+  private entrySignalCounts = new Map<string, number>();
   private runtimeLogs: RuntimeLogRecord[] = [];
   private strategyChecks: StrategyCheck[] = [];
   private readonly persistencePath?: string;
@@ -191,6 +192,15 @@ export class InMemoryStore {
 
   recordStrategyChecks(checks: StrategyCheck[]): void {
     this.strategyChecks = checks;
+  }
+
+  recordEntrySignal(roundId: string, passed: boolean): number {
+    const next = passed ? (this.entrySignalCounts.get(roundId) ?? 0) + 1 : 0;
+    this.entrySignalCounts.set(roundId, next);
+    for (const key of this.entrySignalCounts.keys()) {
+      if (key !== roundId) this.entrySignalCounts.delete(key);
+    }
+    return next;
   }
 
   hasRecentOrder(executionKey: string, windowMs: number, options: { includeFailed?: boolean } = {}): boolean {
