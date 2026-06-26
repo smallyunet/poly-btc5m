@@ -4,6 +4,7 @@ import { PolymarketAdapter, type FillTarget } from '../../../packages/polymarket
 import type { AppConfig } from './config';
 import { buildSingleFillHedgeCheck, executeSingleFillHedges, planSingleFillHedge } from './hedge';
 import { executeLiveIntents } from './execution';
+import { buildSingleFillProfitExitCheck, executeSingleFillProfitExits, planSingleFillProfitExit } from './profitExit';
 import type { MarketDataService } from './marketData';
 import type { ParticipationService } from './participation';
 import type { Btc5mRoundDiscovery } from './roundDiscovery';
@@ -20,7 +21,10 @@ export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, dat
   const hedgeWatchTokenIds = appConfig.singleFillHedgeEnabled
     ? store.hedgeWatchTokenIds(appConfig.singleFillHedgeWindowSeconds, appConfig.singleFillHedgeMinSecondsToEnd)
     : [];
-  data.syncClobRound(round, hedgeWatchTokenIds);
+  const profitExitWatchTokenIds = appConfig.singleFillProfitExitEnabled
+    ? store.profitExitWatchTokenIds(appConfig.singleFillProfitExitMaxSecondsToEnd, appConfig.singleFillProfitExitMinSecondsToEnd)
+    : [];
+  data.syncClobRound(round, [...hedgeWatchTokenIds, ...profitExitWatchTokenIds]);
   const orderbooks = await data.refreshOrderbooks(round);
   const participation = await participationService.refresh(round);
   diagnostics.push(...participation.diagnostics);
@@ -57,15 +61,23 @@ export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, dat
   const hedgeCandidates = appConfig.singleFillHedgeEnabled
     ? store.singleFillHedgeCandidates(appConfig.singleFillHedgeWindowSeconds, appConfig.singleFillHedgeMinSecondsToEnd)
     : [];
-  const hedgeOrderbooks = data.refreshOrderbooksForTokenIds(hedgeCandidates.flatMap((candidate) => [candidate.yesTokenId, candidate.noTokenId]));
+  const profitExitCandidates = appConfig.singleFillProfitExitEnabled
+    ? store.singleFillProfitExitCandidates(appConfig.singleFillProfitExitMaxSecondsToEnd, appConfig.singleFillProfitExitMinSecondsToEnd)
+    : [];
+  const hedgeOrderbooks = data.refreshOrderbooksForTokenIds([
+    ...hedgeCandidates.flatMap((candidate) => [candidate.yesTokenId, candidate.noTokenId]),
+    ...profitExitCandidates.flatMap((candidate) => [candidate.yesTokenId, candidate.noTokenId]),
+  ]);
   const hedgeDiagnostics = await executeSingleFillHedges({ appConfig, adapter, store, candidates: hedgeCandidates, orderbooks: hedgeOrderbooks });
+  const profitExitDiagnostics = await executeSingleFillProfitExits({ appConfig, adapter, store, candidates: profitExitCandidates, orderbooks: hedgeOrderbooks });
   const exit = evaluateExit(snapshot, positions, risk, { orders: store.roundOrders(snapshot.round.id), fills: store.roundFills(snapshot.round.id) });
   const hedgeCheck = buildCurrentRoundHedgeCheck(appConfig, store, snapshot, [...orderbooks, ...hedgeOrderbooks]);
+  const profitExitCheck = buildCurrentRoundProfitExitCheck(appConfig, store, snapshot, [...orderbooks, ...hedgeOrderbooks]);
   await reconcileSettlements(appConfig, store, diagnostics);
   maybeRecordEstimatedSettlement(store, snapshot);
-  const finalSnapshot = { ...snapshot, diagnostics: [...diagnostics, ...entry.diagnostics, ...executionDiagnostics, ...hedgeDiagnostics] };
+  const finalSnapshot = { ...snapshot, diagnostics: [...diagnostics, ...entry.diagnostics, ...executionDiagnostics, ...hedgeDiagnostics, ...profitExitDiagnostics] };
   store.recordSnapshot(finalSnapshot, data.status());
-  store.recordStrategyChecks([...entry.checks, ...exit.checks, hedgeCheck]);
+  store.recordStrategyChecks([...entry.checks, ...exit.checks, hedgeCheck, profitExitCheck]);
   return finalSnapshot;
 }
 
@@ -119,6 +131,32 @@ function buildCurrentRoundHedgeCheck(appConfig: AppConfig, store: InMemoryStore,
     outcome: store.getSingleFillHedgeOutcome(snapshot.round.id),
     hasRecentHedgeOrder: executionKey ? store.hasRecentOrder(executionKey, appConfig.singleFillHedgeWindowSeconds * 1000) : false,
     hasRecentFailedHedgeOrder: executionKey ? store.hasRecentFailedOrder(executionKey, 60_000) : false,
+  });
+}
+
+function buildCurrentRoundProfitExitCheck(appConfig: AppConfig, store: InMemoryStore, snapshot: StateSnapshot, orderbooks: StateSnapshot['orderbooks']) {
+  const candidate = {
+    roundId: snapshot.round.id,
+    eventSlug: snapshot.round.eventSlug,
+    marketTitle: snapshot.round.title,
+    imageUrl: snapshot.round.imageUrl,
+    startAt: snapshot.round.startAt,
+    endAt: snapshot.round.endAt,
+    secondsToEnd: snapshot.round.secondsToEnd,
+    yesTokenId: snapshot.round.yesTokenId,
+    noTokenId: snapshot.round.noTokenId,
+  };
+  const orders = store.roundOrders(snapshot.round.id);
+  const plan = planSingleFillProfitExit({ candidate, orders, orderbooks, appConfig });
+  const executionKey = plan.ok ? [plan.intent.roundId, plan.intent.strategy, plan.intent.tokenId, plan.intent.side].join(':') : undefined;
+  return buildSingleFillProfitExitCheck({
+    candidate,
+    orders,
+    orderbooks,
+    appConfig,
+    runtimeStatus: store.getRuntime().status,
+    hasRecentExitOrder: executionKey ? store.hasRecentOrder(executionKey, 5_000) : false,
+    hasRecentFailedExitOrder: executionKey ? store.hasRecentFailedOrder(executionKey, 60_000) : false,
   });
 }
 

@@ -124,7 +124,7 @@ SINGLE_FILL_HEDGE_PRICE_OFFSET=0.01
 SINGLE_FILL_HEDGE_MAX_PAIR_COST=1.10
 ```
 
-The worker targets the next BTC 5m round for entry. It posts paired BUY limit orders before round start and does not set an exchange-level expiration on those limit orders. After start, it normally only reconciles fills and records settlement estimates. The optional single-fill hedge is the only post-start trade path: in the final window it can cancel stale missing-side BUY orders and submit a capped aggressive BUY LIMIT for the missing side. It never sends SELL orders or uncapped market orders.
+The worker targets the next BTC 5m round for entry. It posts paired BUY limit orders before round start and does not set an exchange-level expiration on those limit orders. After start, it normally only reconciles fills and records settlement estimates. There are two explicit single-fill risk paths: a profit exit can cancel the missing-side BUY and sell the filled side with a capped FAK SELL limit when the filled side is already profitable; the final-window hedge can cancel stale missing-side BUY orders and submit a capped aggressive BUY LIMIT for the missing side. It never sends uncapped market orders.
 
 Live entry orders are configured as CLOB limit order `price + size`:
 
@@ -137,6 +137,7 @@ Live entry orders are configured as CLOB limit order `price + size`:
 - `MAX_ENTRY_QUEUE_IMBALANCE` only blocks extreme YES/NO bid-queue imbalance at the entry limit. If full bid levels are unavailable, the check stays diagnostic and does not block.
 - `PARTICIPATION_*` adds a conservative PM data-api gate using event `conditionId`, top holders, and limited per-holder positions. It blocks only when fetched data shows clearly weak participation; missing/unavailable data is visible in the dashboard and does not block.
 - `SINGLE_FILL_HEDGE_MAX_PRICE` is the hard cap for the final-window missing-side hedge. `SINGLE_FILL_HEDGE_PRICE_OFFSET` lets the hedge cross the current best ask slightly while still respecting the cap.
+- `SINGLE_FILL_PROFIT_EXIT_*` controls the single-fill take-profit exit. The filled side must have a fresh live bid at or above `SINGLE_FILL_PROFIT_EXIT_MIN_PRICE`, the capped FAK SELL limit must realize at least `SINGLE_FILL_PROFIT_EXIT_MIN_PNL_USD`, and stale quotes above `SINGLE_FILL_PROFIT_EXIT_MAX_ORDERBOOK_AGE_MS` are rejected.
 - Final single-fill cooldown is adaptive: base final singles pause entries for 30 minutes, price-cap hedge misses pause for 1 hour, execution/API/cancel/post failures pause for 2 hours, and repeated final singles inside 2 hours escalate to 2 hours then 4 hours.
 
 ## Docker

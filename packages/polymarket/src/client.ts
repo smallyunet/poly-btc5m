@@ -41,6 +41,7 @@ export type FillTarget = Pick<OrderRecord, 'roundId' | 'eventSlug' | 'marketTitl
 type ClobModule = {
   ClobClient: new (params: Record<string, unknown>) => any;
   Side: { BUY: unknown; SELL: unknown };
+  OrderType: { GTC: unknown; FAK: unknown };
   AssetType: { COLLATERAL: unknown; CONDITIONAL: unknown };
 };
 
@@ -51,14 +52,14 @@ async function importClobClient(): Promise<ClobModule> {
 export class PolymarketAdapter {
   constructor(private readonly config: PolymarketClientConfig) {}
 
-  async executeLimitIntent(intent: TradeIntent, options: { execute: boolean }): Promise<LimitOrderResult> {
+  async executeLimitIntent(intent: TradeIntent, options: { execute: boolean; orderType?: 'GTC' | 'FAK' }): Promise<LimitOrderResult> {
     if (!options.execute) {
       return { ok: true, price: intent.limitPrice, size: roundDownShares(intent.shares), raw: { dryRun: true, intent } };
     }
     if (!this.config.ownerPrivateKey?.trim()) throw new Error('OWNER_PRIVATE_KEY is required for execution.');
     if (!this.config.depositWallet?.trim()) throw new Error('POLYMARKET_DEPOSIT_WALLET is required for execution.');
 
-    const { Side } = await importClobClient();
+    const { OrderType, Side } = await importClobClient();
     const client = await this.authenticatedClient();
     const [tickSize, negRisk] = await Promise.all([client.getTickSize(intent.tokenId), client.getNegRisk(intent.tokenId)]);
     const size = roundDownShares(intent.shares);
@@ -71,7 +72,7 @@ export class PolymarketAdapter {
       },
       { tickSize, negRisk },
     );
-    const posted = await client.postOrder(signedOrder);
+    const posted = await client.postOrder(signedOrder, options.orderType === 'FAK' ? OrderType.FAK : OrderType.GTC);
     const error = orderError(posted);
     return {
       ok: !error,

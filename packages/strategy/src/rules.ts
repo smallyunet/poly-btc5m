@@ -16,6 +16,7 @@ export const STRATEGY_RULES: StrategyRule[] = [
     ],
     exitRules: [
       'If both sides fill, hold paired exposure through settlement.',
+      'If only one side fills and its live bid becomes profitable, a separate profit-exit rule may cancel the missing-side buy and sell the filled side with a capped FAK limit.',
       'If only one side fills, a separate last-window hedge rule may buy the missing side with a capped aggressive limit order.',
       'Final single-sided fills use adaptive cooldown: short for ordinary/price-cap misses, longer for execution failures, and escalating for repeats.',
       'Outside the configured single-fill hedge window, the bot does not add, sell, or rebalance after the round starts.',
@@ -37,6 +38,23 @@ export const STRATEGY_RULES: StrategyRule[] = [
     exitRules: [
       'No SELL hedge is generated.',
       'If the cap is exceeded, the bot leaves the single-sided exposure open through settlement.',
+    ],
+  },
+  {
+    id: 'BTC5M_SINGLE_FILL_PROFIT_EXIT',
+    title: 'BTC 5m Single-Fill Profit Exit',
+    allocationPct: 0,
+    summary: 'When a single filled side can be sold for a configured profit, cancel the stale missing-side buy order and exit the filled side using a capped FAK sell limit.',
+    entryRules: [
+      'Round must already be running and inside the configured profit-exit window.',
+      'Exactly one side must have net BUY exposure by at least the minimum order size.',
+      'The filled-side orderbook must be live, fresh under SINGLE_FILL_PROFIT_EXIT_MAX_ORDERBOOK_AGE_MS, and have bestBid >= SINGLE_FILL_PROFIT_EXIT_MIN_PRICE.',
+      'The capped sell limit must realize at least SINGLE_FILL_PROFIT_EXIT_MIN_PNL_USD.',
+      'The exit is posted as a FAK SELL LIMIT, not an uncapped market order.',
+    ],
+    exitRules: [
+      'The missing-side open BUY order is cancelled before the sell attempt.',
+      'If the bid moves below the configured floor after cancellation, the sell is skipped and the single exposure remains managed by the hedge rule.',
     ],
   },
 ];

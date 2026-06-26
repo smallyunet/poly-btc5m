@@ -21,6 +21,8 @@ export type SingleFillHedgeCandidate = {
   noTokenId: string;
 };
 
+export type SingleFillProfitExitCandidate = SingleFillHedgeCandidate;
+
 export type SingleFillHedgeOutcome = {
   roundId: string;
   status: 'posted' | 'blocked' | 'failed' | 'monitor';
@@ -231,6 +233,12 @@ export class InMemoryStore {
       .filter(Boolean);
   }
 
+  profitExitWatchTokenIds(maxSecondsToEnd: number, minSecondsToEnd: number, nowMs = Date.now()): string[] {
+    return this.singleFillProfitExitCandidates(maxSecondsToEnd, minSecondsToEnd, nowMs)
+      .flatMap((candidate) => [candidate.yesTokenId, candidate.noTokenId])
+      .filter(Boolean);
+  }
+
   singleFillHedgeCandidates(windowSeconds: number, minSecondsToEnd: number, nowMs = Date.now()): SingleFillHedgeCandidate[] {
     const byRound = new Map<string, SingleFillHedgeCandidate>();
     for (const order of this.orders) {
@@ -243,6 +251,35 @@ export class InMemoryStore {
 
       const existing = byRound.get(order.roundId);
       const candidate: SingleFillHedgeCandidate = existing || {
+        roundId: order.roundId,
+        eventSlug: order.eventSlug,
+        marketTitle: order.marketTitle,
+        imageUrl: order.imageUrl,
+        startAt: new Date(startMs).toISOString(),
+        endAt: new Date(endMs).toISOString(),
+        secondsToEnd,
+        yesTokenId: '',
+        noTokenId: '',
+      };
+      if (order.label === 'YES') candidate.yesTokenId = order.tokenId;
+      if (order.label === 'NO') candidate.noTokenId = order.tokenId;
+      byRound.set(order.roundId, candidate);
+    }
+    return [...byRound.values()].filter((candidate) => candidate.yesTokenId && candidate.noTokenId);
+  }
+
+  singleFillProfitExitCandidates(maxSecondsToEnd: number, minSecondsToEnd: number, nowMs = Date.now()): SingleFillProfitExitCandidate[] {
+    const byRound = new Map<string, SingleFillProfitExitCandidate>();
+    for (const order of this.orders) {
+      if (order.side !== 'BUY') continue;
+      const startMs = roundStartMs(order.roundId);
+      if (startMs == null) continue;
+      const endMs = startMs + 5 * 60_000;
+      const secondsToEnd = (endMs - nowMs) / 1000;
+      if (nowMs < startMs || secondsToEnd > maxSecondsToEnd || secondsToEnd <= minSecondsToEnd) continue;
+
+      const existing = byRound.get(order.roundId);
+      const candidate: SingleFillProfitExitCandidate = existing || {
         roundId: order.roundId,
         eventSlug: order.eventSlug,
         marketTitle: order.marketTitle,

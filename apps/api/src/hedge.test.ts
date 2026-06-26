@@ -130,6 +130,13 @@ function config(): AppConfig {
     singleFillHedgeMaxPrice: 0.65,
     singleFillHedgePriceOffset: 0.01,
     singleFillHedgeMaxPairCost: 1.05,
+    singleFillProfitExitEnabled: true,
+    singleFillProfitExitMinPrice: 0.5,
+    singleFillProfitExitMinPnlUsd: 0.3,
+    singleFillProfitExitPriceOffset: 0.01,
+    singleFillProfitExitMaxOrderbookAgeMs: 1_000,
+    singleFillProfitExitMinSecondsToEnd: 20,
+    singleFillProfitExitMaxSecondsToEnd: 240,
     marketConfig: {
       seriesSlug: 'btc-updown-5m',
       title: 'Polymarket BTC 5m',

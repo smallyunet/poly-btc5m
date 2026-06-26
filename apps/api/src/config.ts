@@ -61,6 +61,13 @@ export type AppConfig = {
   singleFillHedgeMaxPrice: number;
   singleFillHedgePriceOffset: number;
   singleFillHedgeMaxPairCost: number;
+  singleFillProfitExitEnabled: boolean;
+  singleFillProfitExitMinPrice: number;
+  singleFillProfitExitMinPnlUsd: number;
+  singleFillProfitExitPriceOffset: number;
+  singleFillProfitExitMaxOrderbookAgeMs: number;
+  singleFillProfitExitMinSecondsToEnd: number;
+  singleFillProfitExitMaxSecondsToEnd: number;
   marketConfig: BtcMarketConfig;
 };
 
@@ -124,6 +131,13 @@ export function loadConfig(): AppConfig {
     singleFillHedgeMaxPrice: numberEnv('SINGLE_FILL_HEDGE_MAX_PRICE', 0.65),
     singleFillHedgePriceOffset: numberEnv('SINGLE_FILL_HEDGE_PRICE_OFFSET', 0.01),
     singleFillHedgeMaxPairCost: numberEnv('SINGLE_FILL_HEDGE_MAX_PAIR_COST', 1.1),
+    singleFillProfitExitEnabled: booleanEnv('SINGLE_FILL_PROFIT_EXIT_ENABLED', true),
+    singleFillProfitExitMinPrice: numberEnv('SINGLE_FILL_PROFIT_EXIT_MIN_PRICE', 0.5),
+    singleFillProfitExitMinPnlUsd: numberEnv('SINGLE_FILL_PROFIT_EXIT_MIN_PNL_USD', 0.3),
+    singleFillProfitExitPriceOffset: numberEnv('SINGLE_FILL_PROFIT_EXIT_PRICE_OFFSET', 0.01),
+    singleFillProfitExitMaxOrderbookAgeMs: parsePositiveInteger(process.env.SINGLE_FILL_PROFIT_EXIT_MAX_ORDERBOOK_AGE_MS, 1_000),
+    singleFillProfitExitMinSecondsToEnd: parsePositiveInteger(process.env.SINGLE_FILL_PROFIT_EXIT_MIN_SECONDS_TO_END, 20),
+    singleFillProfitExitMaxSecondsToEnd: parsePositiveInteger(process.env.SINGLE_FILL_PROFIT_EXIT_MAX_SECONDS_TO_END, 240),
     marketConfig: loadMarketConfig(),
   };
 }

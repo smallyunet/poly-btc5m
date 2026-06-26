@@ -4,7 +4,7 @@
 
 该策略**不**交易 BTC 方向。
 
-worker 主要面向**下一轮 BTC 5 分钟市场**。它可以在轮次开始前同时挂出 YES/NO 两侧 BUY 限价单。轮次开始后，默认仍然是 settlement-only；唯一例外是可选的 `BTC5M_SINGLE_FILL_HEDGE` 风控：如果最后窗口内仍然只有一侧成交，worker 可以取消缺失侧旧限价单，并在价格上限内用 aggressive BUY LIMIT 补买缺失侧。它不会 SELL，也不会发送无上限 market order。
+worker 主要面向**下一轮 BTC 5 分钟市场**。它可以在轮次开始前同时挂出 YES/NO 两侧 BUY 限价单。轮次开始后，默认仍然是 settlement-only；两个明确的 single-fill 风控可以在开始后动作：`BTC5M_SINGLE_FILL_PROFIT_EXIT` 可以在已成交侧已经有利润时取消缺失侧 BUY，并用 capped FAK SELL limit 卖出已成交侧；`BTC5M_SINGLE_FILL_HEDGE` 可以在最后窗口取消缺失侧旧限价单，并在价格上限内用 aggressive BUY LIMIT 补买缺失侧。它不会发送无上限 market order。
 
 限价单不会附带交易所层面的过期时间。本地 `ttlSeconds` 只用于本地 intent/order 去重窗口。
 
@@ -90,11 +90,13 @@ Date.now() < round.startAt
 ROUND_ALREADY_STARTED
 ```
 
-所有 SELL intent 都会被拒绝并返回：
+普通入场 SELL intent 会被拒绝并返回：
 
 ```text
 SELL_DISABLED_SETTLEMENT_ONLY
 ```
+
+独立的 profit-exit executor 是唯一允许的开始后 SELL 路径。
 
 最后窗口单侧补单使用独立时间门槛：
 
@@ -521,7 +523,25 @@ no recent failed duplicate exists
 no open Polymarket order exists for the same token
 ```
 
-对 BUY 来说，订单簿必须有 best ask。对 SELL 来说，执行会在订单簿检查前拒绝，因为该策略禁用了所有 SELL 动作。
+对普通入场 BUY 来说，订单簿必须有 best ask。普通入场执行器仍然拒绝 SELL intent；唯一 SELL 路径是独立的 single-fill profit exit 规则。
+
+单侧止盈退出执行层检查：
+
+```text
+SINGLE_FILL_PROFIT_EXIT_ENABLED=true
+round is running and inside the profit-exit window
+exactly one side has net BUY exposure
+filled-side book is live/fresh under SINGLE_FILL_PROFIT_EXIT_MAX_ORDERBOOK_AGE_MS
+filled-side bestBid >= SINGLE_FILL_PROFIT_EXIT_MIN_PRICE
+capped FAK SELL limit realizes at least SINGLE_FILL_PROFIT_EXIT_MIN_PNL_USD
+no recent local profit-exit duplicate exists
+```
+
+止盈退出不是 market order，而是 capped FAK sell limit：
+
+```text
+exitLimitPrice = max(SINGLE_FILL_PROFIT_EXIT_MIN_PRICE, bestBid - SINGLE_FILL_PROFIT_EXIT_PRICE_OFFSET)
+```
 
 单侧补单执行层额外检查：
 
@@ -550,12 +570,20 @@ hedgeLimitPrice = min(bestAsk + SINGLE_FILL_HEDGE_PRICE_OFFSET, SINGLE_FILL_HEDG
 轮次开始后，worker 通常不会：
 
 - 增加任一侧仓位
-- 卖出
-- 退出单边敞口
 - 再平衡
 - 发布新的交易意图
 
-唯一例外是最后窗口单侧补单风控。触发条件：
+第一个例外是 single-fill 止盈退出。触发条件：
+
+- 当前轮次已开始且位于配置的 profit-exit 窗口内
+- 恰好只有一侧存在净 BUY 敞口
+- 已成交侧 live best bid 不低于 `SINGLE_FILL_PROFIT_EXIT_MIN_PRICE`
+- quote 新鲜度不超过 `SINGLE_FILL_PROFIT_EXIT_MAX_ORDERBOOK_AGE_MS`
+- capped FAK SELL limit 至少实现 `SINGLE_FILL_PROFIT_EXIT_MIN_PNL_USD`
+
+取消缺失侧 BUY 并再次对账后，worker 会对已成交侧发送 FAK SELL LIMIT。如果 bid 跌破配置底线，则跳过卖出，single 敞口继续交给 hedge/final review 路径处理。
+
+第二个例外是最后窗口单侧补单风控。触发条件：
 
 - 当前轮次已开始且进入 `SINGLE_FILL_HEDGE_WINDOW_SECONDS`
 - 距离结束仍大于 `SINGLE_FILL_HEDGE_MIN_SECONDS_TO_END`
@@ -667,7 +695,7 @@ dashboard 展示：
 - pair cost 和 pair edge
 - 订单簿可交易状态
 - 当前 blockers
-- 开始后动作模式：默认 settlement-only，最后窗口可显示 capped single-fill hedge 日志
+- 开始后动作模式：默认 settlement-only，可显示 capped single-fill profit-exit 和 hedge 日志
 - 详细策略条件
 
 该页面的目标是在不读日志的情况下展示当前决策和 blockers。

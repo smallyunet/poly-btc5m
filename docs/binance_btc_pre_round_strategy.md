@@ -4,7 +4,7 @@
 
 This strategy does **not** trade BTC direction.
 
-The worker primarily targets the **next BTC 5-minute round**. It may place paired YES/NO BUY limit orders before the round starts. After the round starts, the default mode is still settlement-only. The only exception is the optional `BTC5M_SINGLE_FILL_HEDGE` risk control: if only one side has filled in the final window, the worker may cancel stale missing-side limit orders and submit a capped aggressive BUY LIMIT for the missing side. It never sells and never sends an uncapped market order.
+The worker primarily targets the **next BTC 5-minute round**. It may place paired YES/NO BUY limit orders before the round starts. After the round starts, the default mode is still settlement-only. Two explicit single-fill risk controls can act after start: `BTC5M_SINGLE_FILL_PROFIT_EXIT` can cancel the missing-side BUY and sell the filled side with a capped FAK SELL limit when the filled side is already profitable; `BTC5M_SINGLE_FILL_HEDGE` can cancel stale missing-side limit orders in the final window and submit a capped aggressive BUY LIMIT for the missing side. It never sends an uncapped market order.
 
 No exchange-level expiration is attached to the limit orders. Local `ttlSeconds` is only used for local intent/order dedupe windows.
 
@@ -86,11 +86,13 @@ If this is false, normal entry execution rejects with:
 ROUND_ALREADY_STARTED
 ```
 
-All SELL intents are rejected with:
+Normal entry SELL intents are rejected with:
 
 ```text
 SELL_DISABLED_SETTLEMENT_ONLY
 ```
+
+The independent profit-exit executor is the only allowed post-start SELL path.
 
 The final-window single-fill hedge uses a separate time gate:
 
@@ -517,7 +519,25 @@ no recent failed duplicate exists
 no open Polymarket order exists for the same token
 ```
 
-For BUY, orderbook must have best ask. For SELL, execution rejects before orderbook checks because this strategy disables all SELL actions.
+For normal entry BUY, orderbook must have best ask. The normal entry executor still rejects SELL intents; the only SELL path is the independent single-fill profit exit rule.
+
+Single-fill profit exit execution checks:
+
+```text
+SINGLE_FILL_PROFIT_EXIT_ENABLED=true
+round is running and inside the profit-exit window
+exactly one side has net BUY exposure
+filled-side book is live/fresh under SINGLE_FILL_PROFIT_EXIT_MAX_ORDERBOOK_AGE_MS
+filled-side bestBid >= SINGLE_FILL_PROFIT_EXIT_MIN_PRICE
+capped FAK SELL limit realizes at least SINGLE_FILL_PROFIT_EXIT_MIN_PNL_USD
+no recent local profit-exit duplicate exists
+```
+
+The profit exit is not a market order. It is a capped FAK sell limit:
+
+```text
+exitLimitPrice = max(SINGLE_FILL_PROFIT_EXIT_MIN_PRICE, bestBid - SINGLE_FILL_PROFIT_EXIT_PRICE_OFFSET)
+```
 
 Single-fill hedge execution additionally checks:
 
@@ -546,12 +566,20 @@ hedgeLimitPrice = min(bestAsk + SINGLE_FILL_HEDGE_PRICE_OFFSET, SINGLE_FILL_HEDG
 After round start, the worker normally does not:
 
 - add to either side
-- sell
-- exit single-sided exposure
 - rebalance
 - post new trade intents
 
-The only exception is final-window single-fill hedging. Trigger conditions:
+The first exception is single-fill profit exit. Trigger conditions:
+
+- the active round has started and is inside the configured profit-exit window
+- exactly one side has net BUY exposure
+- the filled-side live best bid is at or above `SINGLE_FILL_PROFIT_EXIT_MIN_PRICE`
+- the quote is fresher than `SINGLE_FILL_PROFIT_EXIT_MAX_ORDERBOOK_AGE_MS`
+- the capped FAK SELL limit realizes at least `SINGLE_FILL_PROFIT_EXIT_MIN_PNL_USD`
+
+After cancellation/reconciliation, the worker posts a FAK SELL LIMIT for the filled side. If the bid moves below the configured floor, it skips the sell and leaves the single exposure for the hedge/final review path.
+
+The second exception is final-window single-fill hedging. Trigger conditions:
 
 - the active round has started and is inside `SINGLE_FILL_HEDGE_WINDOW_SECONDS`
 - more than `SINGLE_FILL_HEDGE_MIN_SECONDS_TO_END` remains
@@ -663,7 +691,7 @@ The dashboard shows:
 - pair cost and pair edge
 - orderbook tradability status
 - current blockers
-- post-start action mode: default settlement-only, with capped single-fill hedge activity visible in logs
+- post-start action mode: default settlement-only, with capped single-fill profit-exit and hedge activity visible in logs
 - detailed strategy conditions
 
 The page is intended to make the current decision and blockers visible without reading logs.
