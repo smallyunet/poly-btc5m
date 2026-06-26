@@ -183,11 +183,11 @@ function participationStats(snapshot: StateSnapshot, config: StrategyRiskConfig)
   const maxConcentration = Math.max(yes?.largestHolderShareRatio ?? 0, no?.largestHolderShareRatio ?? 0);
   const concentrationPassed = maxConcentration <= config.maxParticipationHolderConcentration;
   const topPositionPnl = data.maxPositionPnl;
-  const topPositionPnlPassed = topPositionPnl != null && topPositionPnl >= config.minParticipationTopPositionPnl;
-  const positionPnlSumPassed = data.totalPositionPnl >= config.minParticipationPositionPnlSum;
+  const topPositionPnlPassed = true;
+  const positionPnlSumPassed = true;
 
   return {
-    blocked: !(holderCountPassed && topHolderSharesPassed && concentrationPassed && topPositionPnlPassed && positionPnlSumPassed),
+    blocked: !(holderCountPassed && topHolderSharesPassed && concentrationPassed),
     dataPassed: true,
     dataLabel: `enabled, top ${data.topHoldersPerSide}/side @ ${ageLabel(data.updatedAt)}`,
     holderCountPassed,
@@ -197,9 +197,9 @@ function participationStats(snapshot: StateSnapshot, config: StrategyRiskConfig)
     concentrationPassed,
     concentrationLabel: `max ${formatRatio(maxConcentration)} / cap ${formatRatio(config.maxParticipationHolderConcentration)}`,
     topPositionPnlPassed,
-    topPositionPnlLabel: `${moneyLabel(topPositionPnl)} / min ${moneyLabel(config.minParticipationTopPositionPnl)}`,
+    topPositionPnlLabel: `${moneyLabel(topPositionPnl)} sample; not blocking`,
     positionPnlSumPassed,
-    positionPnlSumLabel: `${moneyLabel(data.totalPositionPnl)} / min ${moneyLabel(config.minParticipationPositionPnlSum)}`,
+    positionPnlSumLabel: `${moneyLabel(data.totalPositionPnl)} sample; not blocking`,
   };
 }
 

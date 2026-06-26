@@ -430,8 +430,6 @@ export function App() {
     'Holder count depth',
     'Top holder shares',
     'Holder concentration',
-    'Top position PnL',
-    'Visible position PnL sum',
   ].map(conditionByLabel).filter((condition): condition is StrategyCheck['conditions'][number] => Boolean(condition));
   const participationDecisionPassed = participationConditions.length > 0 && participationConditions.every((condition) => condition.passed);
   const activeOrders = state.orders.filter((order) => (
@@ -493,7 +491,7 @@ export function App() {
     : participationStatus === 'unavailable' ? 'warn' : 'neutral';
   const participationMaxPnl = participation?.maxPositionPnl;
   const participationSummary = participationStatus === 'enabled' && participation
-    ? `top PnL ${formatNullableMoney(participationMaxPnl)} / visible sum ${formatMoney(participation.totalPositionPnl)}`
+    ? `sample top PnL ${formatNullableMoney(participationMaxPnl)} / sample sum ${formatMoney(participation.totalPositionPnl)}`
     : `${participationStatus}; not blocking`;
   const decisionWindowCondition = conditionByLabel('Decision window');
   const cooldownCondition = conditionByLabel('Single-fill cooldown');
@@ -903,11 +901,11 @@ export function App() {
                     <span className="metricValue"><Badge tone={participationTone}>{participationStatus}</Badge></span>
                   </div>
                   <div className="metricRow">
-                    <span className="metricLabel">Top Position PnL</span>
+                    <span className="metricLabel">Sample Top PnL</span>
                     <span className="metricValue">{formatNullableMoney(participation?.maxPositionPnl)}</span>
                   </div>
                   <div className="metricRow">
-                    <span className="metricLabel">Visible Position PnL Sum</span>
+                    <span className="metricLabel">Sample PnL Sum</span>
                     <span className="metricValue">{participation ? formatMoney(participation.totalPositionPnl) : 'unknown'}</span>
                   </div>
                   <div className="metricRow">
@@ -929,7 +927,7 @@ export function App() {
                         <span className="metricValue">{formatRatioPct(side.largestHolderShareRatio)}</span>
                       </div>
                       <div className="metricRow">
-                        <span className="metricLabel">{outcomeLabel(side.label)} Position PnL</span>
+                        <span className="metricLabel">{outcomeLabel(side.label)} Sample PnL</span>
                         <span className="metricValue">{formatMoney(side.positionPnlSum)} / top {formatNullableMoney(side.topPositionPnl)}</span>
                       </div>
                     </React.Fragment>

@@ -172,6 +172,29 @@ test('blocks entry when visible participation is weak', () => {
   assert.equal(result.checks[0].conditions.find((item) => item.label === 'Holder count depth')?.passed, false);
 });
 
+test('does not block entry for weak sample participation pnl when holder depth passes', () => {
+  const snapshot = { ...baseSnapshot(chopFeatures()), regime: 'CHOP' as const };
+  snapshot.participation = {
+    status: 'enabled',
+    updatedAt: new Date().toISOString(),
+    topHoldersPerSide: 8,
+    maxPositionPnl: -5,
+    totalTopHolderShares: 900,
+    totalPositionPnl: -120,
+    diagnostics: [],
+    sides: [
+      participationSide('YES', { holderCount: 4, topHolderShares: 450, largestHolderShareRatio: 0.4, topPositionPnl: -5, positionPnlSum: -70 }),
+      participationSide('NO', { holderCount: 4, topHolderShares: 450, largestHolderShareRatio: 0.4, topPositionPnl: -10, positionPnlSum: -50 }),
+    ],
+  };
+
+  const result = evaluateEntry(snapshot, risk);
+
+  assert.equal(result.intents.length, 2);
+  assert.equal(result.checks[0].conditions.find((item) => item.label === 'Top position PnL')?.passed, true);
+  assert.match(result.checks[0].conditions.find((item) => item.label === 'Visible position PnL sum')?.actual || '', /not blocking/);
+});
+
 test('does not block entry when participation data is unavailable', () => {
   const snapshot = { ...baseSnapshot(chopFeatures()), regime: 'CHOP' as const };
   snapshot.participation = {
