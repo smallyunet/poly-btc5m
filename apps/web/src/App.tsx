@@ -80,7 +80,7 @@ type DailyExecutionSummary = {
 
 const ROUND_PAGE_SIZE = 20;
 const ORDER_PAGE_SIZE = 25;
-const DAILY_PAGE_SIZE = 7;
+const DAILY_PAGE_SIZE = 1;
 const LOG_PAGE_SIZE = 75;
 const TAB_TYPES: TabType[] = ['terminal', 'orderbooks', 'activity', 'strategy', 'logs'];
 
