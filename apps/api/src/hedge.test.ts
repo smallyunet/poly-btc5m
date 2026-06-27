@@ -2,9 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import type { AppConfig } from './config';
-import { planSingleFillHedge } from './hedge';
-import type { OrderBookQuote, OrderRecord } from '../../../packages/shared/src';
-import type { SingleFillHedgeCandidate } from './store';
+import { executeSingleFillHedges, planSingleFillHedge } from './hedge';
+import { InMemoryStore, type SingleFillHedgeCandidate } from './store';
+import type { PolymarketAdapter } from '../../../packages/polymarket/src';
+import type { OrderBookQuote, OrderRecord, TradeIntent } from '../../../packages/shared/src';
 
 const nowMs = new Date('2026-06-26T00:04:35.000Z').getTime();
 
@@ -106,6 +107,42 @@ test('blocks a marketable hedge below the Polymarket minimum notional', () => {
   assert.deepEqual(plan, { ok: false, reason: 'HEDGE_NOTIONAL_BELOW_MIN' });
 });
 
+test('executes final-window hedge as a FAK limit', async () => {
+  const now = Date.now();
+  const activeCandidate = candidate({
+    startAt: new Date(now - 4 * 60_000).toISOString(),
+    endAt: new Date(now + 25_000).toISOString(),
+    secondsToEnd: 25,
+  });
+  const store = new InMemoryStore('live', 2_000, { persistencePath: false });
+  store.recordOrder(order('YES', { roundId: activeCandidate.roundId, eventSlug: activeCandidate.eventSlug, filledSize: 10, avgFillPrice: 0.44, status: 'filled' }));
+  store.recordOrder(order('NO', { roundId: activeCandidate.roundId, eventSlug: activeCandidate.eventSlug, filledSize: 0, status: 'posted', clobOrderId: 'no-open' }));
+  let postedOptions: { execute: boolean; orderType?: string } | undefined;
+  const adapter = {
+    async getRecentFillsForTargets() {
+      return [];
+    },
+    async cancelOrders() {
+      return {};
+    },
+    async executeLimitIntent(_intent: TradeIntent, options: { execute: boolean; orderType?: string }) {
+      postedOptions = options;
+      return { ok: true, orderId: 'hedge-order', price: 0.6, size: 10 };
+    },
+  } as unknown as PolymarketAdapter;
+
+  const diagnostics = await executeSingleFillHedges({
+    appConfig: { ...config(), executionMode: 'live', ownerPrivateKey: '0xabc', depositWallet: '0xwallet' },
+    adapter,
+    store,
+    candidates: [activeCandidate],
+    orderbooks: [quote('no-token', 0.59)],
+  });
+
+  assert.deepEqual(diagnostics, []);
+  assert.equal(postedOptions?.orderType, 'FAK');
+});
+
 function config(): AppConfig {
   return {
     port: 8788,
@@ -179,7 +216,7 @@ function config(): AppConfig {
   };
 }
 
-function candidate(): SingleFillHedgeCandidate {
+function candidate(patch: Partial<SingleFillHedgeCandidate> = {}): SingleFillHedgeCandidate {
   return {
     roundId: 'btc-updown-5m-1782432000',
     eventSlug: 'btc-updown-5m-1782432000',
@@ -188,6 +225,7 @@ function candidate(): SingleFillHedgeCandidate {
     secondsToEnd: 25,
     yesTokenId: 'yes-token',
     noTokenId: 'no-token',
+    ...patch,
   };
 }
 

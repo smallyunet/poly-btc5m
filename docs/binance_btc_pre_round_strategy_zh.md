@@ -4,9 +4,9 @@
 
 该策略**不**交易 BTC 方向。
 
-worker 主要面向**下一轮 BTC 5 分钟市场**。它可以在轮次开始前同时挂出 YES/NO 两侧 BUY 限价单。轮次开始后，默认仍然是 settlement-only；两个明确的 single-fill 风控可以在开始后动作：`BTC5M_SINGLE_FILL_PROFIT_EXIT` 可以在已成交侧已经有利润时取消缺失侧 BUY，并用 capped FAK SELL limit 卖出已成交侧；`BTC5M_SINGLE_FILL_HEDGE` 可以在最后窗口取消缺失侧旧限价单，并在价格上限内用 aggressive BUY LIMIT 补买缺失侧。它不会发送无上限 market order。
+worker 主要面向**下一轮 BTC 5 分钟市场**。它可以在轮次开始前同时挂出 YES/NO 两侧 BUY 限价单；常规入场单会作为 GTD limit order 提交，并在轮次开始时间过期。轮次开始后，默认仍然是 settlement-only；两个明确的 single-fill 风控可以在开始后动作：`BTC5M_SINGLE_FILL_PROFIT_EXIT` 可以在已成交侧已经有利润时取消缺失侧 BUY，并用 capped FAK SELL limit 卖出已成交侧；`BTC5M_SINGLE_FILL_HEDGE` 可以在最后窗口取消缺失侧旧限价单，并在价格上限内用 aggressive FAK BUY LIMIT 补买缺失侧。它不会发送无上限 market order。
 
-限价单不会附带交易所层面的过期时间。本地 `ttlSeconds` 只用于本地 intent/order 去重窗口。
+本地 `ttlSeconds` 只用于本地 intent/order 去重窗口。交易所层面的订单生命周期单独控制：常规入场使用在轮次开始时间过期的 GTD，profit-exit 和最终窗口 hedge 使用 FAK，未成交剩余会立即取消。
 
 ---
 
@@ -499,7 +499,7 @@ Intent 字段：
 - orderType: `LIMIT`
 - ttlSeconds: `decisionLeadSeconds`
 
-`ttlSeconds` 是本地元数据/去重信息。它不会设置交易所订单过期时间。
+`ttlSeconds` 是本地元数据/去重信息。实盘入场会把这些 intent 作为 GTD limit order 提交到 CLOB，过期时间设置为 `round.startAt`。
 
 ---
 
@@ -557,7 +557,7 @@ no recent local hedge duplicate exists
 
 每个最终窗口内的 hedge candidate 都会记录结构化 outcome。无论是 blocked、failed 还是 posted，dashboard 都应能看到结果；重复订单保护和短失败冷却也会记录明确 outcome，避免 final single-fill 轮次在页面上没有原因。
 
-补单价格不是 market order，而是 capped aggressive limit：
+补单价格不是 market order，而是 capped aggressive FAK limit：
 
 ```text
 hedgeLimitPrice = min(bestAsk + SINGLE_FILL_HEDGE_PRICE_OFFSET, SINGLE_FILL_HEDGE_MAX_PRICE)
@@ -595,7 +595,7 @@ hedgeLimitPrice = min(bestAsk + SINGLE_FILL_HEDGE_PRICE_OFFSET, SINGLE_FILL_HEDG
 
 - 取消缺失侧仍未成交的旧 BUY limit order
 - 再次对账 fills
-- 用 capped aggressive BUY LIMIT 补买缺失侧差额
+- 用 capped aggressive FAK BUY LIMIT 补买缺失侧差额
 
 除此之外，它只会：
 

@@ -4,9 +4,9 @@
 
 This strategy does **not** trade BTC direction.
 
-The worker primarily targets the **next BTC 5-minute round**. It may place paired YES/NO BUY limit orders before the round starts. After the round starts, the default mode is still settlement-only. Two explicit single-fill risk controls can act after start: `BTC5M_SINGLE_FILL_PROFIT_EXIT` can cancel the missing-side BUY and sell the filled side with a capped FAK SELL limit when the filled side is already profitable; `BTC5M_SINGLE_FILL_HEDGE` can cancel stale missing-side limit orders in the final window and submit a capped aggressive BUY LIMIT for the missing side. It never sends an uncapped market order.
+The worker primarily targets the **next BTC 5-minute round**. It may place paired YES/NO BUY limit orders before the round starts. Normal entry orders are posted as GTD limit orders expiring at the round start timestamp. After the round starts, the default mode is still settlement-only. Two explicit single-fill risk controls can act after start: `BTC5M_SINGLE_FILL_PROFIT_EXIT` can cancel the missing-side BUY and sell the filled side with a capped FAK SELL limit when the filled side is already profitable; `BTC5M_SINGLE_FILL_HEDGE` can cancel stale missing-side limit orders in the final window and submit a capped aggressive FAK BUY LIMIT for the missing side. It never sends an uncapped market order.
 
-No exchange-level expiration is attached to the limit orders. Local `ttlSeconds` is only used for local intent/order dedupe windows.
+Local `ttlSeconds` is only used for local intent/order dedupe windows. Exchange-level order lifetime is controlled separately: normal entry uses GTD expiration at round start, while profit-exit and final-window hedge orders use FAK so unfilled remainder is cancelled immediately.
 
 ---
 
@@ -495,7 +495,7 @@ Intent fields:
 - orderType: `LIMIT`
 - ttlSeconds: `decisionLeadSeconds`
 
-`ttlSeconds` is local metadata/dedupe. It does not set exchange order expiration.
+`ttlSeconds` is local metadata/dedupe. Live entry execution posts these intents to the CLOB as GTD limit orders with expiration set to `round.startAt`.
 
 ---
 
@@ -553,7 +553,7 @@ no recent local hedge duplicate exists
 
 Every final-window hedge candidate records a structured outcome when it is blocked, fails, or posts. Duplicate-order and short failed-order cooldown guards also record explicit outcomes, so a final single-fill round should not remain blank in the dashboard.
 
-The hedge is not a market order. It is a capped aggressive limit:
+The hedge is not a market order. It is a capped aggressive FAK limit:
 
 ```text
 hedgeLimitPrice = min(bestAsk + SINGLE_FILL_HEDGE_PRICE_OFFSET, SINGLE_FILL_HEDGE_MAX_PRICE)
@@ -591,7 +591,7 @@ When triggered, the worker:
 
 - cancels stale missing-side BUY limit orders
 - reconciles fills again
-- submits a capped aggressive BUY LIMIT for the missing-side share gap
+- submits a capped aggressive FAK BUY LIMIT for the missing-side share gap
 
 Otherwise it only:
 

@@ -41,7 +41,7 @@ export type FillTarget = Pick<OrderRecord, 'roundId' | 'eventSlug' | 'marketTitl
 type ClobModule = {
   ClobClient: new (params: Record<string, unknown>) => any;
   Side: { BUY: unknown; SELL: unknown };
-  OrderType: { GTC: unknown; FAK: unknown };
+  OrderType: { GTC: unknown; GTD: unknown; FAK: unknown };
   AssetType: { COLLATERAL: unknown; CONDITIONAL: unknown };
 };
 
@@ -52,7 +52,7 @@ async function importClobClient(): Promise<ClobModule> {
 export class PolymarketAdapter {
   constructor(private readonly config: PolymarketClientConfig) {}
 
-  async executeLimitIntent(intent: TradeIntent, options: { execute: boolean; orderType?: 'GTC' | 'FAK' }): Promise<LimitOrderResult> {
+  async executeLimitIntent(intent: TradeIntent, options: { execute: boolean; orderType?: 'GTC' | 'GTD' | 'FAK'; expiration?: number }): Promise<LimitOrderResult> {
     if (!options.execute) {
       return { ok: true, price: intent.limitPrice, size: roundDownShares(intent.shares), raw: { dryRun: true, intent } };
     }
@@ -69,10 +69,11 @@ export class PolymarketAdapter {
         price: intent.limitPrice,
         side: intent.side === 'BUY' ? Side.BUY : Side.SELL,
         size,
+        ...(options.orderType === 'GTD' && options.expiration ? { expiration: options.expiration } : {}),
       },
       { tickSize, negRisk },
     );
-    const posted = await client.postOrder(signedOrder, options.orderType === 'FAK' ? OrderType.FAK : OrderType.GTC);
+    const posted = await client.postOrder(signedOrder, clobOrderType(OrderType, options.orderType));
     const error = orderError(posted);
     return {
       ok: !error,
@@ -324,6 +325,12 @@ export class PolymarketAdapter {
     throw new Error('Failed to resolve Polymarket CLOB API credentials.');
   }
 
+}
+
+function clobOrderType(OrderType: ClobModule['OrderType'], orderType: 'GTC' | 'GTD' | 'FAK' = 'GTC'): unknown {
+  if (orderType === 'FAK') return OrderType.FAK;
+  if (orderType === 'GTD') return OrderType.GTD;
+  return OrderType.GTC;
 }
 
 export function quoteFromBook(tokenId: string, book: any, source: 'ws'): OrderBookQuote {

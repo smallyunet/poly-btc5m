@@ -13,11 +13,12 @@ export const STRATEGY_RULES: StrategyRule[] = [
       'Extreme imbalance in YES vs NO bid queue at the entry limit is blocked; mild imbalance is only diagnostic.',
       'Shares are score-tiered: low CHOP scores reduce size, mid scores use base size, and very high scores get only a small size increase.',
       'No duplicate local or Polymarket open order may exist for the same round/token.',
+      'Live entry orders are posted as GTD limit orders expiring at round start.',
     ],
     exitRules: [
       'If both sides fill, hold paired exposure through settlement.',
       'If only one side fills and its live bid becomes profitable, a separate profit-exit rule may cancel the missing-side buy and sell the filled side with a capped FAK limit.',
-      'If only one side fills, a separate last-window hedge rule may buy the missing side with a capped aggressive limit order.',
+      'If only one side fills, a separate last-window hedge rule may buy the missing side with a capped aggressive FAK limit order.',
       'Final single-sided fills use adaptive cooldown: short for ordinary/price-cap misses, longer for execution failures, and escalating for repeats.',
       'Outside the configured single-fill hedge window, the bot does not add, sell, or rebalance after the round starts.',
       'Execution rejects all SELL intents and rejects normal entry intents after round start; hedge intents use the separate capped hedge gate.',
@@ -33,7 +34,7 @@ export const STRATEGY_RULES: StrategyRule[] = [
       'Exactly one side must have more BUY fills than the other side by at least the minimum order size.',
       'The missing-side orderbook must be live, fresh, and have bestAsk <= SINGLE_FILL_HEDGE_MAX_PRICE.',
       'Dominant-side average fill price plus hedge limit price must be <= SINGLE_FILL_HEDGE_MAX_PAIR_COST.',
-      'The hedge is posted as a capped BUY LIMIT order, not an uncapped market order.',
+      'The hedge is posted as a capped FAK BUY LIMIT order, not an uncapped market order.',
     ],
     exitRules: [
       'No SELL hedge is generated.',

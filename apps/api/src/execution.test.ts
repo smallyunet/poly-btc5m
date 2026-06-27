@@ -53,6 +53,39 @@ test('blocks a paired live entry batch when active BUY orders leave insufficient
   assert.ok(storedIntents.every((item) => item.rejectionReason === 'INSUFFICIENT_AVAILABLE_COLLATERAL'));
 });
 
+test('posts live entry orders as GTD limits expiring at round start', async () => {
+  const store = new InMemoryStore('live', 2_000, { persistencePath: false });
+  const intents = [intent('YES')];
+  store.recordIntents(intents);
+  const startAt = new Date(Date.now() + 20_000).toISOString();
+  let postedOptions: { execute: boolean; orderType?: string; expiration?: number } | undefined;
+  const adapter = {
+    async getCollateralBalanceAllowance() {
+      return { balance: 20, allowance: 20 };
+    },
+    async getOpenOrders() {
+      return [];
+    },
+    async executeLimitIntent(_intent: TradeIntent, options: { execute: boolean; orderType?: string; expiration?: number }) {
+      postedOptions = options;
+      return { ok: true, orderId: 'entry-order', price: 0.44, size: 10 };
+    },
+  } as unknown as PolymarketAdapter;
+
+  const diagnostics = await executeLiveIntents({
+    appConfig: appConfig(),
+    adapter,
+    store,
+    snapshot: snapshot({ startAt }),
+    intents,
+    risk: risk(),
+  });
+
+  assert.deepEqual(diagnostics, []);
+  assert.equal(postedOptions?.orderType, 'GTD');
+  assert.equal(postedOptions?.expiration, Math.floor(new Date(startAt).getTime() / 1000));
+});
+
 function intent(label: 'YES' | 'NO'): TradeIntent {
   return {
     id: `intent-${label}`,
@@ -87,7 +120,7 @@ function risk(): StrategyRiskConfig {
   } as StrategyRiskConfig;
 }
 
-function snapshot(): StateSnapshot {
+function snapshot(patch: Partial<StateSnapshot['round']> = {}): StateSnapshot {
   const now = Date.now();
   return {
     id: 'snapshot-test',
@@ -104,6 +137,7 @@ function snapshot(): StateSnapshot {
       strikeStatus: 'estimated',
       yesTokenId: 'yes-token',
       noTokenId: 'no-token',
+      ...patch,
     },
     features: {} as StateSnapshot['features'],
     regime: 'CHOP',

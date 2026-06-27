@@ -71,7 +71,11 @@ async function executeOneIntent(params: ExecuteIntentsParams, intent: TradeInten
   }
 
   try {
-    const posted = await params.adapter.executeLimitIntent(intent, { execute: true });
+    const posted = await params.adapter.executeLimitIntent(intent, {
+      execute: true,
+      orderType: 'GTD',
+      expiration: Math.floor(new Date(params.snapshot.round.startAt).getTime() / 1000),
+    });
     const order: OrderRecord = {
       id: `order-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
       intentId: intent.id,

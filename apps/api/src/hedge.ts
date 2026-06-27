@@ -264,7 +264,7 @@ async function executeOneHedge(params: ExecuteHedgesParams, candidate: SingleFil
   }
 
   try {
-    const posted = await params.adapter.executeLimitIntent(finalPlan.intent, { execute: true });
+    const posted = await params.adapter.executeLimitIntent(finalPlan.intent, { execute: true, orderType: 'FAK' });
     params.store.recordOrder({
       ...localHedgeOrder(candidate, finalPlan.intent, executionKey),
       id: `hedge-order-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
