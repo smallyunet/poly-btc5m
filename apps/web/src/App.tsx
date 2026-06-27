@@ -264,11 +264,14 @@ function clamp01(value: number): number {
 }
 
 function scoreBreakdown(features: DashboardState['latestSnapshot']['features']) {
+  const centerCrosses = features.centerCross120s ?? features.cross120s;
+  const centerMinExcursion = features.centerMinBiExcursionBps120s ?? features.minBiExcursionBps120s;
+  const centerBalance = features.centerExcursionBalance120s ?? features.excursionBalance120s;
   return [
-    { label: 'Crosses', value: clamp01(features.cross120s / 4) * 25, max: 25, detail: `${features.cross120s} crosses` },
+    { label: 'Center Crosses', value: clamp01(centerCrosses / 4) * 25, max: 25, detail: `${centerCrosses} crosses` },
     { label: 'Range', value: clamp01(features.rangeBps120s / 3) * 10, max: 10, detail: `${formatNumber(features.rangeBps120s, 2)}bps` },
-    { label: 'Two-sided', value: clamp01(features.minBiExcursionBps120s / 2) * 25, max: 25, detail: `${formatNumber(features.minBiExcursionBps120s, 2)}bps` },
-    { label: 'Balance', value: clamp01(features.excursionBalance120s) * 15, max: 15, detail: formatNumber(features.excursionBalance120s, 2) },
+    { label: 'Center Two-sided', value: clamp01(centerMinExcursion / 2) * 25, max: 25, detail: `${formatNumber(centerMinExcursion, 2)}bps` },
+    { label: 'Center Balance', value: clamp01(centerBalance) * 15, max: 15, detail: formatNumber(centerBalance, 2) },
     { label: 'Drift', value: clamp01(1 - features.driftRatio120s / 0.7) * 15, max: 15, detail: formatNumber(features.driftRatio120s, 2) },
     { label: 'Momentum', value: clamp01(1 - features.momentumRatio30s / 0.8) * 10, max: 10, detail: formatNumber(features.momentumRatio30s, 2) },
   ];
@@ -563,9 +566,9 @@ export function App() {
   const failedEntryConditions = entryConditions.filter((condition) => !condition.passed);
   const btcDecisionConditions = [
     'CHOP score threshold',
-    'cross_120s threshold',
+    'center cross_120s threshold',
     'range_120s sufficient',
-    'two-sided excursion',
+    'center two-sided excursion',
     'drift ratio capped',
     'momentum ratio capped',
   ].map(conditionByLabel).filter((condition): condition is StrategyCheck['conditions'][number] => Boolean(condition));
@@ -1116,6 +1119,14 @@ export function App() {
                     <span className="metricValue">{snapshot.features.cross120s}</span>
                   </div>
                   <div className="metricRow">
+                    <span className="metricLabel">Center Price</span>
+                    <span className="metricValue">{snapshot.features.centerPrice120s == null ? 'unknown' : formatMoney(snapshot.features.centerPrice120s)}</span>
+                  </div>
+                  <div className="metricRow">
+                    <span className="metricLabel">Center Crosses</span>
+                    <span className="metricValue">{snapshot.features.centerCross120s ?? snapshot.features.cross120s}</span>
+                  </div>
+                  <div className="metricRow">
                     <span className="metricLabel">CHOP Score</span>
                     <span className="metricValue">{formatNumber(snapshot.features.chopScore, 1)}</span>
                   </div>
@@ -1130,6 +1141,14 @@ export function App() {
                   <div className="metricRow">
                     <span className="metricLabel">Two-Sided Excursion</span>
                     <span className="metricValue">{formatNumber(snapshot.features.minBiExcursionBps120s, 2)}bps</span>
+                  </div>
+                  <div className="metricRow">
+                    <span className="metricLabel">Center Two-Sided</span>
+                    <span className="metricValue">{formatNumber(snapshot.features.centerMinBiExcursionBps120s ?? snapshot.features.minBiExcursionBps120s, 2)}bps</span>
+                  </div>
+                  <div className="metricRow">
+                    <span className="metricLabel">Latest Range Position</span>
+                    <span className="metricValue">{formatRatioPct(snapshot.features.latestRangePosition120s)}</span>
                   </div>
                   <div className="metricRow">
                     <span className="metricLabel">Excursion Balance</span>

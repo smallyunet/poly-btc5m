@@ -28,9 +28,10 @@ The strategy uses BTC price to compute:
 
 - latest BTC price
 - strike-relative crosses
+- center-relative crosses around the recent 120s median price
 - realized range over 120s and 300s
 - range in bps
-- two-sided excursion around strike
+- two-sided excursion around both strike and the recent 120s median price center
 - drift and momentum ratios
 - rolling range percentile
 - CHOP score
@@ -138,7 +139,7 @@ rangeBps300s = range300s / latestPrice * 10000
 
 ### 3.3 Two-Sided Excursion
 
-Two-sided excursion measures whether BTC moved meaningfully on both sides of strike:
+Two-sided excursion is tracked in two forms. The strike-based form remains useful for understanding the current market line:
 
 ```text
 upExcursion = max(price - strike, 0)
@@ -150,7 +151,20 @@ minBiExcursionBps120s = min(upExcursionBps120s, downExcursionBps120s)
 excursionBalance120s = min(upExcursionBps120s, downExcursionBps120s) / max(upExcursionBps120s, downExcursionBps120s)
 ```
 
-This is the most important CHOP quality feature because the strategy wants both YES and NO to have a chance to trade cheaply. `excursionBalance120s` is closest to 1 when both sides move similarly; a path with one deep side and one shallow touch is scored lower.
+The CHOP classifier and score use a center-based form so the strategy does not depend entirely on an estimated next-round opening strike before that strike is locked:
+
+```text
+centerPrice120s = median(price over last 120s)
+centerCross120s = crossings of centerPrice120s
+centerUpExcursion = max(price - centerPrice120s, 0)
+centerDownExcursion = max(centerPrice120s - price, 0)
+
+centerMinBiExcursionBps120s = min(centerUpExcursionBps120s, centerDownExcursionBps120s)
+centerExcursionBalance120s = min(centerUpExcursionBps120s, centerDownExcursionBps120s) / max(centerUpExcursionBps120s, centerDownExcursionBps120s)
+latestRangePosition120s = (latestPrice - low120s) / range120s
+```
+
+This is the most important CHOP quality feature because the strategy wants repeated movement around a short-term equilibrium, not simply large absolute movement. `centerExcursionBalance120s` is closest to 1 when both sides of the recent center move similarly; a path with one deep side and one shallow touch is scored lower.
 
 ### 3.4 Drift Ratio
 
@@ -197,10 +211,10 @@ chopScore =
 Current scoring:
 
 ```text
-crossScore       = min(cross120s / 4, 1) * 25
+crossScore       = min(centerCross120s / 4, 1) * 25
 rangeScore       = min(rangeBps120s / 3, 1) * 10
-twoSidedScore    = min(minBiExcursionBps120s / 2, 1) * 25
-balanceScore     = excursionBalance120s * 15
+twoSidedScore    = min(centerMinBiExcursionBps120s / 2, 1) * 25
+balanceScore     = centerExcursionBalance120s * 15
 driftScore       = max(1 - driftRatio120s / 0.7, 0) * 15
 momentumScore    = max(1 - momentumRatio30s / 0.8, 0) * 10
 ```
@@ -228,9 +242,9 @@ Regime is `CHOP` only if all of these pass:
 
 ```text
 chopScore >= MIN_CHOP_SCORE
-cross120s >= MIN_CROSS_120S
+centerCross120s >= MIN_CROSS_120S
 rangeBps120s >= MIN_RANGE_BPS_120S
-minBiExcursionBps120s >= MIN_BI_EXCURSION_BPS_120S
+centerMinBiExcursionBps120s >= MIN_BI_EXCURSION_BPS_120S
 driftRatio120s <= MAX_DRIFT_RATIO_120S
 momentumRatio30s <= MAX_MOMENTUM_RATIO_30S
 ```

@@ -77,6 +77,11 @@ export class MarketDataService {
     const denominator = latest?.price && latest.price > 0 ? latest.price : round.strike;
     const rangeBps120s = bps(range120s, denominator);
     const rangeBps300s = bps(range300s, denominator);
+    const centerPrice120s = median(prices);
+    const centerCross120s = centerPrice120s == null ? 0 : countCrosses(ticks, centerPrice120s).crosses;
+    const latestRangePosition120s = latest && prices.length > 1 && range120s > 0
+      ? (latest.price - Math.min(...prices)) / range120s
+      : null;
     const upExcursion = prices.length ? Math.max(0, ...prices.map((price) => price - round.strike)) : 0;
     const downExcursion = prices.length ? Math.max(0, ...prices.map((price) => round.strike - price)) : 0;
     const upExcursionBps120s = bps(upExcursion, denominator);
@@ -84,14 +89,21 @@ export class MarketDataService {
     const minBiExcursionBps120s = Math.min(upExcursionBps120s, downExcursionBps120s);
     const maxBiExcursionBps120s = Math.max(upExcursionBps120s, downExcursionBps120s);
     const excursionBalance120s = maxBiExcursionBps120s > 0 ? minBiExcursionBps120s / maxBiExcursionBps120s : 0;
+    const centerUpExcursion = centerPrice120s == null ? 0 : Math.max(0, ...prices.map((price) => price - centerPrice120s));
+    const centerDownExcursion = centerPrice120s == null ? 0 : Math.max(0, ...prices.map((price) => centerPrice120s - price));
+    const centerUpExcursionBps120s = bps(centerUpExcursion, denominator);
+    const centerDownExcursionBps120s = bps(centerDownExcursion, denominator);
+    const centerMinBiExcursionBps120s = Math.min(centerUpExcursionBps120s, centerDownExcursionBps120s);
+    const centerMaxBiExcursionBps120s = Math.max(centerUpExcursionBps120s, centerDownExcursionBps120s);
+    const centerExcursionBalance120s = centerMaxBiExcursionBps120s > 0 ? centerMinBiExcursionBps120s / centerMaxBiExcursionBps120s : 0;
     const driftRatio120s = range120s > 0 ? Math.abs(drift120s) / range120s : 1;
     const momentumRatio30s = range120s > 0 ? Math.abs(momentum30s) / range120s : 1;
     const rangePercentile120s = rollingRangePercentile(this.priceTicks, now, 120_000);
     const chopScore = scoreChop({
-      cross120s,
+      cross120s: centerCross120s,
       rangeBps120s,
-      minBiExcursionBps120s,
-      excursionBalance120s,
+      minBiExcursionBps120s: centerMinBiExcursionBps120s,
+      excursionBalance120s: centerExcursionBalance120s,
       driftRatio120s,
       momentumRatio30s,
       rangePercentile120s,
@@ -109,10 +121,17 @@ export class MarketDataService {
       range300s,
       rangeBps120s,
       rangeBps300s,
+      centerPrice120s,
+      centerCross120s,
+      latestRangePosition120s,
       upExcursionBps120s,
       downExcursionBps120s,
       minBiExcursionBps120s,
       excursionBalance120s,
+      centerUpExcursionBps120s,
+      centerDownExcursionBps120s,
+      centerMinBiExcursionBps120s,
+      centerExcursionBalance120s,
       driftRatio120s,
       momentumRatio30s,
       rangePercentile120s,
@@ -298,10 +317,31 @@ export class MarketDataService {
 
 }
 
+function countCrosses(ticks: PriceTick[], center: number): { crosses: number; latestCrossAt?: string } {
+  let crosses = 0;
+  let latestCrossAt: string | undefined;
+  for (let i = 1; i < ticks.length; i += 1) {
+    const prev = Math.sign(ticks[i - 1].price - center);
+    const next = Math.sign(ticks[i].price - center);
+    if (prev !== 0 && next !== 0 && prev !== next) {
+      crosses += 1;
+      latestCrossAt = ticks[i].receivedAt;
+    }
+  }
+  return { crosses, latestCrossAt };
+}
+
 function stddev(values: number[]): number {
   const mean = values.reduce((sum, value) => sum + value, 0) / values.length;
   const variance = values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / values.length;
   return Math.sqrt(variance);
+}
+
+function median(values: number[]): number | null {
+  if (!values.length) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0 ? (sorted[middle - 1] + sorted[middle]) / 2 : sorted[middle];
 }
 
 function range(values: number[]): number {

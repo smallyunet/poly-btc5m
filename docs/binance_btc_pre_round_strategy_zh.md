@@ -32,9 +32,10 @@ BINANCE_PRICE_SAMPLE_MS=1000
 
 - 最新 BTC 价格
 - 相对 strike 的穿越
+- 相对最近 120s 中位价 center 的穿越
 - 120s 和 300s 已实现波动区间
 - bps 口径区间
-- 围绕 strike 的双侧偏离
+- 围绕 strike 和最近 120s 中位价 center 的双侧偏离
 - drift 和 momentum 比率
 - 滚动区间分位数
 - CHOP 分数
@@ -142,7 +143,7 @@ rangeBps300s = range300s / latestPrice * 10000
 
 ### 3.3 双侧偏离
 
-双侧偏离衡量 BTC 是否在 strike 两侧都出现了有意义的运动：
+双侧偏离会保留两套口径。strike 口径用于理解当前市场线附近的运动：
 
 ```text
 upExcursion = max(price - strike, 0)
@@ -154,7 +155,20 @@ minBiExcursionBps120s = min(upExcursionBps120s, downExcursionBps120s)
 excursionBalance120s = min(upExcursionBps120s, downExcursionBps120s) / max(upExcursionBps120s, downExcursionBps120s)
 ```
 
-这是最重要的 CHOP 质量特征，因为策略希望 YES 和 NO 都有机会以便宜价格成交。`excursionBalance120s` 越接近 1，说明上下两侧运动越均衡；如果一侧很深、另一侧只是轻微碰到 strike，评分会被压低。
+CHOP 分类和打分使用 center 口径，避免在下一轮开盘 strike 尚未锁定前完全依赖估计 strike：
+
+```text
+centerPrice120s = median(price over last 120s)
+centerCross120s = crossings of centerPrice120s
+centerUpExcursion = max(price - centerPrice120s, 0)
+centerDownExcursion = max(centerPrice120s - price, 0)
+
+centerMinBiExcursionBps120s = min(centerUpExcursionBps120s, centerDownExcursionBps120s)
+centerExcursionBalance120s = min(centerUpExcursionBps120s, centerDownExcursionBps120s) / max(centerUpExcursionBps120s, centerDownExcursionBps120s)
+latestRangePosition120s = (latestPrice - low120s) / range120s
+```
+
+这是最重要的 CHOP 质量特征，因为策略要识别的是围绕短期均衡中心的反复运动，而不是单纯的大幅波动。`centerExcursionBalance120s` 越接近 1，说明 center 上下两侧运动越均衡；如果一侧很深、另一侧只是轻微触碰，评分会被压低。
 
 ### 3.4 Drift Ratio
 
@@ -201,10 +215,10 @@ chopScore =
 当前评分：
 
 ```text
-crossScore       = min(cross120s / 4, 1) * 25
+crossScore       = min(centerCross120s / 4, 1) * 25
 rangeScore       = min(rangeBps120s / 3, 1) * 10
-twoSidedScore    = min(minBiExcursionBps120s / 2, 1) * 25
-balanceScore     = excursionBalance120s * 15
+twoSidedScore    = min(centerMinBiExcursionBps120s / 2, 1) * 25
+balanceScore     = centerExcursionBalance120s * 15
 driftScore       = max(1 - driftRatio120s / 0.7, 0) * 15
 momentumScore    = max(1 - momentumRatio30s / 0.8, 0) * 10
 ```
@@ -232,9 +246,9 @@ or samples120s < 8
 
 ```text
 chopScore >= MIN_CHOP_SCORE
-cross120s >= MIN_CROSS_120S
+centerCross120s >= MIN_CROSS_120S
 rangeBps120s >= MIN_RANGE_BPS_120S
-minBiExcursionBps120s >= MIN_BI_EXCURSION_BPS_120S
+centerMinBiExcursionBps120s >= MIN_BI_EXCURSION_BPS_120S
 driftRatio120s <= MAX_DRIFT_RATIO_120S
 momentumRatio30s <= MAX_MOMENTUM_RATIO_30S
 ```

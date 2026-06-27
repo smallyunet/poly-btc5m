@@ -51,13 +51,15 @@ export function classifyRegime(snapshot: StateSnapshot, config: StrategyRiskConf
   const f = snapshot.features;
   if (f.price == null || f.samples120s < 8) return 'UNKNOWN';
   const rangeReady = f.rangeBps120s >= config.minRangeBps120s;
-  const twoSided = f.minBiExcursionBps120s >= config.minBiExcursionBps120s;
+  const centerCrosses = f.centerCross120s ?? f.cross120s;
+  const centerMinBiExcursion = f.centerMinBiExcursionBps120s ?? f.minBiExcursionBps120s;
+  const twoSided = centerMinBiExcursion >= config.minBiExcursionBps120s;
   const driftControlled = f.driftRatio120s <= config.maxDriftRatio120s;
   const momentumControlled = f.momentumRatio30s <= config.maxMomentumRatio30s;
-  if (f.chopScore >= config.minChopScore && f.cross120s >= config.minCross120s && rangeReady && twoSided && driftControlled && momentumControlled) {
+  if (f.chopScore >= config.minChopScore && centerCrosses >= config.minCross120s && rangeReady && twoSided && driftControlled && momentumControlled) {
     return 'CHOP';
   }
-  if (f.cross120s === 0 && (!driftControlled || !momentumControlled || Math.abs(f.drift120s) > config.maxAbsDrift120s || Math.abs(f.momentum30s) > config.maxAbsMomentum30s)) {
+  if (centerCrosses === 0 && (!driftControlled || !momentumControlled || Math.abs(f.drift120s) > config.maxAbsDrift120s || Math.abs(f.momentum30s) > config.maxAbsMomentum30s)) {
     return 'TREND';
   }
   return 'LOW_ACTIVITY';
@@ -117,9 +119,9 @@ export function evaluateEntry(snapshot: StateSnapshot, config: StrategyRiskConfi
       condition('Single-fill cooldown', !cooldownActive, cooldownActive ? cooldownLabel(config.entryCooldownUntil, config.entryCooldownReason) : 'inactive'),
       condition('Regime is CHOP', snapshot.regime === 'CHOP', snapshot.regime),
       condition('CHOP score threshold', snapshot.features.chopScore >= config.minChopScore, `${snapshot.features.chopScore.toFixed(1)} / ${config.minChopScore}`),
-      condition('cross_120s threshold', snapshot.features.cross120s >= config.minCross120s, `${snapshot.features.cross120s} / ${config.minCross120s}`),
+      condition('center cross_120s threshold', (snapshot.features.centerCross120s ?? snapshot.features.cross120s) >= config.minCross120s, `${snapshot.features.centerCross120s ?? snapshot.features.cross120s} / ${config.minCross120s}`),
       condition('range_120s sufficient', snapshot.features.rangeBps120s >= config.minRangeBps120s, `${snapshot.features.rangeBps120s.toFixed(2)}bps / ${config.minRangeBps120s}`),
-      condition('two-sided excursion', snapshot.features.minBiExcursionBps120s >= config.minBiExcursionBps120s, `${snapshot.features.minBiExcursionBps120s.toFixed(2)}bps / ${config.minBiExcursionBps120s}`),
+      condition('center two-sided excursion', (snapshot.features.centerMinBiExcursionBps120s ?? snapshot.features.minBiExcursionBps120s) >= config.minBiExcursionBps120s, `${(snapshot.features.centerMinBiExcursionBps120s ?? snapshot.features.minBiExcursionBps120s).toFixed(2)}bps / ${config.minBiExcursionBps120s}`),
       condition('drift ratio capped', snapshot.features.driftRatio120s <= config.maxDriftRatio120s, `${snapshot.features.driftRatio120s.toFixed(2)} / ${config.maxDriftRatio120s}`),
       condition('momentum ratio capped', snapshot.features.momentumRatio30s <= config.maxMomentumRatio30s, `${snapshot.features.momentumRatio30s.toFixed(2)} / ${config.maxMomentumRatio30s}`),
       condition('Live score floor', config.dryRun || snapshot.features.chopScore >= config.minLiveChopScore, config.dryRun ? 'monitor mode' : `${snapshot.features.chopScore.toFixed(1)} / ${config.minLiveChopScore}`),

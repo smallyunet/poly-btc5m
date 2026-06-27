@@ -37,17 +37,60 @@ const risk: StrategyRiskConfig = {
 test('classifies a high-cross low-drift path as CHOP', () => {
   const snapshot = baseSnapshot({
     cross120s: 3,
+    centerCross120s: 3,
     volatility120s: 18,
     drift120s: 5,
     momentum30s: 3,
     rangeBps120s: 6,
     minBiExcursionBps120s: 2,
+    centerMinBiExcursionBps120s: 2,
     driftRatio120s: 0.2,
     momentumRatio30s: 0.12,
     chopScore: 84,
     samples120s: 20,
   });
   assert.equal(classifyRegime(snapshot, risk), 'CHOP');
+});
+
+test('classifies center-balanced chop even when estimated strike is off-center', () => {
+  const snapshot = baseSnapshot({
+    cross120s: 0,
+    centerPrice120s: 100_080,
+    centerCross120s: 4,
+    volatility120s: 18,
+    drift120s: 4,
+    momentum30s: 2,
+    rangeBps120s: 6,
+    minBiExcursionBps120s: 0,
+    centerMinBiExcursionBps120s: 2.5,
+    centerExcursionBalance120s: 0.9,
+    driftRatio120s: 0.18,
+    momentumRatio30s: 0.1,
+    chopScore: 86,
+    samples120s: 20,
+  });
+
+  assert.equal(classifyRegime(snapshot, risk), 'CHOP');
+});
+
+test('does not classify one-sided movement as chop just because range is large', () => {
+  const snapshot = baseSnapshot({
+    cross120s: 0,
+    centerCross120s: 0,
+    volatility120s: 30,
+    drift120s: 65,
+    momentum30s: 32,
+    rangeBps120s: 12,
+    minBiExcursionBps120s: 0,
+    centerMinBiExcursionBps120s: 0.2,
+    centerExcursionBalance120s: 0.05,
+    driftRatio120s: 0.9,
+    momentumRatio30s: 0.65,
+    chopScore: 52,
+    samples120s: 20,
+  });
+
+  assert.notEqual(classifyRegime(snapshot, risk), 'CHOP');
 });
 
 test('blocks entry outside the decision window', () => {
@@ -291,10 +334,17 @@ function baseSnapshot(features: Partial<StateSnapshot['features']>): StateSnapsh
       range300s: 0,
       rangeBps120s: 0,
       rangeBps300s: 0,
+      centerPrice120s: null,
+      centerCross120s: 0,
+      latestRangePosition120s: null,
       upExcursionBps120s: 0,
       downExcursionBps120s: 0,
       minBiExcursionBps120s: 0,
       excursionBalance120s: 0,
+      centerUpExcursionBps120s: 0,
+      centerDownExcursionBps120s: 0,
+      centerMinBiExcursionBps120s: 0,
+      centerExcursionBalance120s: 0,
       driftRatio120s: 1,
       momentumRatio30s: 1,
       rangePercentile120s: null,
@@ -325,10 +375,17 @@ function chopFeatures(): Partial<StateSnapshot['features']> {
     range300s: 90,
     rangeBps120s: 6,
     rangeBps300s: 9,
+    centerPrice120s: 100_000,
+    centerCross120s: 3,
+    latestRangePosition120s: 0.55,
     upExcursionBps120s: 3,
     downExcursionBps120s: 2,
     minBiExcursionBps120s: 2,
     excursionBalance120s: 2 / 3,
+    centerUpExcursionBps120s: 3,
+    centerDownExcursionBps120s: 2,
+    centerMinBiExcursionBps120s: 2,
+    centerExcursionBalance120s: 2 / 3,
     driftRatio120s: 0.2,
     momentumRatio30s: 0.12,
     rangePercentile120s: 0.6,

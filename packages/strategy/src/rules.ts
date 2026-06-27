@@ -8,7 +8,7 @@ export const STRATEGY_RULES: StrategyRule[] = [
     summary: 'Pre-commit YES and NO liquidity with score-based limit pricing and conservative score-based sizing when the next round looks choppy.',
     entryRules: [
       'Round must be inside the T-30s decision window before start.',
-      'Regime must be CHOP: BTC path score, cross_120s, range, two-sided excursion, drift ratio, and momentum ratio filters all pass.',
+      'Regime must be CHOP: BTC path score, center crosses, range, center two-sided excursion, drift ratio, and momentum ratio filters all pass.',
       'YES and NO books must be live, fresh, and buyable for the configured limit to be valid.',
       'Extreme imbalance in YES vs NO bid queue at the entry limit is blocked; mild imbalance is only diagnostic.',
       'Shares are score-tiered: low CHOP scores reduce size, mid scores use base size, and very high scores get only a small size increase.',

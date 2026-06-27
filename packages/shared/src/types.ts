@@ -84,10 +84,17 @@ export type BtcFeatureSnapshot = {
   range300s: number;
   rangeBps120s: number;
   rangeBps300s: number;
+  centerPrice120s: number | null;
+  centerCross120s: number;
+  latestRangePosition120s: number | null;
   upExcursionBps120s: number;
   downExcursionBps120s: number;
   minBiExcursionBps120s: number;
   excursionBalance120s: number;
+  centerUpExcursionBps120s: number;
+  centerDownExcursionBps120s: number;
+  centerMinBiExcursionBps120s: number;
+  centerExcursionBalance120s: number;
   driftRatio120s: number;
   momentumRatio30s: number;
   rangePercentile120s: number | null;
