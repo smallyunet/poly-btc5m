@@ -887,7 +887,7 @@ button.primary:hover:not(:disabled) {
 .posPnLAmount.profit { color: var(--color-success); }
 .posPnLAmount.loss { color: var(--color-danger); }
 
-/* BTC Price vs Strike Gauge */
+/* BTC Volatility Gauge */
 .gaugeContainer {
   display: flex;
   flex-direction: column;
@@ -2427,6 +2427,14 @@ td.mono {
 
 .gaugeSideLabel.UP {
   color: var(--color-success);
+}
+
+.gaugeSideLabel.LOW {
+  color: var(--text-muted);
+}
+
+.gaugeSideLabel.HIGH {
+  color: var(--color-danger);
 }
 
 .gaugeDigitalReadout {

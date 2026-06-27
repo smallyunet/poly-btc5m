@@ -610,16 +610,8 @@ export function App() {
     progressColorClass = 'warning';
   }
 
-  // BTC vs Strike calculations for visual gauge
+  // BTC volatility gauge inputs
   const btcPrice = snapshot.features.price;
-  const strikePrice = snapshot.round.strike;
-  const priceDiff = btcPrice != null ? btcPrice - strikePrice : null;
-  const isBtcAboveStrike = priceDiff != null && priceDiff >= 0;
-  
-  // Dynamic scale: range window represents the width of the gauge bar.
-  // We center it at the strike, and range represents +/- delta.
-  const rangeDelta = priceDiff != null ? Math.max(100, Math.abs(priceDiff) * 1.6) : 100;
-  const gaugePct = priceDiff != null ? Math.min(95, Math.max(5, 50 + (priceDiff / rangeDelta) * 50)) : 50;
 
   // Round phase detail text logic (prevents negative countdowns once started)
   const roundPhaseDetail = isRoundStarted
@@ -627,9 +619,6 @@ export function App() {
     : `${formatSeconds(secondsToStart)} to start`;
   const timelineDetail = isRoundStarted ? `${formatSeconds(secondsToEnd)} remaining` : `${formatSeconds(secondsToStart)} to start`;
   const strikeLabel = snapshot.round.strikeStatus === 'locked' ? 'Opening Strike' : 'Estimated Open';
-  const terminalGaugeStatus = snapshot.round.strikeStatus === 'locked'
-    ? (isBtcAboveStrike ? 'BTC >= OPEN (UP WINS)' : 'BTC < OPEN (DOWN WINS)')
-    : 'PRE-ROUND OPEN ESTIMATE';
   const entryStatusTone = entryCheck?.status === 'eligible' ? 'good' : entryCheck?.status === 'blocked' ? 'bad' : 'neutral';
   const entryStatusLabel = entryCheck?.status || 'not-loaded';
   const topBlockers = failedEntryConditions.slice(0, 4).map((condition) => condition.label).join(', ') || 'none';
@@ -914,17 +903,18 @@ export function App() {
                 </details>
               </div>
               
-              {/* BTC Price vs Strike Visualizer */}
-              {btcPrice != null && strikePrice != null && priceDiff != null && (
+              {/* BTC Volatility Visualizer */}
+              {btcPrice != null && (
                 <div className="panel">
-                  <h2>BTC Price vs. Strike Position</h2>
+                  <h2>BTC 120s Volatility</h2>
                   <PriceStrikeGauge
                     btcPrice={btcPrice}
-                    strikePrice={strikePrice}
-                    priceDiff={priceDiff}
-                    strikeLabel={strikeLabel}
-                    terminalGaugeStatus={terminalGaugeStatus}
-                    gaugePct={gaugePct}
+                    centerPrice={snapshot.features.centerPrice120s}
+                    rangeBps120s={snapshot.features.rangeBps120s}
+                    volatility120s={snapshot.features.volatility120s}
+                    centerMinBiExcursionBps120s={snapshot.features.centerMinBiExcursionBps120s ?? snapshot.features.minBiExcursionBps120s}
+                    centerExcursionBalance120s={snapshot.features.centerExcursionBalance120s ?? snapshot.features.excursionBalance120s}
+                    latestRangePosition120s={snapshot.features.latestRangePosition120s}
                   />
                 </div>
               )}
