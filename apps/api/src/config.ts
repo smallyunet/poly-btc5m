@@ -58,6 +58,9 @@ export type AppConfig = {
   singleFillHedgeEnabled: boolean;
   singleFillEarlyHedgeWindowSeconds: number;
   singleFillEarlyHedgeMaxPairCost: number;
+  singleFillEmergencyHedgeWindowSeconds: number;
+  singleFillEmergencyHedgeMaxPrice: number;
+  singleFillEmergencyHedgeMaxPairCost: number;
   singleFillHedgeWindowSeconds: number;
   singleFillHedgeMinSecondsToEnd: number;
   singleFillHedgeMaxPrice: number;
@@ -130,6 +133,9 @@ export function loadConfig(): AppConfig {
     singleFillHedgeEnabled: booleanEnv('SINGLE_FILL_HEDGE_ENABLED', true),
     singleFillEarlyHedgeWindowSeconds: parsePositiveInteger(process.env.SINGLE_FILL_EARLY_HEDGE_WINDOW_SECONDS, 60),
     singleFillEarlyHedgeMaxPairCost: numberEnv('SINGLE_FILL_EARLY_HEDGE_MAX_PAIR_COST', 1.02),
+    singleFillEmergencyHedgeWindowSeconds: parsePositiveInteger(process.env.SINGLE_FILL_EMERGENCY_HEDGE_WINDOW_SECONDS, 15),
+    singleFillEmergencyHedgeMaxPrice: numberEnv('SINGLE_FILL_EMERGENCY_HEDGE_MAX_PRICE', 0.75),
+    singleFillEmergencyHedgeMaxPairCost: numberEnv('SINGLE_FILL_EMERGENCY_HEDGE_MAX_PAIR_COST', 1.2),
     singleFillHedgeWindowSeconds: parsePositiveInteger(process.env.SINGLE_FILL_HEDGE_WINDOW_SECONDS, 30),
     singleFillHedgeMinSecondsToEnd: parsePositiveInteger(process.env.SINGLE_FILL_HEDGE_MIN_SECONDS_TO_END, 5),
     singleFillHedgeMaxPrice: numberEnv('SINGLE_FILL_HEDGE_MAX_PRICE', 0.65),

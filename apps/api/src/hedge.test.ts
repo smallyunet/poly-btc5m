@@ -9,6 +9,7 @@ import type { OrderBookQuote, OrderRecord, TradeIntent } from '../../../packages
 
 const nowMs = new Date('2026-06-26T00:04:35.000Z').getTime();
 const earlyNowMs = new Date('2026-06-26T00:04:15.000Z').getTime();
+const emergencyNowMs = new Date('2026-06-26T00:04:48.000Z').getTime();
 
 test('plans a capped buy hedge for material single-fill exposure', () => {
   const plan = planSingleFillHedge({
@@ -41,6 +42,57 @@ test('blocks a hedge when missing-side ask is above the configured cap', () => {
     orderbooks: [quote('no-token', 0.66)],
     appConfig: config(),
     nowMs,
+  });
+
+  assert.deepEqual(plan, { ok: false, reason: 'HEDGE_ASK_ABOVE_CAP' });
+});
+
+test('keeps the regular final hedge capped before the emergency window', () => {
+  const plan = planSingleFillHedge({
+    candidate: candidate(),
+    orders: [
+      order('YES', { filledSize: 10, avgFillPrice: 0.45, status: 'filled' }),
+      order('NO', { filledSize: 0, status: 'posted', clobOrderId: 'no-open' }),
+    ],
+    orderbooks: [quote('no-token', 0.7)],
+    appConfig: config(),
+    nowMs,
+  });
+
+  assert.deepEqual(plan, { ok: false, reason: 'HEDGE_ASK_ABOVE_CAP' });
+});
+
+test('allows emergency hedge to lock a wider final loss', () => {
+  const plan = planSingleFillHedge({
+    candidate: candidate(),
+    orders: [
+      order('YES', { filledSize: 10, avgFillPrice: 0.45, status: 'filled' }),
+      order('NO', { filledSize: 0, status: 'posted', clobOrderId: 'no-open' }),
+    ],
+    orderbooks: [quote('no-token', 0.74)],
+    appConfig: config(),
+    nowMs: emergencyNowMs,
+  });
+
+  assert.equal(plan.ok, true);
+  if (!plan.ok) return;
+  assert.equal(plan.hedgeMode, 'emergency');
+  assert.equal(plan.pairCostCap, 1.2);
+  assert.equal(plan.priceCap, 0.75);
+  assert.equal(plan.intent.limitPrice, 0.75);
+  assert.equal(plan.expectedPnlPerShare, -0.19999999999999996);
+});
+
+test('blocks emergency hedge above the emergency price cap', () => {
+  const plan = planSingleFillHedge({
+    candidate: candidate(),
+    orders: [
+      order('YES', { filledSize: 10, avgFillPrice: 0.45, status: 'filled' }),
+      order('NO', { filledSize: 0, status: 'posted', clobOrderId: 'no-open' }),
+    ],
+    orderbooks: [quote('no-token', 0.76)],
+    appConfig: config(),
+    nowMs: emergencyNowMs,
   });
 
   assert.deepEqual(plan, { ok: false, reason: 'HEDGE_ASK_ABOVE_CAP' });
@@ -231,11 +283,14 @@ function config(): AppConfig {
     singleFillHedgeEnabled: true,
     singleFillEarlyHedgeWindowSeconds: 60,
     singleFillEarlyHedgeMaxPairCost: 1.02,
+    singleFillEmergencyHedgeWindowSeconds: 15,
+    singleFillEmergencyHedgeMaxPrice: 0.75,
+    singleFillEmergencyHedgeMaxPairCost: 1.2,
     singleFillHedgeWindowSeconds: 30,
     singleFillHedgeMinSecondsToEnd: 5,
     singleFillHedgeMaxPrice: 0.65,
     singleFillHedgePriceOffset: 0.01,
-    singleFillHedgeMaxPairCost: 1.05,
+    singleFillHedgeMaxPairCost: 1.1,
     singleFillProfitExitEnabled: true,
     singleFillProfitExitMinPrice: 0.5,
     singleFillProfitExitMinPnlUsd: 0.3,

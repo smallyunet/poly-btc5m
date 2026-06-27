@@ -4,7 +4,7 @@
 
 该策略**不**交易 BTC 方向。
 
-worker 主要面向**下一轮 BTC 5 分钟市场**。它可以在轮次开始前同时挂出 YES/NO 两侧 BUY 限价单；常规入场单会作为 GTD limit order 提交，并在轮次开始时间过期。轮次开始后，默认仍然是 settlement-only；两个明确的 single-fill 风控可以在开始后动作：`BTC5M_SINGLE_FILL_PROFIT_EXIT` 可以在已成交侧已经有利润时取消缺失侧 BUY，并用 capped FAK SELL limit 卖出已成交侧；`BTC5M_SINGLE_FILL_HEDGE` 可以用两阶段规则取消缺失侧旧限价单，并在价格/成本上限内用 aggressive FAK BUY LIMIT 补买缺失侧。它不会发送无上限 market order。
+worker 主要面向**下一轮 BTC 5 分钟市场**。它可以在轮次开始前同时挂出 YES/NO 两侧 BUY 限价单；常规入场单会作为 GTD limit order 提交，并在轮次开始时间过期。轮次开始后，默认仍然是 settlement-only；两个明确的 single-fill 风控可以在开始后动作：`BTC5M_SINGLE_FILL_PROFIT_EXIT` 可以在已成交侧已经有利润时取消缺失侧 BUY，并用 capped FAK SELL limit 卖出已成交侧；`BTC5M_SINGLE_FILL_HEDGE` 可以用三阶段规则取消缺失侧旧限价单，并在价格/成本上限内用 aggressive FAK BUY LIMIT 补买缺失侧。它不会发送无上限 market order。
 
 本地 `ttlSeconds` 只用于本地 intent/order 去重窗口。交易所层面的订单生命周期单独控制：常规入场使用在轮次开始时间过期的 GTD，profit-exit 和 hedge 使用 FAK，未成交剩余会立即取消。
 
@@ -99,22 +99,26 @@ SELL_DISABLED_SETTLEMENT_ONLY
 
 独立的 profit-exit executor 是唯一允许的开始后 SELL 路径。
 
-单侧补单使用两阶段时间门槛：
+单侧补单使用三阶段时间门槛：
 
 ```text
 secondsToEnd <= SINGLE_FILL_EARLY_HEDGE_WINDOW_SECONDS
 secondsToEnd > SINGLE_FILL_HEDGE_MIN_SECONDS_TO_END
 ```
 
-早期阶段只在 pair cost 接近保本时执行；最终阶段使用更宽的最终风控上限：
+早期阶段只在 pair cost 接近保本时执行；最终阶段使用更宽的最终风控上限。emergency 阶段只在最末尾、距离最小截止时间前启用，可以接受更大的锁定亏损，避免把裸方向敞口带入结算：
 
 当前默认值：
 
 ```text
 SINGLE_FILL_EARLY_HEDGE_WINDOW_SECONDS=60
 SINGLE_FILL_EARLY_HEDGE_MAX_PAIR_COST=1.02
+SINGLE_FILL_EMERGENCY_HEDGE_WINDOW_SECONDS=15
+SINGLE_FILL_EMERGENCY_HEDGE_MAX_PRICE=0.75
+SINGLE_FILL_EMERGENCY_HEDGE_MAX_PAIR_COST=1.20
 SINGLE_FILL_HEDGE_WINDOW_SECONDS=30
 SINGLE_FILL_HEDGE_MIN_SECONDS_TO_END=5
+SINGLE_FILL_HEDGE_MAX_PRICE=0.65
 SINGLE_FILL_HEDGE_MAX_PAIR_COST=1.10
 ```
 
@@ -605,14 +609,15 @@ hedgeLimitPrice = min(bestAsk + SINGLE_FILL_HEDGE_PRICE_OFFSET, SINGLE_FILL_HEDG
 
 取消缺失侧 BUY 并再次对账后，worker 会对已成交侧发送 FAK SELL LIMIT。如果 bid 跌破配置底线，则跳过卖出，single 敞口继续交给 hedge/final review 路径处理。
 
-第二个例外是两阶段单侧补单风控。触发条件：
+第二个例外是三阶段单侧补单风控。触发条件：
 
 - 当前轮次已开始且进入 `SINGLE_FILL_EARLY_HEDGE_WINDOW_SECONDS`
 - 距离结束仍大于 `SINGLE_FILL_HEDGE_MIN_SECONDS_TO_END`
 - 一侧 BUY 成交 shares 明显大于另一侧
-- 缺失侧 live best ask 不超过 `SINGLE_FILL_HEDGE_MAX_PRICE`
+- 缺失侧 live best ask 不超过当前阶段的价格上限
 - 在最终 hedge 窗口外，已成交侧均价加补单限价不超过 `SINGLE_FILL_EARLY_HEDGE_MAX_PAIR_COST`
 - 在最终 hedge 窗口内，已成交侧均价加补单限价不超过 `SINGLE_FILL_HEDGE_MAX_PAIR_COST`
+- 在 emergency hedge 窗口内，已成交侧均价加补单限价不超过 `SINGLE_FILL_EMERGENCY_HEDGE_MAX_PAIR_COST`
 
 触发后，worker 会：
 
@@ -673,7 +678,7 @@ p=0.46 => win +0.54, lose -0.46
 
 这是策略的主要风险。动态定价的设计是：CHOP 分数较弱时使用更低价格，只有在 CHOP 信号更强时才提高价格。
 
-如果两阶段 hedge 补入缺失侧，结果变为：
+如果三阶段 hedge 补入缺失侧，结果变为：
 
 ```text
 hedgedPnlPerShare = 1 - originalAvgPrice - hedgeLimitPrice
@@ -684,7 +689,7 @@ hedgedPnlPerShare = 1 - originalAvgPrice - hedgeLimitPrice
 ```text
 hedgeLimit=0.55 => +0.01/share
 hedgeLimit=0.65 => -0.09/share
-hedgeLimit=0.80 => -0.24/share
+hedgeLimit=0.75 => -0.19/share
 no hedge and original side loses => -0.44/share
 ```
 

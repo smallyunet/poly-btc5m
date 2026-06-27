@@ -4,7 +4,7 @@
 
 This strategy does **not** trade BTC direction.
 
-The worker primarily targets the **next BTC 5-minute round**. It may place paired YES/NO BUY limit orders before the round starts. Normal entry orders are posted as GTD limit orders expiring at the round start timestamp. After the round starts, the default mode is still settlement-only. Two explicit single-fill risk controls can act after start: `BTC5M_SINGLE_FILL_PROFIT_EXIT` can cancel the missing-side BUY and sell the filled side with a capped FAK SELL limit when the filled side is already profitable; `BTC5M_SINGLE_FILL_HEDGE` can use a two-stage rule to cancel stale missing-side limit orders and submit a capped aggressive FAK BUY LIMIT for the missing side. It never sends an uncapped market order.
+The worker primarily targets the **next BTC 5-minute round**. It may place paired YES/NO BUY limit orders before the round starts. Normal entry orders are posted as GTD limit orders expiring at the round start timestamp. After the round starts, the default mode is still settlement-only. Two explicit single-fill risk controls can act after start: `BTC5M_SINGLE_FILL_PROFIT_EXIT` can cancel the missing-side BUY and sell the filled side with a capped FAK SELL limit when the filled side is already profitable; `BTC5M_SINGLE_FILL_HEDGE` can use a three-stage rule to cancel stale missing-side limit orders and submit a capped aggressive FAK BUY LIMIT for the missing side. It never sends an uncapped market order.
 
 Local `ttlSeconds` is only used for local intent/order dedupe windows. Exchange-level order lifetime is controlled separately: normal entry uses GTD expiration at round start, while profit-exit and hedge orders use FAK so unfilled remainder is cancelled immediately.
 
@@ -95,22 +95,26 @@ SELL_DISABLED_SETTLEMENT_ONLY
 
 The independent profit-exit executor is the only allowed post-start SELL path.
 
-The single-fill hedge uses a two-stage time gate:
+The single-fill hedge uses a three-stage time gate:
 
 ```text
 secondsToEnd <= SINGLE_FILL_EARLY_HEDGE_WINDOW_SECONDS
 secondsToEnd > SINGLE_FILL_HEDGE_MIN_SECONDS_TO_END
 ```
 
-The early stage only runs when the resulting pair cost is near breakeven. The final stage uses the wider final risk cap:
+The early stage only runs when the resulting pair cost is near breakeven. The final stage uses the wider final risk cap. The emergency stage only runs in the last seconds before the minimum cutoff and can accept a larger locked loss to avoid carrying naked directional exposure into settlement:
 
 Current defaults:
 
 ```text
 SINGLE_FILL_EARLY_HEDGE_WINDOW_SECONDS=60
 SINGLE_FILL_EARLY_HEDGE_MAX_PAIR_COST=1.02
+SINGLE_FILL_EMERGENCY_HEDGE_WINDOW_SECONDS=15
+SINGLE_FILL_EMERGENCY_HEDGE_MAX_PRICE=0.75
+SINGLE_FILL_EMERGENCY_HEDGE_MAX_PAIR_COST=1.20
 SINGLE_FILL_HEDGE_WINDOW_SECONDS=30
 SINGLE_FILL_HEDGE_MIN_SECONDS_TO_END=5
+SINGLE_FILL_HEDGE_MAX_PRICE=0.65
 SINGLE_FILL_HEDGE_MAX_PAIR_COST=1.10
 ```
 
@@ -601,14 +605,15 @@ The first exception is single-fill profit exit. Trigger conditions:
 
 After cancellation/reconciliation, the worker posts a FAK SELL LIMIT for the filled side. If the bid moves below the configured floor, it skips the sell and leaves the single exposure for the hedge/final review path.
 
-The second exception is two-stage single-fill hedging. Trigger conditions:
+The second exception is three-stage single-fill hedging. Trigger conditions:
 
 - the active round has started and is inside `SINGLE_FILL_EARLY_HEDGE_WINDOW_SECONDS`
 - more than `SINGLE_FILL_HEDGE_MIN_SECONDS_TO_END` remains
 - one BUY side materially exceeds the other side
-- the missing-side live best ask is not above `SINGLE_FILL_HEDGE_MAX_PRICE`
+- the missing-side live best ask is not above the current stage price cap
 - outside the final hedge window, dominant-side average fill price plus hedge limit is not above `SINGLE_FILL_EARLY_HEDGE_MAX_PAIR_COST`
 - inside the final hedge window, dominant-side average fill price plus hedge limit is not above `SINGLE_FILL_HEDGE_MAX_PAIR_COST`
+- inside the emergency hedge window, dominant-side average fill price plus hedge limit is not above `SINGLE_FILL_EMERGENCY_HEDGE_MAX_PAIR_COST`
 
 When triggered, the worker:
 
@@ -669,7 +674,7 @@ p=0.46 => win +0.54, lose -0.46
 
 This is the main risk of the strategy. Dynamic pricing is designed to use lower prices for weaker CHOP scores and only raise price when the CHOP signal is stronger.
 
-If the two-stage hedge buys the missing side, the outcome becomes:
+If the three-stage hedge buys the missing side, the outcome becomes:
 
 ```text
 hedgedPnlPerShare = 1 - originalAvgPrice - hedgeLimitPrice
@@ -680,7 +685,7 @@ Example with original average fill price `0.44`:
 ```text
 hedgeLimit=0.55 => +0.01/share
 hedgeLimit=0.65 => -0.09/share
-hedgeLimit=0.80 => -0.24/share
+hedgeLimit=0.75 => -0.19/share
 no hedge and original side loses => -0.44/share
 ```
 
