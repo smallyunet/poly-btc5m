@@ -86,7 +86,67 @@ test('posts live entry orders as GTD limits expiring at round start', async () =
   assert.equal(postedOptions?.expiration, Math.floor(new Date(startAt).getTime() / 1000));
 });
 
-function intent(label: 'YES' | 'NO'): TradeIntent {
+test('blocks duplicate experimental side after a non-failed order already exists', async () => {
+  const store = new InMemoryStore('live', 2_000, { persistencePath: false }, 'experiment_next_round');
+  const existing = intent('NO', { strategy: 'BTC5M_NEXT_ROUND_50_49_STOP_ON_SINGLE' });
+  store.recordOrder({
+    id: 'filled-experiment-down',
+    intentId: existing.id,
+    strategy: existing.strategy,
+    strategyProfile: 'experiment_next_round',
+    executionKey: [existing.roundId, existing.strategy, existing.tokenId, existing.side].join(':'),
+    roundId: existing.roundId,
+    eventSlug: existing.roundId,
+    tokenId: existing.tokenId,
+    label: existing.label,
+    side: existing.side,
+    price: existing.limitPrice,
+    size: existing.shares,
+    status: 'filled',
+    createdAt: new Date().toISOString(),
+  });
+  let posted = 0;
+  const adapter = adapterStub(() => {
+    posted += 1;
+    return { ok: true, orderId: 'unexpected', price: 0.49, size: 5 };
+  });
+
+  const diagnostics = await executeLiveIntents({
+    appConfig: appConfig(),
+    adapter,
+    store,
+    snapshot: snapshot({ startAt: new Date(Date.now() + 20_000).toISOString() }),
+    intents: [existing],
+    risk: risk(),
+  });
+
+  assert.equal(posted, 0);
+  assert.match(diagnostics[0], /LOCAL_STRATEGY_ORDER_EXISTS/);
+});
+
+test('blocks GTD posting when round start is too close', async () => {
+  const store = new InMemoryStore('live', 2_000, { persistencePath: false });
+  const nearStart = new Date(Date.now() + 1_000).toISOString();
+  let posted = 0;
+  const adapter = adapterStub(() => {
+    posted += 1;
+    return { ok: true, orderId: 'unexpected', price: 0.44, size: 10 };
+  });
+
+  const diagnostics = await executeLiveIntents({
+    appConfig: appConfig(),
+    adapter,
+    store,
+    snapshot: snapshot({ startAt: nearStart, secondsToStart: 1 }),
+    intents: [intent('YES')],
+    risk: risk(),
+  });
+
+  assert.equal(posted, 0);
+  assert.match(diagnostics[0], /ROUND_START_TOO_CLOSE_FOR_GTD/);
+});
+
+function intent(label: 'YES' | 'NO', patch: Partial<TradeIntent> = {}): TradeIntent {
   return {
     id: `intent-${label}`,
     strategy: 'BTC5M_DUAL_45',
@@ -101,7 +161,22 @@ function intent(label: 'YES' | 'NO'): TradeIntent {
     status: 'generated',
     ttlSeconds: 30,
     createdAt: new Date().toISOString(),
+    ...patch,
   };
+}
+
+function adapterStub(executeLimitIntent: () => { ok: boolean; orderId: string; price: number; size: number }): PolymarketAdapter {
+  return {
+    async getCollateralBalanceAllowance() {
+      return { balance: 20, allowance: 20 };
+    },
+    async getOpenOrders() {
+      return [];
+    },
+    async executeLimitIntent() {
+      return executeLimitIntent();
+    },
+  } as unknown as PolymarketAdapter;
 }
 
 function appConfig(): AppConfig {

@@ -6,6 +6,8 @@ import type { InMemoryStore } from './store';
 
 const FAILED_ORDER_COOLDOWN_MS = 5 * 60_000;
 const MIN_MARKETABLE_BUY_NOTIONAL_USD = 1;
+const MIN_GTD_EXPIRATION_LEAD_MS = 5_000;
+const EXPERIMENT_ENTRY_STRATEGY = 'BTC5M_NEXT_ROUND_50_49_STOP_ON_SINGLE';
 export type ExecuteIntentsParams = {
   appConfig: AppConfig;
   adapter: PolymarketAdapter;
@@ -175,7 +177,9 @@ async function executionGate(params: ExecuteIntentsParams, intent: TradeIntent):
 
   if (!roundTokens(params.snapshot).has(intent.tokenId)) return reject('TOKEN_NOT_IN_ROUND');
   if (intent.side === 'SELL') return reject('SELL_DISABLED_SETTLEMENT_ONLY');
-  if (Date.now() >= new Date(params.snapshot.round.startAt).getTime()) return reject('ROUND_ALREADY_STARTED');
+  const msToStart = new Date(params.snapshot.round.startAt).getTime() - Date.now();
+  if (msToStart <= 0) return reject('ROUND_ALREADY_STARTED');
+  if (msToStart <= MIN_GTD_EXPIRATION_LEAD_MS) return reject('ROUND_START_TOO_CLOSE_FOR_GTD');
   if (params.snapshot.round.secondsToEnd <= params.appConfig.marketConfig.avoidExpirySeconds) return reject('ROUND_EXPIRY_TOO_CLOSE');
   if (!params.appConfig.ownerPrivateKey?.trim()) return reject('OWNER_PRIVATE_KEY_MISSING', true);
   if (!params.appConfig.depositWallet?.trim()) return reject('POLYMARKET_DEPOSIT_WALLET_MISSING', true);
@@ -189,6 +193,7 @@ async function executionGate(params: ExecuteIntentsParams, intent: TradeIntent):
   if (quoteGate) return reject(quoteGate);
 
   const dedupeWindowMs = Math.max(intent.ttlSeconds * 1000, 60_000);
+  if (intent.strategy === EXPERIMENT_ENTRY_STRATEGY && params.store.hasNonFailedOrder(executionKey)) return reject('LOCAL_STRATEGY_ORDER_EXISTS');
   if (params.store.hasRecentOrder(executionKey, dedupeWindowMs)) return reject('LOCAL_DUPLICATE_ORDER');
   if (params.store.hasRecentFailedOrder(executionKey, FAILED_ORDER_COOLDOWN_MS)) return reject('LOCAL_RECENT_FAILED_ORDER');
 

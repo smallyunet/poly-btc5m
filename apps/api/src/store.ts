@@ -239,6 +239,10 @@ export class InMemoryStore {
     return this.hasRecentOrder(executionKey, windowMs, { includeFailed: true });
   }
 
+  hasNonFailedOrder(executionKey: string): boolean {
+    return this.orders.some((order) => order.executionKey === executionKey && order.status !== 'failed');
+  }
+
   roundFills(roundId: string): FillRecord[] {
     return this.fills.filter((fill) => fill.roundId === roundId);
   }
