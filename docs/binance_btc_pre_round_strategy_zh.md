@@ -692,7 +692,7 @@ no hedge and original side loses => -0.44/share
 
 ### 单侧成交后的 cooldown
 
-最终结算复盘仍然是 cooldown 的触发点。只要最终 BUY fills 已经成对，说明 hedge 成功或原订单后来成交，不会触发 single-fill cooldown。
+最终结算复盘仍然是 cooldown 的触发点。它只复盘有本地策略 BUY order 记录的轮次；没有本地订单记录的外部/手动成交会被忽略。只要最终 BUY fills 已经成对，说明 hedge 成功或原订单后来成交，不会触发 single-fill cooldown。
 
 如果最终仍是 single，cooldown 根据最新 hedge 结果决定：
 

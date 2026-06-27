@@ -400,6 +400,7 @@ export class InMemoryStore {
     let dirty = false;
     for (const fill of newFills) {
       if (fill.side !== 'BUY' || this.singleFillCooldownRoundIds.has(fill.roundId)) continue;
+      if (!this.hasTrackedBuyOrderForFill(fill)) continue;
       const before = this.pendingSingleFillReviewRoundIds.size;
       this.pendingSingleFillReviewRoundIds.add(fill.roundId);
       dirty ||= this.pendingSingleFillReviewRoundIds.size !== before;
@@ -594,6 +595,7 @@ export class InMemoryStore {
 
   private isFinalSingleSidedBuyRound(roundId: string, nowMs: number): boolean {
     if (!isRoundEnded(roundId, nowMs, FINAL_SINGLE_FILL_GRACE_MS)) return false;
+    if (!this.hasTrackedBuyOrderForRound(roundId)) return false;
     return this.singleSidedBuyExposure(roundId).singleSided;
   }
 
@@ -606,6 +608,23 @@ export class InMemoryStore {
       noShares,
       singleSided: (yesShares > 0 && noShares <= 0) || (noShares > 0 && yesShares <= 0),
     };
+  }
+
+  private hasTrackedBuyOrderForFill(fill: FillRecord): boolean {
+    return this.orders.some((order) => (
+      order.roundId === fill.roundId
+      && order.side === 'BUY'
+      && order.status !== 'failed'
+      && (
+        (fill.clobOrderId && order.clobOrderId === fill.clobOrderId)
+        || order.tokenId === fill.tokenId
+        || order.label === fill.label
+      )
+    ));
+  }
+
+  private hasTrackedBuyOrderForRound(roundId: string): boolean {
+    return this.orders.some((order) => order.roundId === roundId && order.side === 'BUY' && order.status !== 'failed');
   }
 
   private clearSingleFillCooldown(): void {

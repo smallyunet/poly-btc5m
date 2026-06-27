@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import type { FillRecord } from '../../../packages/shared/src';
+import type { FillRecord, OrderRecord } from '../../../packages/shared/src';
 import { InMemoryStore } from './store';
 
 test('does not start single-fill cooldown before the round is final', () => {
@@ -12,6 +12,7 @@ test('does not start single-fill cooldown before the round is final', () => {
   const roundId = roundIdFromStart(nowMs - 4 * 60_000);
   const store = new InMemoryStore('live', 2_000, { persistencePath: false });
 
+  store.recordOrder(order(roundId, 'YES'));
   store.recordFills([fill(roundId, 'YES')]);
 
   assert.equal(store.maybeStartSingleFillCooldown([fill(roundId, 'YES')], 4 * 60 * 60_000, nowMs), null);
@@ -23,6 +24,7 @@ test('starts single-fill cooldown only after final round state is single-sided',
   const roundId = roundIdFromStart(nowMs - 7 * 60_000);
   const store = new InMemoryStore('live', 2_000, { persistencePath: false });
 
+  store.recordOrder(order(roundId, 'YES'));
   store.recordFills([fill(roundId, 'YES')]);
   store.maybeStartSingleFillCooldown([fill(roundId, 'YES')], 4 * 60 * 60_000, nowMs - 2 * 60_000);
 
@@ -39,6 +41,8 @@ test('does not start cooldown when the final round state is paired', () => {
   const roundId = roundIdFromStart(nowMs - 7 * 60_000);
   const store = new InMemoryStore('live', 2_000, { persistencePath: false });
 
+  store.recordOrder(order(roundId, 'YES'));
+  store.recordOrder(order(roundId, 'NO'));
   store.recordFills([fill(roundId, 'YES'), fill(roundId, 'NO')]);
   store.maybeStartSingleFillCooldown([fill(roundId, 'YES'), fill(roundId, 'NO')], 4 * 60 * 60_000, nowMs - 2 * 60_000);
 
@@ -51,6 +55,7 @@ test('does not start cooldown when the single filled side was sold out', () => {
   const roundId = roundIdFromStart(nowMs - 7 * 60_000);
   const store = new InMemoryStore('live', 2_000, { persistencePath: false });
 
+  store.recordOrder(order(roundId, 'YES'));
   store.recordFills([fill(roundId, 'YES'), fill(roundId, 'YES', { side: 'SELL', price: 0.57 })]);
   store.maybeStartSingleFillCooldown([fill(roundId, 'YES')], 4 * 60 * 60_000, nowMs - 2 * 60_000);
 
@@ -63,6 +68,8 @@ test('clears an active cooldown if later fills make the round paired', () => {
   const roundId = roundIdFromStart(nowMs - 7 * 60_000);
   const store = new InMemoryStore('live', 2_000, { persistencePath: false });
 
+  store.recordOrder(order(roundId, 'YES'));
+  store.recordOrder(order(roundId, 'NO'));
   store.recordFills([fill(roundId, 'YES')]);
   store.maybeStartSingleFillCooldown([fill(roundId, 'YES')], 4 * 60 * 60_000, nowMs - 2 * 60_000);
   assert.equal(store.maybeStartSingleFillCooldown([], 4 * 60 * 60_000, nowMs)?.roundId, roundId);
@@ -77,6 +84,7 @@ test('uses shorter cooldown for price-capped single-fill hedge misses', () => {
   const roundId = roundIdFromStart(nowMs - 7 * 60_000);
   const store = new InMemoryStore('live', 2_000, { persistencePath: false });
 
+  store.recordOrder(order(roundId, 'YES'));
   store.recordFills([fill(roundId, 'YES')]);
   store.recordSingleFillHedgeOutcome({
     roundId,
@@ -99,10 +107,12 @@ test('escalates cooldown for repeated final single fills inside the repeat windo
   const secondRoundId = roundIdFromStart(nowMs - 7 * 60_000);
   const store = new InMemoryStore('live', 2_000, { persistencePath: false });
 
+  store.recordOrder(order(firstRoundId, 'YES'));
   store.recordFills([fill(firstRoundId, 'YES')]);
   store.maybeStartSingleFillCooldown([fill(firstRoundId, 'YES')], policy(), nowMs - 95 * 60_000);
   store.maybeStartSingleFillCooldown([], policy(), nowMs - 94 * 60_000);
 
+  store.recordOrder(order(secondRoundId, 'NO'));
   store.recordFills([fill(secondRoundId, 'NO')]);
   store.maybeStartSingleFillCooldown([fill(secondRoundId, 'NO')], policy(), nowMs - 2 * 60_000);
   const cooldown = store.maybeStartSingleFillCooldown([], policy(), nowMs);
@@ -117,8 +127,21 @@ test('does not scan historical fills without a pending final review', () => {
   const roundId = roundIdFromStart(nowMs - 7 * 60_000);
   const store = new InMemoryStore('live', 2_000, { persistencePath: false });
 
+  store.recordOrder(order(roundId, 'YES'));
   store.recordFills([fill(roundId, 'YES')]);
 
+  assert.equal(store.maybeStartSingleFillCooldown([], 4 * 60 * 60_000, nowMs), null);
+  assert.equal(store.getActiveEntryCooldown(nowMs), null);
+});
+
+test('does not start cooldown for external fills without tracked strategy orders', () => {
+  const nowMs = Date.now();
+  const roundId = roundIdFromStart(nowMs - 7 * 60_000);
+  const store = new InMemoryStore('live', 2_000, { persistencePath: false });
+
+  store.recordFills([fill(roundId, 'YES')]);
+
+  assert.equal(store.maybeStartSingleFillCooldown([fill(roundId, 'YES')], 4 * 60 * 60_000, nowMs - 2 * 60_000), null);
   assert.equal(store.maybeStartSingleFillCooldown([], 4 * 60 * 60_000, nowMs), null);
   assert.equal(store.getActiveEntryCooldown(nowMs), null);
 });
@@ -173,6 +196,23 @@ function fill(roundId: string, label: 'YES' | 'NO', patch: Partial<FillRecord> =
     price: 0.44,
     size: 10,
     matchedAt: new Date().toISOString(),
+    ...patch,
+  };
+}
+
+function order(roundId: string, label: 'YES' | 'NO', patch: Partial<OrderRecord> = {}): OrderRecord {
+  return {
+    id: `order-${roundId}-${label}`,
+    intentId: `intent-${roundId}-${label}`,
+    roundId,
+    eventSlug: roundId,
+    tokenId: `${label.toLowerCase()}-token`,
+    label,
+    side: 'BUY',
+    price: 0.44,
+    size: 10,
+    status: 'posted',
+    createdAt: new Date().toISOString(),
     ...patch,
   };
 }

@@ -141,7 +141,7 @@ Live entry orders are configured as CLOB limit order `price + size`:
 - `SINGLE_FILL_EARLY_HEDGE_*` controls the 60s-to-30s opportunity hedge. It only runs when the combined pair cost is near breakeven.
 - `SINGLE_FILL_HEDGE_*` controls the final 30s risk hedge. It can accept the wider final pair-cost cap to avoid carrying a single-sided exposure into settlement.
 - `SINGLE_FILL_PROFIT_EXIT_*` controls the single-fill take-profit exit. The filled side must have a fresh live bid at or above `SINGLE_FILL_PROFIT_EXIT_MIN_PRICE`, the capped FAK SELL limit must realize at least `SINGLE_FILL_PROFIT_EXIT_MIN_PNL_USD`, and stale quotes above `SINGLE_FILL_PROFIT_EXIT_MAX_ORDERBOOK_AGE_MS` are rejected.
-- Final single-fill cooldown is adaptive: base final singles pause entries for 30 minutes, price-cap hedge misses pause for 1 hour, execution/API/cancel/post failures pause for 2 hours, and repeated final singles inside 2 hours escalate to 2 hours then 4 hours.
+- Final single-fill cooldown is adaptive and only applies to rounds with tracked strategy BUY orders. External/manual fills without local strategy orders are ignored. Base final singles pause entries for 30 minutes, price-cap hedge misses pause for 1 hour, execution/API/cancel/post failures pause for 2 hours, and repeated final singles inside 2 hours escalate to 2 hours then 4 hours.
 
 ## Docker
 

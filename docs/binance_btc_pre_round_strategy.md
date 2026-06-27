@@ -688,7 +688,7 @@ The hedge is therefore a tail-loss reducer, not an unconditional return enhancer
 
 ### Cooldown After One Side Fills
 
-Final-round review is still the cooldown trigger. If final BUY fills are paired, the hedge succeeded or the original orders later filled, so no single-fill cooldown starts.
+Final-round review is still the cooldown trigger. It only reviews rounds that have tracked local strategy BUY orders; external/manual fills with no local order record are ignored. If final BUY fills are paired, the hedge succeeded or the original orders later filled, so no single-fill cooldown starts.
 
 If the final state is still single-sided, cooldown duration depends on the latest hedge outcome:
 
