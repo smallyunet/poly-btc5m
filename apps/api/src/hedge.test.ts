@@ -59,6 +59,38 @@ test('blocks a hedge when combined pair cost is above the configured cap', () =>
   assert.deepEqual(plan, { ok: false, reason: 'HEDGE_PAIR_COST_ABOVE_CAP' });
 });
 
+test('does not hedge after the single filled side was sold by profit exit', () => {
+  const plan = planSingleFillHedge({
+    candidate: candidate(),
+    orders: [
+      order('YES', { filledSize: 10, avgFillPrice: 0.44, status: 'filled' }),
+      order('YES', { side: 'SELL', filledSize: 10, avgFillPrice: 0.57, status: 'filled' }),
+      order('NO', { filledSize: 0, status: 'cancelled', clobOrderId: 'no-cancelled' }),
+    ],
+    orderbooks: [quote('no-token', 0.59)],
+    appConfig: config(),
+    nowMs,
+  });
+
+  assert.deepEqual(plan, { ok: false, reason: 'NO_MATERIAL_SINGLE_FILL_EXPOSURE' });
+});
+
+test('pauses hedge while a profit-exit sell order is awaiting reconciliation', () => {
+  const plan = planSingleFillHedge({
+    candidate: candidate(),
+    orders: [
+      order('YES', { filledSize: 10, avgFillPrice: 0.44, status: 'filled' }),
+      order('YES', { side: 'SELL', status: 'posted', clobOrderId: 'exit-posted' }),
+      order('NO', { filledSize: 0, status: 'cancelled', clobOrderId: 'no-cancelled' }),
+    ],
+    orderbooks: [quote('no-token', 0.59)],
+    appConfig: config(),
+    nowMs,
+  });
+
+  assert.deepEqual(plan, { ok: false, reason: 'PROFIT_EXIT_ORDER_ACTIVE' });
+});
+
 test('blocks a marketable hedge below the Polymarket minimum notional', () => {
   const plan = planSingleFillHedge({
     candidate: candidate(),

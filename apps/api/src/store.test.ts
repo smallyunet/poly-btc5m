@@ -46,6 +46,18 @@ test('does not start cooldown when the final round state is paired', () => {
   assert.equal(store.getActiveEntryCooldown(nowMs), null);
 });
 
+test('does not start cooldown when the single filled side was sold out', () => {
+  const nowMs = Date.now();
+  const roundId = roundIdFromStart(nowMs - 7 * 60_000);
+  const store = new InMemoryStore('live', 2_000, { persistencePath: false });
+
+  store.recordFills([fill(roundId, 'YES'), fill(roundId, 'YES', { side: 'SELL', price: 0.57 })]);
+  store.maybeStartSingleFillCooldown([fill(roundId, 'YES')], 4 * 60 * 60_000, nowMs - 2 * 60_000);
+
+  assert.equal(store.maybeStartSingleFillCooldown([], 4 * 60 * 60_000, nowMs), null);
+  assert.equal(store.getActiveEntryCooldown(nowMs), null);
+});
+
 test('clears an active cooldown if later fills make the round paired', () => {
   const nowMs = Date.now();
   const roundId = roundIdFromStart(nowMs - 7 * 60_000);
@@ -151,9 +163,9 @@ function policy() {
   };
 }
 
-function fill(roundId: string, label: 'YES' | 'NO'): FillRecord {
+function fill(roundId: string, label: 'YES' | 'NO', patch: Partial<FillRecord> = {}): FillRecord {
   return {
-    id: `fill-${roundId}-${label}`,
+    id: `fill-${roundId}-${label}-${patch.side ?? 'BUY'}`,
     roundId,
     tokenId: `${label.toLowerCase()}-token`,
     label,
@@ -161,5 +173,6 @@ function fill(roundId: string, label: 'YES' | 'NO'): FillRecord {
     price: 0.44,
     size: 10,
     matchedAt: new Date().toISOString(),
+    ...patch,
   };
 }

@@ -45,9 +45,11 @@ export function planSingleFillHedge(params: {
   if (secondsToEnd > params.appConfig.singleFillHedgeWindowSeconds) return { ok: false, reason: 'NOT_IN_HEDGE_WINDOW' };
   if (secondsToEnd <= params.appConfig.singleFillHedgeMinSecondsToEnd) return { ok: false, reason: 'HEDGE_TOO_CLOSE_TO_EXPIRY' };
 
-  const buyFills = params.orders.flatMap((order) => matchingBuyFills(order));
-  const yes = exposure(buyFills.filter((fill) => fill.label === 'YES'));
-  const no = exposure(buyFills.filter((fill) => fill.label === 'NO'));
+  const activeExit = activeSellOrder(params.orders);
+  if (activeExit) return { ok: false, reason: 'PROFIT_EXIT_ORDER_ACTIVE' };
+
+  const yes = netExposure(params.orders, 'YES');
+  const no = netExposure(params.orders, 'NO');
   const diff = roundShares(Math.abs(yes.shares - no.shares));
   if (diff < params.appConfig.minOrderShares) return { ok: false, reason: 'NO_MATERIAL_SINGLE_FILL_EXPOSURE' };
 
@@ -109,9 +111,8 @@ export function buildSingleFillHedgeCheck(params: {
 }): StrategyCheck {
   const nowMs = params.nowMs ?? Date.now();
   const secondsToEnd = (new Date(params.candidate.endAt).getTime() - nowMs) / 1000;
-  const buyFills = params.orders.flatMap((order) => matchingBuyFills(order));
-  const yes = exposure(buyFills.filter((fill) => fill.label === 'YES'));
-  const no = exposure(buyFills.filter((fill) => fill.label === 'NO'));
+  const yes = netExposure(params.orders, 'YES');
+  const no = netExposure(params.orders, 'NO');
   const diff = roundShares(Math.abs(yes.shares - no.shares));
   const dominantLabel = yes.shares > no.shares ? 'YES' : no.shares > yes.shares ? 'NO' : null;
   const missingLabel = dominantLabel === 'YES' ? 'NO' : dominantLabel === 'NO' ? 'YES' : null;
@@ -347,18 +348,29 @@ async function cancelMissingSideOrders(params: ExecuteHedgesParams, roundId: str
   }
 }
 
-function matchingBuyFills(order: OrderRecord): Array<{ label: 'YES' | 'NO'; price: number; size: number }> {
-  if (order.side !== 'BUY') return [];
-  const filledSize = order.filledSize ?? 0;
-  const avgFillPrice = order.avgFillPrice ?? order.price;
-  if (filledSize <= 0 || !Number.isFinite(avgFillPrice)) return [];
-  return [{ label: order.label, price: avgFillPrice, size: filledSize }];
+function netExposure(orders: OrderRecord[], label: 'YES' | 'NO'): { shares: number; avgPrice: number } {
+  const sideOrders = orders.filter((order) => order.label === label);
+  const buyFilled = sum(sideOrders.filter((order) => order.side === 'BUY').map((order) => filledShares(order)));
+  const sellFilled = sum(sideOrders.filter((order) => order.side === 'SELL').map((order) => filledShares(order)));
+  const buyCost = sum(sideOrders.filter((order) => order.side === 'BUY').map((order) => filledShares(order) * fillPrice(order)));
+  const sellProceeds = sum(sideOrders.filter((order) => order.side === 'SELL').map((order) => filledShares(order) * fillPrice(order)));
+  const shares = roundShares(Math.max(0, buyFilled - sellFilled));
+  const costBasis = Math.max(0, buyCost - sellProceeds);
+  return { shares, avgPrice: shares > 0 ? costBasis / shares : 0 };
 }
 
-function exposure(fills: Array<{ price: number; size: number }>): { shares: number; avgPrice: number } {
-  const shares = sum(fills.map((fill) => fill.size));
-  const cost = sum(fills.map((fill) => fill.price * fill.size));
-  return { shares, avgPrice: shares > 0 ? cost / shares : 0 };
+function activeSellOrder(orders: OrderRecord[]): OrderRecord | undefined {
+  return orders.find((order) => order.side === 'SELL' && (order.status === 'posted' || order.status === 'partially_filled'));
+}
+
+function filledShares(order: OrderRecord): number {
+  if (order.filledSize != null) return order.filledSize;
+  if (order.status === 'filled') return order.size;
+  return 0;
+}
+
+function fillPrice(order: OrderRecord): number {
+  return order.avgFillPrice ?? order.price;
 }
 
 function buyQuoteGate(quote: OrderBookQuote | undefined, maxAgeSeconds: number): string | null {
@@ -375,7 +387,7 @@ function condition(label: string, passed: boolean, actual: string) {
 }
 
 function benignHedgeReason(reason: string | undefined): boolean {
-  return !reason || ['NO_MATERIAL_SINGLE_FILL_EXPOSURE', 'NOT_IN_HEDGE_WINDOW', 'HEDGE_TOO_CLOSE_TO_EXPIRY'].includes(reason);
+  return !reason || ['NO_MATERIAL_SINGLE_FILL_EXPOSURE', 'NOT_IN_HEDGE_WINDOW', 'HEDGE_TOO_CLOSE_TO_EXPIRY', 'PROFIT_EXIT_ORDER_ACTIVE'].includes(reason);
 }
 
 function hedgeCheckReason(plan: HedgePlan, outcome: { status: 'posted' | 'blocked' | 'failed' | 'monitor'; reason: string; recordedAt: string } | undefined, hasRecentHedgeOrder?: boolean, hasRecentFailedHedgeOrder?: boolean): string {

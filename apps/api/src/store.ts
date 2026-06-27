@@ -598,9 +598,9 @@ export class InMemoryStore {
   }
 
   private singleSidedBuyExposure(roundId: string): { yesShares: number; noShares: number; singleSided: boolean } {
-    const buys = this.fills.filter((fill) => fill.roundId === roundId && fill.side === 'BUY');
-    const yesShares = sum(buys.filter((fill) => fill.label === 'YES').map((fill) => fill.size));
-    const noShares = sum(buys.filter((fill) => fill.label === 'NO').map((fill) => fill.size));
+    const roundFills = this.fills.filter((fill) => fill.roundId === roundId);
+    const yesShares = netShares(roundFills, 'YES');
+    const noShares = netShares(roundFills, 'NO');
     return {
       yesShares,
       noShares,
@@ -621,6 +621,13 @@ function isTradeIntentLike(value: unknown): value is TradeIntent {
   if (!value || typeof value !== 'object') return false;
   const item = value as Partial<TradeIntent>;
   return typeof item.id === 'string' && typeof item.tokenId === 'string' && (item.side === 'BUY' || item.side === 'SELL');
+}
+
+function netShares(fills: FillRecord[], label: 'YES' | 'NO'): number {
+  const labelFills = fills.filter((fill) => fill.label === label);
+  const buyShares = sum(labelFills.filter((fill) => fill.side === 'BUY').map((fill) => fill.size));
+  const sellShares = sum(labelFills.filter((fill) => fill.side === 'SELL').map((fill) => fill.size));
+  return Math.max(0, buyShares - sellShares);
 }
 
 function isOrderRecordLike(value: unknown): value is OrderRecord {

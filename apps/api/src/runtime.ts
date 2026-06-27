@@ -68,8 +68,8 @@ export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, dat
     ...hedgeCandidates.flatMap((candidate) => [candidate.yesTokenId, candidate.noTokenId]),
     ...profitExitCandidates.flatMap((candidate) => [candidate.yesTokenId, candidate.noTokenId]),
   ]);
-  const hedgeDiagnostics = await executeSingleFillHedges({ appConfig, adapter, store, candidates: hedgeCandidates, orderbooks: hedgeOrderbooks });
   const profitExitDiagnostics = await executeSingleFillProfitExits({ appConfig, adapter, store, candidates: profitExitCandidates, orderbooks: hedgeOrderbooks });
+  const hedgeDiagnostics = await executeSingleFillHedges({ appConfig, adapter, store, candidates: hedgeCandidates, orderbooks: hedgeOrderbooks });
   const exit = evaluateExit(snapshot, positions, risk, { orders: store.roundOrders(snapshot.round.id), fills: store.roundFills(snapshot.round.id) });
   const hedgeCheck = buildCurrentRoundHedgeCheck(appConfig, store, snapshot, [...orderbooks, ...hedgeOrderbooks]);
   const profitExitCheck = buildCurrentRoundProfitExitCheck(appConfig, store, snapshot, [...orderbooks, ...hedgeOrderbooks]);
@@ -287,10 +287,7 @@ async function reconcileSettlements(appConfig: AppConfig, store: InMemoryStore, 
       const winningLabel = await resolvedWinningLabel(appConfig, round.eventSlug);
       if (!winningLabel) continue;
       const fills = store.roundFills(round.roundId);
-      const yesShares = sum(fills.filter((fill) => fill.label === 'YES' && fill.side === 'BUY').map((fill) => fill.size));
-      const noShares = sum(fills.filter((fill) => fill.label === 'NO' && fill.side === 'BUY').map((fill) => fill.size));
-      const totalCost = sum(fills.filter((fill) => fill.side === 'BUY').map((fill) => fill.price * fill.size));
-      const payout = winningLabel === 'YES' ? yesShares : noShares;
+      const settlementValues = calculateSettlementValues(fills, winningLabel);
       const settlement: SettlementRecord = {
         id: `settlement-${round.roundId}`,
         roundId: round.roundId,
@@ -299,11 +296,7 @@ async function reconcileSettlements(appConfig: AppConfig, store: InMemoryStore, 
         imageUrl: round.imageUrl,
         resolvedAt: new Date().toISOString(),
         winningLabel,
-        yesShares,
-        noShares,
-        totalCost,
-        payout,
-        pnl: payout - totalCost,
+        ...settlementValues,
         status: 'settled',
       };
       store.recordSettlement(settlement);
@@ -317,11 +310,8 @@ function maybeRecordEstimatedSettlement(store: InMemoryStore, snapshot: StateSna
   if (snapshot.round.phase !== 'settled') return;
   const fills = store.roundFills(snapshot.round.id);
   if (!fills.length) return;
-  const yesShares = sum(fills.filter((fill) => fill.label === 'YES' && fill.side === 'BUY').map((fill) => fill.size));
-  const noShares = sum(fills.filter((fill) => fill.label === 'NO' && fill.side === 'BUY').map((fill) => fill.size));
-  const totalCost = sum(fills.filter((fill) => fill.side === 'BUY').map((fill) => fill.price * fill.size));
   const winningLabel = snapshot.features.price == null ? undefined : snapshot.features.price >= snapshot.round.strike ? 'YES' : 'NO';
-  const payout = winningLabel === 'YES' ? yesShares : winningLabel === 'NO' ? noShares : 0;
+  const settlementValues = calculateSettlementValues(fills, winningLabel);
   const settlement: SettlementRecord = {
     id: `settlement-${snapshot.round.id}`,
     roundId: snapshot.round.id,
@@ -330,14 +320,37 @@ function maybeRecordEstimatedSettlement(store: InMemoryStore, snapshot: StateSna
     imageUrl: snapshot.round.imageUrl,
     resolvedAt: snapshot.capturedAt,
     winningLabel,
+    ...settlementValues,
+    status: 'estimated',
+  };
+  store.recordSettlement(settlement);
+}
+
+export function calculateSettlementValues(fills: FillRecord[], winningLabel?: 'YES' | 'NO'): Pick<SettlementRecord, 'yesShares' | 'noShares' | 'totalCost' | 'payout' | 'pnl'> {
+  const yesShares = netShares(fills, 'YES');
+  const noShares = netShares(fills, 'NO');
+  const buyCost = sum(fills.filter((fill) => fill.side === 'BUY').map((fill) => fill.price * fill.size));
+  const sellProceeds = sum(fills.filter((fill) => fill.side === 'SELL').map((fill) => fill.price * fill.size));
+  const totalCost = roundMoney(buyCost - sellProceeds);
+  const payout = winningLabel === 'YES' ? yesShares : winningLabel === 'NO' ? noShares : 0;
+  return {
     yesShares,
     noShares,
     totalCost,
     payout,
-    pnl: payout - totalCost,
-    status: 'estimated',
+    pnl: roundMoney(payout - totalCost),
   };
-  store.recordSettlement(settlement);
+}
+
+function netShares(fills: FillRecord[], label: 'YES' | 'NO'): number {
+  const labelFills = fills.filter((fill) => fill.label === label);
+  const buyShares = sum(labelFills.filter((fill) => fill.side === 'BUY').map((fill) => fill.size));
+  const sellShares = sum(labelFills.filter((fill) => fill.side === 'SELL').map((fill) => fill.size));
+  return Math.max(0, buyShares - sellShares);
+}
+
+function roundMoney(value: number): number {
+  return Math.round(value * 1_000_000) / 1_000_000;
 }
 
 async function resolvedWinningLabel(appConfig: AppConfig, eventSlug: string): Promise<'YES' | 'NO' | null> {
