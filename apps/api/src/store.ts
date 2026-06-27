@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { STRATEGY_RULES } from '../../../packages/strategy/src';
-import type { BotRuntimeStatus, DashboardState, DataFeedStatus, ExecutionMode, FillRecord, OrderRecord, RuntimeLogRecord, SettlementRecord, StateSnapshot, StrategyCheck, TradeIntent } from '../../../packages/shared/src';
+import type { BotRuntimeStatus, DashboardState, DataFeedStatus, ExecutionMode, FillRecord, OrderRecord, RuntimeLogRecord, SettlementRecord, StateSnapshot, StrategyCheck, StrategyId, StrategyProfile, TradeIntent } from '../../../packages/shared/src';
 
 type OpenOrderLike = {
   id: string;
@@ -57,6 +57,7 @@ type PersistedRuntimeState = {
   pendingSingleFillReviewRoundIds?: string[];
   singleFillHedgeOutcomes?: Record<string, SingleFillHedgeOutcome>;
   singleFillCooldownEvents?: SingleFillCooldownEvent[];
+  experimentStop?: ExperimentStopRecord | null;
 };
 
 type SingleFillCooldownRecord = {
@@ -77,7 +78,17 @@ type SingleFillCooldownEvent = {
   category: string;
 };
 
+type ExperimentStopRecord = {
+  roundId: string;
+  stoppedAt: string;
+  reason: string;
+  yesShares: number;
+  noShares: number;
+};
+
 const FINAL_SINGLE_FILL_GRACE_MS = 60_000;
+const CLASSIC_ENTRY_STRATEGY: StrategyId = 'BTC5M_DUAL_45';
+const EXPERIMENT_STRATEGY: StrategyId = 'BTC5M_NEXT_ROUND_50_49_STOP_ON_SINGLE';
 const PRICE_CAP_HEDGE_REASONS = new Set(['HEDGE_ASK_ABOVE_CAP', 'HEDGE_PAIR_COST_ABOVE_CAP', 'EARLY_HEDGE_PAIR_COST_ABOVE_CAP', 'EMERGENCY_HEDGE_PAIR_COST_ABOVE_CAP']);
 const BENIGN_HEDGE_REASONS = new Set(['NO_MATERIAL_SINGLE_FILL_EXPOSURE', 'NOT_IN_HEDGE_WINDOW', 'HEDGE_TOO_CLOSE_TO_EXPIRY']);
 
@@ -95,13 +106,14 @@ export class InMemoryStore {
   private pendingSingleFillReviewRoundIds = new Set<string>();
   private singleFillHedgeOutcomes = new Map<string, SingleFillHedgeOutcome>();
   private singleFillCooldownEvents: SingleFillCooldownEvent[] = [];
+  private experimentStop: ExperimentStopRecord | null = null;
   private entrySignalCounts = new Map<string, number>();
   private runtimeLogs: RuntimeLogRecord[] = [];
   private strategyChecks: StrategyCheck[] = [];
   private readonly persistencePath?: string;
   private readonly maxRecords: number;
 
-  constructor(mode: ExecutionMode, private readonly tickIntervalMs: number, options: StoreOptions = {}) {
+  constructor(mode: ExecutionMode, private readonly tickIntervalMs: number, options: StoreOptions = {}, activeStrategyProfile: StrategyProfile = 'classic') {
     this.persistencePath = options.persistencePath === false ? undefined : options.persistencePath;
     this.maxRecords = options.maxRecords ?? 10_000;
     const startedAt = new Date();
@@ -113,12 +125,18 @@ export class InMemoryStore {
       tickIntervalMs,
       version: '0.1.0',
       dockerReady: true,
+      activeStrategyProfile,
     };
     this.loadPersistedState();
   }
 
   getRuntime(): BotRuntimeStatus {
     return this.runtimeWithCooldown();
+  }
+
+  setActiveStrategyProfile(profile: StrategyProfile): void {
+    if (this.runtime.activeStrategyProfile === profile) return;
+    this.runtime = { ...this.runtime, activeStrategyProfile: profile };
   }
 
   markDegraded(): BotRuntimeStatus {
@@ -173,7 +191,9 @@ export class InMemoryStore {
   recordFills(fills: FillRecord[]): FillRecord[] {
     if (!fills.length) return [];
     const seen = new Set(this.fills.map((item) => item.id));
-    const nextFills = fills.filter((item) => !seen.has(item.id));
+    const nextFills = fills
+      .filter((item) => !seen.has(item.id))
+      .map((fill) => this.fillWithStrategySource(fill));
     if (!nextFills.length) return [];
     this.fills = [...nextFills, ...this.fills].slice(0, this.maxRecords);
     this.reconcileOrderFillStatus();
@@ -223,8 +243,12 @@ export class InMemoryStore {
     return this.fills.filter((fill) => fill.roundId === roundId);
   }
 
-  roundOrders(roundId: string): OrderRecord[] {
-    return this.orders.filter((order) => order.roundId === roundId);
+  roundFillsByStrategy(roundId: string, strategy: StrategyId): FillRecord[] {
+    return this.fills.filter((fill) => fill.roundId === roundId && fillStrategy(fill) === strategy);
+  }
+
+  roundOrders(roundId: string, strategy?: StrategyId): OrderRecord[] {
+    return this.orders.filter((order) => order.roundId === roundId && (!strategy || orderStrategy(order) === strategy));
   }
 
   hedgeWatchTokenIds(windowSeconds: number, minSecondsToEnd: number, nowMs = Date.now()): string[] {
@@ -239,10 +263,11 @@ export class InMemoryStore {
       .filter(Boolean);
   }
 
-  singleFillHedgeCandidates(windowSeconds: number, minSecondsToEnd: number, nowMs = Date.now()): SingleFillHedgeCandidate[] {
+  singleFillHedgeCandidates(windowSeconds: number, minSecondsToEnd: number, nowMs = Date.now(), strategy: StrategyId = CLASSIC_ENTRY_STRATEGY): SingleFillHedgeCandidate[] {
     const byRound = new Map<string, SingleFillHedgeCandidate>();
     for (const order of this.orders) {
       if (order.side !== 'BUY') continue;
+      if (orderStrategy(order) !== strategy) continue;
       const startMs = roundStartMs(order.roundId);
       if (startMs == null) continue;
       const endMs = startMs + 5 * 60_000;
@@ -268,10 +293,11 @@ export class InMemoryStore {
     return [...byRound.values()].filter((candidate) => candidate.yesTokenId && candidate.noTokenId);
   }
 
-  singleFillProfitExitCandidates(maxSecondsToEnd: number, minSecondsToEnd: number, nowMs = Date.now()): SingleFillProfitExitCandidate[] {
+  singleFillProfitExitCandidates(maxSecondsToEnd: number, minSecondsToEnd: number, nowMs = Date.now(), strategy: StrategyId = CLASSIC_ENTRY_STRATEGY): SingleFillProfitExitCandidate[] {
     const byRound = new Map<string, SingleFillProfitExitCandidate>();
     for (const order of this.orders) {
       if (order.side !== 'BUY') continue;
+      if (orderStrategy(order) !== strategy) continue;
       const startMs = roundStartMs(order.roundId);
       if (startMs == null) continue;
       const endMs = startMs + 5 * 60_000;
@@ -395,12 +421,43 @@ export class InMemoryStore {
     return this.singleFillHedgeOutcomes.get(roundId);
   }
 
-  maybeStartSingleFillCooldown(newFills: FillRecord[], cooldown: number | SingleFillCooldownPolicy, nowMs = Date.now()): SingleFillCooldownRecord | null {
+  getExperimentStop(): ExperimentStopRecord | null {
+    return this.experimentStop;
+  }
+
+  maybeStopExperimentOnSingle(newFills: FillRecord[], nowMs = Date.now()): ExperimentStopRecord | null {
+    if (this.experimentStop) return null;
+    const roundIds = new Set<string>();
+    for (const fill of [...newFills, ...this.fills]) {
+      if (fill.side !== 'BUY') continue;
+      if (fillStrategy(fill) !== EXPERIMENT_STRATEGY) continue;
+      roundIds.add(fill.roundId);
+    }
+    for (const roundId of roundIds) {
+      if (!isRoundEnded(roundId, nowMs, FINAL_SINGLE_FILL_GRACE_MS)) continue;
+      const exposure = this.singleSidedBuyExposure(roundId, EXPERIMENT_STRATEGY);
+      if (!exposure.singleSided) continue;
+      const record: ExperimentStopRecord = {
+        roundId,
+        stoppedAt: new Date(nowMs).toISOString(),
+        reason: 'EXPERIMENT_SINGLE_FILL',
+        yesShares: exposure.yesShares,
+        noShares: exposure.noShares,
+      };
+      this.experimentStop = record;
+      this.persistState();
+      return record;
+    }
+    return null;
+  }
+
+  maybeStartSingleFillCooldown(newFills: FillRecord[], cooldown: number | SingleFillCooldownPolicy, nowMs = Date.now(), strategy: StrategyId = CLASSIC_ENTRY_STRATEGY): SingleFillCooldownRecord | null {
     const policy = normalizeCooldownPolicy(cooldown);
     let dirty = false;
     for (const fill of newFills) {
       if (fill.side !== 'BUY' || this.singleFillCooldownRoundIds.has(fill.roundId)) continue;
-      if (!this.hasTrackedBuyOrderForFill(fill)) continue;
+      if (fillStrategy(fill) !== strategy) continue;
+      if (!this.hasTrackedBuyOrderForFill(fill, strategy)) continue;
       const before = this.pendingSingleFillReviewRoundIds.size;
       this.pendingSingleFillReviewRoundIds.add(fill.roundId);
       dirty ||= this.pendingSingleFillReviewRoundIds.size !== before;
@@ -411,7 +468,7 @@ export class InMemoryStore {
     for (const roundId of this.pendingSingleFillReviewRoundIds) {
       if (this.singleFillCooldownRoundIds.has(roundId)) continue;
       if (!isRoundEnded(roundId, nowMs, FINAL_SINGLE_FILL_GRACE_MS)) continue;
-      const exposure = this.singleSidedBuyExposure(roundId);
+      const exposure = this.singleSidedBuyExposure(roundId, strategy);
       this.pendingSingleFillReviewRoundIds.delete(roundId);
       this.singleFillCooldownRoundIds.add(roundId);
       dirty = true;
@@ -500,6 +557,7 @@ export class InMemoryStore {
       this.pendingSingleFillReviewRoundIds = new Set(Array.isArray(parsed.pendingSingleFillReviewRoundIds) ? parsed.pendingSingleFillReviewRoundIds.filter((roundId): roundId is string => typeof roundId === 'string') : []);
       this.singleFillHedgeOutcomes = new Map(Object.entries(parsed.singleFillHedgeOutcomes || {}).filter((entry): entry is [string, SingleFillHedgeOutcome] => isSingleFillHedgeOutcomeLike(entry[1])));
       this.singleFillCooldownEvents = Array.isArray(parsed.singleFillCooldownEvents) ? parsed.singleFillCooldownEvents.filter(isSingleFillCooldownEventLike).slice(0, 100) : [];
+      this.experimentStop = isExperimentStopLike(parsed.experimentStop) ? parsed.experimentStop : null;
       this.runtime = this.runtimeWithCooldown();
       this.reconcileOrderFillStatus();
     } catch (error) {
@@ -553,6 +611,7 @@ export class InMemoryStore {
         pendingSingleFillReviewRoundIds: [...this.pendingSingleFillReviewRoundIds],
         singleFillHedgeOutcomes: Object.fromEntries(this.singleFillHedgeOutcomes),
         singleFillCooldownEvents: this.singleFillCooldownEvents,
+        experimentStop: this.experimentStop,
       };
       const tmpPath = `${this.persistencePath}.${process.pid}.tmp`;
       fs.writeFileSync(tmpPath, JSON.stringify(payload, null, 2));
@@ -563,15 +622,21 @@ export class InMemoryStore {
   }
 
   private runtimeWithCooldown(nowMs = Date.now()): BotRuntimeStatus {
+    const experimentFields = this.experimentStop ? {
+      experimentStoppedAt: this.experimentStop.stoppedAt,
+      experimentStoppedReason: this.experimentStop.reason,
+      experimentStoppedRoundId: this.experimentStop.roundId,
+    } : {};
     const activeCooldown = this.getActiveEntryCooldown(nowMs);
     if (!activeCooldown) {
       const { entryCooldownUntil: _entryCooldownUntil, entryCooldownReason: _entryCooldownReason, ...runtime } = this.runtime;
-      return runtime;
+      return { ...runtime, ...experimentFields };
     }
     return {
       ...this.runtime,
       entryCooldownUntil: activeCooldown.expiresAt,
       entryCooldownReason: `single fill on ${activeCooldown.roundId}${activeCooldown.category ? ` (${activeCooldown.category})` : ''}`,
+      ...experimentFields,
     };
   }
 
@@ -595,12 +660,12 @@ export class InMemoryStore {
 
   private isFinalSingleSidedBuyRound(roundId: string, nowMs: number): boolean {
     if (!isRoundEnded(roundId, nowMs, FINAL_SINGLE_FILL_GRACE_MS)) return false;
-    if (!this.hasTrackedBuyOrderForRound(roundId)) return false;
-    return this.singleSidedBuyExposure(roundId).singleSided;
+    if (!this.hasTrackedBuyOrderForRound(roundId, CLASSIC_ENTRY_STRATEGY)) return false;
+    return this.singleSidedBuyExposure(roundId, CLASSIC_ENTRY_STRATEGY).singleSided;
   }
 
-  private singleSidedBuyExposure(roundId: string): { yesShares: number; noShares: number; singleSided: boolean } {
-    const roundFills = this.fills.filter((fill) => fill.roundId === roundId);
+  private singleSidedBuyExposure(roundId: string, strategy: StrategyId): { yesShares: number; noShares: number; singleSided: boolean } {
+    const roundFills = this.fills.filter((fill) => fill.roundId === roundId && fillStrategy(fill) === strategy);
     const yesShares = netShares(roundFills, 'YES');
     const noShares = netShares(roundFills, 'NO');
     return {
@@ -610,9 +675,10 @@ export class InMemoryStore {
     };
   }
 
-  private hasTrackedBuyOrderForFill(fill: FillRecord): boolean {
+  private hasTrackedBuyOrderForFill(fill: FillRecord, strategy: StrategyId): boolean {
     return this.orders.some((order) => (
       order.roundId === fill.roundId
+      && orderStrategy(order) === strategy
       && order.side === 'BUY'
       && order.status !== 'failed'
       && (
@@ -623,8 +689,26 @@ export class InMemoryStore {
     ));
   }
 
-  private hasTrackedBuyOrderForRound(roundId: string): boolean {
-    return this.orders.some((order) => order.roundId === roundId && order.side === 'BUY' && order.status !== 'failed');
+  private hasTrackedBuyOrderForRound(roundId: string, strategy: StrategyId): boolean {
+    return this.orders.some((order) => order.roundId === roundId && orderStrategy(order) === strategy && order.side === 'BUY' && order.status !== 'failed');
+  }
+
+  private fillWithStrategySource(fill: FillRecord): FillRecord {
+    if (fill.strategy && fill.strategyProfile) return fill;
+    const exact = fill.clobOrderId
+      ? this.orders.find((order) => order.clobOrderId === fill.clobOrderId)
+      : undefined;
+    const candidates = exact ? [exact] : this.orders.filter((order) => (
+      order.roundId === fill.roundId
+      && order.tokenId === fill.tokenId
+      && order.label === fill.label
+      && order.side === fill.side
+      && order.status !== 'failed'
+    ));
+    const strategies = new Set(candidates.map(orderStrategy));
+    if (strategies.size !== 1) return fill;
+    const strategy = [...strategies][0];
+    return { ...fill, strategy, strategyProfile: strategyProfileForStrategy(strategy) };
   }
 
   private clearSingleFillCooldown(): void {
@@ -690,6 +774,16 @@ function isSingleFillCooldownEventLike(value: unknown): value is SingleFillCoold
     && typeof item.category === 'string';
 }
 
+function isExperimentStopLike(value: unknown): value is ExperimentStopRecord {
+  if (!value || typeof value !== 'object') return false;
+  const item = value as Partial<ExperimentStopRecord>;
+  return typeof item.roundId === 'string'
+    && typeof item.stoppedAt === 'string'
+    && typeof item.reason === 'string'
+    && typeof item.yesShares === 'number'
+    && typeof item.noShares === 'number';
+}
+
 function normalizeCooldownPolicy(value: number | SingleFillCooldownPolicy): SingleFillCooldownPolicy {
   if (typeof value === 'number') {
     return {
@@ -714,14 +808,27 @@ function cooldownCategory(outcome: SingleFillHedgeOutcome | undefined): string {
 
 function matchingOrderFills(order: OrderRecord, fills: FillRecord[]): FillRecord[] {
   const exact = order.clobOrderId
-    ? fills.filter((fill) => fill.clobOrderId === order.clobOrderId)
+    ? fills.filter((fill) => fill.clobOrderId === order.clobOrderId && fillStrategy(fill) === orderStrategy(order))
     : [];
   if (exact.length) return exact;
   return fills.filter((fill) => (
     fill.roundId === order.roundId
     && fill.tokenId === order.tokenId
     && fill.side === order.side
+    && fillStrategy(fill) === orderStrategy(order)
   ));
+}
+
+function orderStrategy(order: Pick<OrderRecord, 'strategy'>): StrategyId {
+  return order.strategy || CLASSIC_ENTRY_STRATEGY;
+}
+
+function fillStrategy(fill: Pick<FillRecord, 'strategy'>): StrategyId {
+  return fill.strategy || CLASSIC_ENTRY_STRATEGY;
+}
+
+function strategyProfileForStrategy(strategy: StrategyId): StrategyProfile {
+  return strategy === EXPERIMENT_STRATEGY ? 'experiment_next_round' : 'classic';
 }
 
 function sum(values: number[]): number {

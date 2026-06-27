@@ -314,6 +314,10 @@ function orderMarketTitle(order: DashboardOrder): string {
   return order.marketTitle || derivedRoundTitle(order.roundId);
 }
 
+function strategySourceLabel(order: DashboardOrder): string {
+  return order.strategy || 'BTC5M_DUAL_45';
+}
+
 function orderFailureReason(order: DashboardOrder): string {
   if (order.error) return order.error;
   if (order.status === 'cancelled') return 'closed after round ended';
@@ -764,6 +768,13 @@ export function App() {
             value={state.runtime.status.toUpperCase()}
             detail={modeLabel(state.runtime.executionMode)}
             tone={state.runtime.executionMode === 'live' ? 'warn' : 'neutral'}
+          />
+          <Digest
+            icon={<Cpu size={16} />}
+            label="Strategy Profile"
+            value={state.runtime.activeStrategyProfile}
+            detail={state.runtime.experimentStoppedAt ? `${state.runtime.experimentStoppedReason || 'stopped'} / ${state.runtime.experimentStoppedRoundId || 'unknown round'}` : 'running selected profile'}
+            tone={state.runtime.activeStrategyProfile === 'experiment_next_round' ? 'warn' : 'neutral'}
           />
           <Digest
             icon={<Radio size={16} />}
@@ -1396,10 +1407,11 @@ export function App() {
               {activitySubTab === 'orders' && (
                 state.orders.length > 0 ? (
                   <>
-                    <DataTable headers={['Time (ET)', 'Market', 'Round ID', 'Outcome', 'Side', 'Price', 'Size', 'Status', 'Reason', 'Polymarket CLOB Order ID']}>
+                    <DataTable headers={['Time (ET)', 'Strategy', 'Market', 'Round ID', 'Outcome', 'Side', 'Price', 'Size', 'Status', 'Reason', 'Polymarket CLOB Order ID']}>
                       {ordersPagination.pageRows.map((order) => (
                         <tr key={order.id}>
                           <td className="mono">{formatEtTime(order.createdAt)}</td>
+                          <td className="mono" style={{ fontSize: '11px' }}>{strategySourceLabel(order)}</td>
                           <td>
                             <span className="marketTitle">{orderMarketTitle(order)}</span>
                           </td>

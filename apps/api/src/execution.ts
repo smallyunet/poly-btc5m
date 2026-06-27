@@ -79,6 +79,8 @@ async function executeOneIntent(params: ExecuteIntentsParams, intent: TradeInten
     const order: OrderRecord = {
       id: `order-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
       intentId: intent.id,
+      strategy: intent.strategy,
+      strategyProfile: strategyProfileForIntent(intent),
       executionKey: gate.executionKey,
       clobOrderId: posted.orderId,
       roundId: intent.roundId,
@@ -215,6 +217,8 @@ function localOrder(snapshot: StateSnapshot, intent: TradeIntent): OrderRecord {
   return {
     id: `local-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
     intentId: intent.id,
+    strategy: intent.strategy,
+    strategyProfile: strategyProfileForIntent(intent),
     executionKey: [intent.roundId, intent.strategy, intent.tokenId, intent.side].join(':'),
     roundId: intent.roundId,
     eventSlug: snapshot.round.eventSlug,
@@ -248,4 +252,8 @@ function roundTokens(snapshot: StateSnapshot): Set<string> {
 
 function roundDownShares(shares: number): number {
   return Math.floor(shares * 100) / 100;
+}
+
+function strategyProfileForIntent(intent: TradeIntent): OrderRecord['strategyProfile'] {
+  return intent.strategy === 'BTC5M_NEXT_ROUND_50_49_STOP_ON_SINGLE' ? 'experiment_next_round' : 'classic';
 }

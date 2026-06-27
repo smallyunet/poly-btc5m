@@ -146,6 +146,39 @@ test('does not start cooldown for external fills without tracked strategy orders
   assert.equal(store.getActiveEntryCooldown(nowMs), null);
 });
 
+test('stops experimental profile after final experimental single fill', () => {
+  const nowMs = Date.now();
+  const roundId = roundIdFromStart(nowMs - 7 * 60_000);
+  const store = new InMemoryStore('live', 2_000, { persistencePath: false }, 'experiment_next_round');
+
+  store.recordOrder(order(roundId, 'YES', {
+    strategy: 'BTC5M_NEXT_ROUND_50_49_STOP_ON_SINGLE',
+    strategyProfile: 'experiment_next_round',
+  }));
+  store.recordFills([fill(roundId, 'YES')]);
+
+  const stop = store.maybeStopExperimentOnSingle([], nowMs);
+
+  assert.equal(stop?.roundId, roundId);
+  assert.equal(stop?.reason, 'EXPERIMENT_SINGLE_FILL');
+  assert.equal(store.getRuntime().experimentStoppedRoundId, roundId);
+});
+
+test('experimental single fill does not trigger classic cooldown', () => {
+  const nowMs = Date.now();
+  const roundId = roundIdFromStart(nowMs - 7 * 60_000);
+  const store = new InMemoryStore('live', 2_000, { persistencePath: false }, 'experiment_next_round');
+
+  store.recordOrder(order(roundId, 'NO', {
+    strategy: 'BTC5M_NEXT_ROUND_50_49_STOP_ON_SINGLE',
+    strategyProfile: 'experiment_next_round',
+  }));
+  const newFills = store.recordFills([fill(roundId, 'NO')]);
+
+  assert.equal(store.maybeStartSingleFillCooldown(newFills, 4 * 60 * 60_000, nowMs), null);
+  assert.equal(store.getActiveEntryCooldown(nowMs), null);
+});
+
 test('clears legacy cooldown records that were not created from final review', () => {
   const nowMs = Date.now();
   const roundId = roundIdFromStart(nowMs - 7 * 60_000);

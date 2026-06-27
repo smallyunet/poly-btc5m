@@ -6,7 +6,14 @@ export type RoundPhase = 'observing' | 'decision' | 'posting' | 'monitoring' | '
 
 export type Regime = 'CHOP' | 'TREND' | 'LOW_ACTIVITY' | 'UNKNOWN';
 
-export type StrategyId = 'BTC5M_DUAL_45' | 'BTC5M_SINGLE_FILL_HEDGE' | 'BTC5M_SINGLE_FILL_PROFIT_EXIT' | 'BTC5M_SINGLE_EXIT';
+export type StrategyProfile = 'classic' | 'experiment_next_round';
+
+export type StrategyId =
+  | 'BTC5M_DUAL_45'
+  | 'BTC5M_NEXT_ROUND_50_49_STOP_ON_SINGLE'
+  | 'BTC5M_SINGLE_FILL_HEDGE'
+  | 'BTC5M_SINGLE_FILL_PROFIT_EXIT'
+  | 'BTC5M_SINGLE_EXIT';
 
 export type BotRuntimeStatus = {
   status: 'running' | 'degraded';
@@ -17,8 +24,12 @@ export type BotRuntimeStatus = {
   tickIntervalMs: number;
   version: string;
   dockerReady: boolean;
+  activeStrategyProfile: StrategyProfile;
   entryCooldownUntil?: string;
   entryCooldownReason?: string;
+  experimentStoppedAt?: string;
+  experimentStoppedReason?: string;
+  experimentStoppedRoundId?: string;
 };
 
 export type BtcRoundConfig = {
@@ -217,6 +228,8 @@ export type StrategyRule = {
 export type OrderRecord = {
   id: string;
   intentId: string;
+  strategy?: StrategyId;
+  strategyProfile?: StrategyProfile;
   executionKey?: string;
   clobOrderId?: string;
   roundId: string;
@@ -239,6 +252,8 @@ export type OrderRecord = {
 
 export type FillRecord = {
   id: string;
+  strategy?: StrategyId;
+  strategyProfile?: StrategyProfile;
   roundId: string;
   eventSlug?: string;
   marketTitle?: string;

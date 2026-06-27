@@ -1,12 +1,13 @@
 import 'dotenv/config';
 import path from 'node:path';
 
-import { btcMarketConfigSchema, type BtcMarketConfig, type ExecutionMode } from '../../../packages/shared/src';
+import { btcMarketConfigSchema, type BtcMarketConfig, type ExecutionMode, type StrategyProfile } from '../../../packages/shared/src';
 
 export type AppConfig = {
   port: number;
   dashboardInternalApiKey?: string;
   executionMode: ExecutionMode;
+  activeStrategyProfile: StrategyProfile;
   clobApiUrl: string;
   gammaApiUrl: string;
   dataApiUrl: string;
@@ -73,6 +74,10 @@ export type AppConfig = {
   singleFillProfitExitMaxOrderbookAgeMs: number;
   singleFillProfitExitMinSecondsToEnd: number;
   singleFillProfitExitMaxSecondsToEnd: number;
+  experimentNextRoundUpLimitPrice: number;
+  experimentNextRoundDownLimitPrice: number;
+  experimentNextRoundSharesPerSide: number;
+  experimentStopOnSingle: boolean;
   marketConfig: BtcMarketConfig;
 };
 
@@ -82,6 +87,7 @@ export function loadConfig(): AppConfig {
     port: Number(process.env.PORT || 8788),
     dashboardInternalApiKey: process.env.DASHBOARD_INTERNAL_API_KEY,
     executionMode: parseExecutionMode(process.env.EXECUTION_MODE),
+    activeStrategyProfile: parseStrategyProfile(process.env.ACTIVE_STRATEGY_PROFILE),
     clobApiUrl: process.env.POLYMARKET_CLOB_API_URL || 'https://clob.polymarket.com',
     gammaApiUrl: process.env.POLYMARKET_GAMMA_API_URL || 'https://gamma-api.polymarket.com',
     dataApiUrl: process.env.POLYMARKET_DATA_API_URL || 'https://data-api.polymarket.com',
@@ -148,6 +154,10 @@ export function loadConfig(): AppConfig {
     singleFillProfitExitMaxOrderbookAgeMs: parsePositiveInteger(process.env.SINGLE_FILL_PROFIT_EXIT_MAX_ORDERBOOK_AGE_MS, 1_000),
     singleFillProfitExitMinSecondsToEnd: parsePositiveInteger(process.env.SINGLE_FILL_PROFIT_EXIT_MIN_SECONDS_TO_END, 20),
     singleFillProfitExitMaxSecondsToEnd: parsePositiveInteger(process.env.SINGLE_FILL_PROFIT_EXIT_MAX_SECONDS_TO_END, 240),
+    experimentNextRoundUpLimitPrice: numberEnv('EXPERIMENT_NEXT_ROUND_UP_LIMIT_PRICE', 0.5),
+    experimentNextRoundDownLimitPrice: numberEnv('EXPERIMENT_NEXT_ROUND_DOWN_LIMIT_PRICE', 0.49),
+    experimentNextRoundSharesPerSide: numberEnv('EXPERIMENT_NEXT_ROUND_SHARES_PER_SIDE', orderSharesPerSide),
+    experimentStopOnSingle: booleanEnv('EXPERIMENT_STOP_ON_SINGLE', true),
     marketConfig: loadMarketConfig(),
   };
 }
@@ -164,6 +174,13 @@ function loadMarketConfig(): BtcMarketConfig {
 
 function parseExecutionMode(value: string | undefined): ExecutionMode {
   return value === 'live' ? 'live' : 'monitor';
+}
+
+function parseStrategyProfile(value: string | undefined): StrategyProfile {
+  const normalized = value?.trim();
+  if (!normalized || normalized === 'classic') return 'classic';
+  if (normalized === 'experiment_next_round') return 'experiment_next_round';
+  throw new Error(`ACTIVE_STRATEGY_PROFILE must be "classic" or "experiment_next_round", got "${value}".`);
 }
 
 function parsePositiveInteger(value: string | undefined, fallback: number): number {

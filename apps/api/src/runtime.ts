@@ -1,5 +1,5 @@
-import type { BtcRoundConfig, FillRecord, PositionSnapshot, RoundPhase, RoundSnapshot, SettlementRecord, StateSnapshot, StrategyCheck, TradeIntent } from '../../../packages/shared/src';
-import { classifyRegime, evaluateEntry, evaluateExit, type StrategyRiskConfig } from '../../../packages/strategy/src';
+import type { BtcRoundConfig, FillRecord, PositionSnapshot, RoundPhase, RoundSnapshot, SettlementRecord, StateSnapshot, StrategyCheck, StrategyCondition, TradeIntent } from '../../../packages/shared/src';
+import { classifyRegime, evaluateEntry, evaluateExit, type StrategyEvaluation, type StrategyRiskConfig } from '../../../packages/strategy/src';
 import { PolymarketAdapter, type FillTarget } from '../../../packages/polymarket/src';
 import type { AppConfig } from './config';
 import { activeHedgeWindowSeconds, buildSingleFillHedgeCheck, executeSingleFillHedges, planSingleFillHedge } from './hedge';
@@ -12,16 +12,18 @@ import type { InMemoryStore } from './store';
 
 export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, data: MarketDataService, adapter: PolymarketAdapter, discovery: Btc5mRoundDiscovery, participationService: ParticipationService): Promise<StateSnapshot> {
   const diagnostics: string[] = [];
+  store.setActiveStrategyProfile(appConfig.activeStrategyProfile);
+  const classicActive = appConfig.activeStrategyProfile === 'classic';
   const discovered = await discovery.discover({
     latestPrice: data.latestPrice(),
     persistedStrike: (roundId) => store.getRoundStrike(roundId),
   });
   diagnostics.push(...discovered.diagnostics);
   const round = captureOpeningStrike(discovered.round, store, data.latestPrice());
-  const hedgeWatchTokenIds = appConfig.singleFillHedgeEnabled
+  const hedgeWatchTokenIds = classicActive && appConfig.singleFillHedgeEnabled
     ? store.hedgeWatchTokenIds(activeHedgeWindowSeconds(appConfig), appConfig.singleFillHedgeMinSecondsToEnd)
     : [];
-  const profitExitWatchTokenIds = appConfig.singleFillProfitExitEnabled
+  const profitExitWatchTokenIds = classicActive && appConfig.singleFillProfitExitEnabled
     ? store.profitExitWatchTokenIds(appConfig.singleFillProfitExitMaxSecondsToEnd, appConfig.singleFillProfitExitMinSecondsToEnd)
     : [];
   data.syncClobRound(round, [...hedgeWatchTokenIds, ...profitExitWatchTokenIds]);
@@ -50,29 +52,41 @@ export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, dat
   const activeCooldown = store.getActiveEntryCooldown();
   const risk = riskConfig(appConfig, store.getRuntime().executionMode !== 'live', activeCooldown?.expiresAt, activeCooldown ? `single fill on ${activeCooldown.roundId}` : undefined);
   const snapshot: StateSnapshot = { ...baseSnapshot, regime: classifyRegime(baseSnapshot, risk) };
-  const evaluatedEntry = evaluateEntry(snapshot, risk);
-  const entrySignalCount = store.recordEntrySignal(snapshot.round.id, evaluatedEntry.intents.length > 0);
-  const entry = applyEntryConfirmation(evaluatedEntry, entrySignalCount, appConfig.entryConfirmTicks);
+  const evaluatedEntry = classicActive ? evaluateEntry(snapshot, risk) : evaluateExperimentEntry(snapshot, appConfig, store);
+  const entry = classicActive
+    ? applyEntryConfirmation(evaluatedEntry, store.recordEntrySignal(snapshot.round.id, evaluatedEntry.intents.length > 0), appConfig.entryConfirmTicks)
+    : evaluatedEntry;
   const intents = [...entry.intents];
   store.recordIntents([...intents, ...entry.rejected]);
   const executionDiagnostics = await executeLiveIntents({ appConfig, adapter, store, snapshot, intents, risk });
   await reconcileFills(appConfig, adapter, store, roundSnapshot, tokenLabels, diagnostics);
   await reconcileTrackedOrders(appConfig, adapter, store, diagnostics);
-  const hedgeCandidates = appConfig.singleFillHedgeEnabled
+  const maturedExperimentStop = appConfig.experimentStopOnSingle ? store.maybeStopExperimentOnSingle([]) : null;
+  if (maturedExperimentStop) {
+    store.recordRuntimeLog({
+      level: 'warn',
+      source: 'execution',
+      message: `Experimental profile stopped after final single-sided fill on ${maturedExperimentStop.roundId}.`,
+      details: maturedExperimentStop,
+    });
+  }
+  const hedgeCandidates = classicActive && appConfig.singleFillHedgeEnabled
     ? store.singleFillHedgeCandidates(activeHedgeWindowSeconds(appConfig), appConfig.singleFillHedgeMinSecondsToEnd)
     : [];
-  const profitExitCandidates = appConfig.singleFillProfitExitEnabled
+  const profitExitCandidates = classicActive && appConfig.singleFillProfitExitEnabled
     ? store.singleFillProfitExitCandidates(appConfig.singleFillProfitExitMaxSecondsToEnd, appConfig.singleFillProfitExitMinSecondsToEnd)
     : [];
   const hedgeOrderbooks = data.refreshOrderbooksForTokenIds([
     ...hedgeCandidates.flatMap((candidate) => [candidate.yesTokenId, candidate.noTokenId]),
     ...profitExitCandidates.flatMap((candidate) => [candidate.yesTokenId, candidate.noTokenId]),
   ]);
-  const profitExitDiagnostics = await executeSingleFillProfitExits({ appConfig, adapter, store, candidates: profitExitCandidates, orderbooks: hedgeOrderbooks });
-  const hedgeDiagnostics = await executeSingleFillHedges({ appConfig, adapter, store, candidates: hedgeCandidates, orderbooks: hedgeOrderbooks });
-  const exit = evaluateExit(snapshot, positions, risk, { orders: store.roundOrders(snapshot.round.id), fills: store.roundFills(snapshot.round.id) });
-  const hedgeCheck = buildCurrentRoundHedgeCheck(appConfig, store, snapshot, [...orderbooks, ...hedgeOrderbooks]);
-  const profitExitCheck = buildCurrentRoundProfitExitCheck(appConfig, store, snapshot, [...orderbooks, ...hedgeOrderbooks]);
+  const profitExitDiagnostics = classicActive ? await executeSingleFillProfitExits({ appConfig, adapter, store, candidates: profitExitCandidates, orderbooks: hedgeOrderbooks }) : [];
+  const hedgeDiagnostics = classicActive ? await executeSingleFillHedges({ appConfig, adapter, store, candidates: hedgeCandidates, orderbooks: hedgeOrderbooks }) : [];
+  const exit = classicActive
+    ? evaluateExit(snapshot, positions, risk, { orders: store.roundOrders(snapshot.round.id, 'BTC5M_DUAL_45'), fills: store.roundFillsByStrategy(snapshot.round.id, 'BTC5M_DUAL_45') })
+    : disabledExperimentExitCheck(snapshot);
+  const hedgeCheck = classicActive ? buildCurrentRoundHedgeCheck(appConfig, store, snapshot, [...orderbooks, ...hedgeOrderbooks]) : disabledClassicCheck('BTC5M_SINGLE_FILL_HEDGE', 'BTC 5m Single-Fill Hedge', 'Disabled while experimental profile is active.');
+  const profitExitCheck = classicActive ? buildCurrentRoundProfitExitCheck(appConfig, store, snapshot, [...orderbooks, ...hedgeOrderbooks]) : disabledClassicCheck('BTC5M_SINGLE_FILL_PROFIT_EXIT', 'BTC 5m Single-Fill Profit Exit', 'Disabled while experimental profile is active.');
   await reconcileSettlements(appConfig, store, diagnostics);
   maybeRecordEstimatedSettlement(store, snapshot);
   const finalSnapshot = { ...snapshot, diagnostics: [...diagnostics, ...entry.diagnostics, ...executionDiagnostics, ...hedgeDiagnostics, ...profitExitDiagnostics] };
@@ -107,6 +121,105 @@ function applyEntryConfirmation(entry: ReturnType<typeof evaluateEntry>, signalC
   return { ...entry, intents: [], rejected: [...entry.rejected, ...rejected], checks: [blockedCheck] };
 }
 
+function evaluateExperimentEntry(snapshot: StateSnapshot, appConfig: AppConfig, store: InMemoryStore): StrategyEvaluation {
+  const reasons: string[] = [];
+  const stopped = store.getExperimentStop();
+  const inDecisionWindow = snapshot.round.secondsToStart > 0;
+  const shares = roundShares(appConfig.experimentNextRoundSharesPerSide);
+  const upPrice = roundPrice(appConfig.experimentNextRoundUpLimitPrice);
+  const downPrice = roundPrice(appConfig.experimentNextRoundDownLimitPrice);
+  const yesQuote = snapshot.orderbooks.find((quote) => quote.tokenId === snapshot.round.yesTokenId);
+  const noQuote = snapshot.orderbooks.find((quote) => quote.tokenId === snapshot.round.noTokenId);
+  const yesReady = buyQuoteReady(yesQuote, appConfig.maxOrderbookAgeSeconds);
+  const noReady = buyQuoteReady(noQuote, appConfig.maxOrderbookAgeSeconds);
+
+  if (stopped) reasons.push('EXPERIMENT_STOPPED_ON_SINGLE');
+  if (!inDecisionWindow) reasons.push('ROUND_ALREADY_STARTED');
+  if (!Number.isFinite(upPrice) || upPrice <= 0 || upPrice >= 1) reasons.push('INVALID_UP_LIMIT_PRICE');
+  if (!Number.isFinite(downPrice) || downPrice <= 0 || downPrice >= 1) reasons.push('INVALID_DOWN_LIMIT_PRICE');
+  if (shares < appConfig.minOrderShares) reasons.push('ORDER_SHARES_TOO_SMALL');
+  if (!yesReady) reasons.push('UP_ORDERBOOK_NOT_TRADABLE');
+  if (!noReady) reasons.push('DOWN_ORDERBOOK_NOT_TRADABLE');
+
+  const base = [
+    experimentIntent(snapshot, 'YES', snapshot.round.yesTokenId, shares, upPrice),
+    experimentIntent(snapshot, 'NO', snapshot.round.noTokenId, shares, downPrice),
+  ];
+  const rejected = reasons.length ? base.map((intent) => ({ ...intent, status: 'rejected' as const, rejectionReason: reasons.join(',') })) : [];
+  const intents = reasons.length ? [] : base;
+  const check: StrategyCheck = {
+    strategy: 'BTC5M_NEXT_ROUND_50_49_STOP_ON_SINGLE',
+    title: 'BTC 5m Experimental Next-Round 50/49',
+    status: reasons.length ? 'blocked' : 'eligible',
+    summary: 'Posts fixed next-round UP and DOWN BUY limits and stops after a final single-sided experimental fill.',
+    reason: reasons.length ? reasons.join(', ') : `Experimental entry eligible: UP ${upPrice.toFixed(3)} / DOWN ${downPrice.toFixed(3)} / ${shares.toFixed(2)} shares.`,
+    blockers: reasons,
+    amountUsd: shares * (upPrice + downPrice),
+    limitPrice: Math.max(upPrice, downPrice),
+    conditions: [
+      condition('Active profile', appConfig.activeStrategyProfile === 'experiment_next_round', appConfig.activeStrategyProfile),
+      condition('Experiment not stopped', !stopped, stopped ? `${stopped.reason} on ${stopped.roundId}` : 'active'),
+      condition('Round before start', inDecisionWindow, `${snapshot.round.secondsToStart.toFixed(1)}s to start`),
+      condition('UP limit price', upPrice > 0 && upPrice < 1, upPrice.toFixed(3)),
+      condition('DOWN limit price', downPrice > 0 && downPrice < 1, downPrice.toFixed(3)),
+      condition('Shares per side', shares >= appConfig.minOrderShares, `${shares.toFixed(2)} / min ${appConfig.minOrderShares.toFixed(2)}`),
+      condition('UP book tradable', yesReady, quoteAgeLabel(yesQuote)),
+      condition('DOWN book tradable', noReady, quoteAgeLabel(noQuote)),
+      condition('Profit exit disabled', true, 'no SELL generated by experimental profile'),
+      condition('Hedge disabled', true, 'no single-fill hedge generated by experimental profile'),
+    ],
+  };
+  return { intents, rejected, diagnostics: [], checks: [check] };
+}
+
+function experimentIntent(snapshot: StateSnapshot, label: 'YES' | 'NO', tokenId: string, shares: number, limitPrice: number): TradeIntent {
+  return {
+    id: `experiment-intent-${Date.now()}-${label}-${Math.random().toString(16).slice(2, 8)}`,
+    strategy: 'BTC5M_NEXT_ROUND_50_49_STOP_ON_SINGLE',
+    roundId: snapshot.round.id,
+    tokenId,
+    label,
+    side: 'BUY',
+    orderType: 'LIMIT',
+    limitPrice,
+    shares,
+    reason: `Experimental fixed next-round ${label === 'YES' ? 'UP' : 'DOWN'} entry for ${snapshot.round.id}.`,
+    status: 'generated',
+    ttlSeconds: Math.max(1, Math.ceil(snapshot.round.secondsToStart)),
+    createdAt: snapshot.capturedAt,
+  };
+}
+
+function disabledExperimentExitCheck(snapshot: StateSnapshot): StrategyEvaluation {
+  const check: StrategyCheck = {
+    strategy: 'BTC5M_SINGLE_EXIT',
+    title: 'BTC 5m Experimental Exit Policy',
+    status: 'not-applicable',
+    summary: 'Experimental profile has no profit exit, hedge, sell, or rebalance path.',
+    reason: 'No exit intent is generated while the experimental profile is active.',
+    blockers: [],
+    conditions: [
+      condition('Experimental round', true, snapshot.round.id),
+      condition('SELL generation', true, 'disabled'),
+      condition('Profit exit', true, 'disabled'),
+      condition('Single-fill hedge', true, 'disabled'),
+    ],
+  };
+  return { intents: [], rejected: [], diagnostics: [], checks: [check] };
+}
+
+function disabledClassicCheck(strategy: StrategyCheck['strategy'], title: string, reason: string): StrategyCheck {
+  return {
+    strategy,
+    title,
+    status: 'not-applicable',
+    summary: reason,
+    reason,
+    blockers: [],
+    conditions: [condition('Active profile', true, 'experiment_next_round')],
+  };
+}
+
 function buildCurrentRoundHedgeCheck(appConfig: AppConfig, store: InMemoryStore, snapshot: StateSnapshot, orderbooks: StateSnapshot['orderbooks']) {
   const candidate = {
     roundId: snapshot.round.id,
@@ -119,7 +232,7 @@ function buildCurrentRoundHedgeCheck(appConfig: AppConfig, store: InMemoryStore,
     yesTokenId: snapshot.round.yesTokenId,
     noTokenId: snapshot.round.noTokenId,
   };
-  const orders = store.roundOrders(snapshot.round.id);
+  const orders = store.roundOrders(snapshot.round.id, 'BTC5M_DUAL_45');
   const plan = planSingleFillHedge({ candidate, orders, orderbooks, appConfig });
   const executionKey = plan.ok ? [plan.intent.roundId, plan.intent.strategy, plan.intent.tokenId, plan.intent.side].join(':') : undefined;
   return buildSingleFillHedgeCheck({
@@ -146,7 +259,7 @@ function buildCurrentRoundProfitExitCheck(appConfig: AppConfig, store: InMemoryS
     yesTokenId: snapshot.round.yesTokenId,
     noTokenId: snapshot.round.noTokenId,
   };
-  const orders = store.roundOrders(snapshot.round.id);
+  const orders = store.roundOrders(snapshot.round.id, 'BTC5M_DUAL_45');
   const plan = planSingleFillProfitExit({ candidate, orders, orderbooks, appConfig });
   const executionKey = plan.ok ? [plan.intent.roundId, plan.intent.strategy, plan.intent.tokenId, plan.intent.side].join(':') : undefined;
   return buildSingleFillProfitExitCheck({
@@ -262,6 +375,16 @@ async function reconcileTrackedOrders(appConfig: AppConfig, adapter: PolymarketA
 
 function recordFillsAndMaybeCooldown(appConfig: AppConfig, store: InMemoryStore, fills: FillRecord[]): void {
   const newFills = store.recordFills(fills);
+  const experimentStop = appConfig.experimentStopOnSingle ? store.maybeStopExperimentOnSingle(newFills) : null;
+  if (experimentStop) {
+    store.recordRuntimeLog({
+      level: 'warn',
+      source: 'execution',
+      message: `Experimental profile stopped after single-sided fill on ${experimentStop.roundId}.`,
+      details: experimentStop,
+    });
+  }
+  if (appConfig.activeStrategyProfile !== 'classic') return;
   const cooldown = store.maybeStartSingleFillCooldown(newFills, {
     baseMs: appConfig.singleFillCooldownBaseMs,
     priceCapMs: appConfig.singleFillCooldownPriceCapMs,
@@ -402,6 +525,31 @@ function riskConfig(appConfig: AppConfig, dryRun: boolean, entryCooldownUntil?: 
     entryCooldownUntil,
     entryCooldownReason,
   };
+}
+
+function buyQuoteReady(quote: StateSnapshot['orderbooks'][number] | undefined, maxAgeSeconds: number): boolean {
+  if (!quote || quote.source === 'mock' || quote.bestAsk == null) return false;
+  const ageMs = Date.now() - new Date(quote.updatedAt).getTime();
+  return Number.isFinite(ageMs) && ageMs <= maxAgeSeconds * 1000;
+}
+
+function quoteAgeLabel(quote: StateSnapshot['orderbooks'][number] | undefined): string {
+  if (!quote) return 'missing';
+  const ageSeconds = (Date.now() - new Date(quote.updatedAt).getTime()) / 1000;
+  const ask = quote.bestAsk == null ? ', ask missing' : '';
+  return `${quote.source}, ${Number.isFinite(ageSeconds) ? ageSeconds.toFixed(1) : 'unknown'}s old${ask}`;
+}
+
+function condition(label: string, passed: boolean, actual: string): StrategyCondition {
+  return { label, passed, actual };
+}
+
+function roundShares(value: number): number {
+  return Math.floor(value * 100) / 100;
+}
+
+function roundPrice(value: number): number {
+  return Math.round(value * 1000) / 1000;
 }
 
 function sum(values: number[]): number {

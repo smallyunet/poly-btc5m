@@ -18,6 +18,7 @@ type ExecuteHedgesParams = {
 };
 
 const HEDGE_STRATEGY = 'BTC5M_SINGLE_FILL_HEDGE';
+const CLASSIC_ENTRY_STRATEGY = 'BTC5M_DUAL_45';
 const FAILED_HEDGE_COOLDOWN_MS = 60_000;
 const MIN_MARKETABLE_BUY_NOTIONAL_USD = 1;
 
@@ -208,9 +209,9 @@ export function buildSingleFillHedgeCheck(params: {
 }
 
 async function executeOneHedge(params: ExecuteHedgesParams, candidate: SingleFillHedgeCandidate): Promise<string | null> {
-  const orders = params.store.roundOrders(candidate.roundId);
+  const orders = params.store.roundOrders(candidate.roundId, CLASSIC_ENTRY_STRATEGY);
   await reconcileCandidateFills(params, orders);
-  const plan = planSingleFillHedge({ candidate, orders: params.store.roundOrders(candidate.roundId), orderbooks: params.orderbooks, appConfig: params.appConfig });
+  const plan = planSingleFillHedge({ candidate, orders: params.store.roundOrders(candidate.roundId, CLASSIC_ENTRY_STRATEGY), orderbooks: params.orderbooks, appConfig: params.appConfig });
 
   if (!plan.ok) {
     params.store.recordSingleFillHedgeOutcome({
@@ -258,8 +259,8 @@ async function executeOneHedge(params: ExecuteHedgesParams, candidate: SingleFil
     return `Single-fill hedge blocked for ${plan.intent.label}: ${cancelResult.reason}.`;
   }
 
-  await reconcileCandidateFills(params, params.store.roundOrders(candidate.roundId));
-  const finalPlan = planSingleFillHedge({ candidate, orders: params.store.roundOrders(candidate.roundId), orderbooks: params.orderbooks, appConfig: params.appConfig });
+  await reconcileCandidateFills(params, params.store.roundOrders(candidate.roundId, CLASSIC_ENTRY_STRATEGY));
+  const finalPlan = planSingleFillHedge({ candidate, orders: params.store.roundOrders(candidate.roundId, CLASSIC_ENTRY_STRATEGY), orderbooks: params.orderbooks, appConfig: params.appConfig });
   if (!finalPlan.ok) {
     params.store.recordSingleFillHedgeOutcome({
       roundId: candidate.roundId,
@@ -367,7 +368,7 @@ async function reconcileCandidateFills(params: ExecuteHedgesParams, orders: Orde
 }
 
 async function cancelMissingSideOrders(params: ExecuteHedgesParams, roundId: string, label: 'YES' | 'NO'): Promise<{ ok: true } | { ok: false; reason: string }> {
-  const orders = params.store.roundOrders(roundId).filter((order) => (
+  const orders = params.store.roundOrders(roundId, CLASSIC_ENTRY_STRATEGY).filter((order) => (
     order.label === label
     && order.side === 'BUY'
     && (order.status === 'posted' || order.status === 'partially_filled')
@@ -450,6 +451,8 @@ function localHedgeOrder(candidate: SingleFillHedgeCandidate, intent: TradeInten
   return {
     id: `local-hedge-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
     intentId: intent.id,
+    strategy: intent.strategy,
+    strategyProfile: 'classic',
     executionKey,
     roundId: intent.roundId,
     eventSlug: candidate.eventSlug,
