@@ -4,9 +4,9 @@
 
 该策略**不**交易 BTC 方向。
 
-worker 主要面向**下一轮 BTC 5 分钟市场**。它可以在轮次开始前同时挂出 YES/NO 两侧 BUY 限价单；常规入场单会作为 GTD limit order 提交，并在轮次开始时间过期。轮次开始后，默认仍然是 settlement-only；两个明确的 single-fill 风控可以在开始后动作：`BTC5M_SINGLE_FILL_PROFIT_EXIT` 可以在已成交侧已经有利润时取消缺失侧 BUY，并用 capped FAK SELL limit 卖出已成交侧；`BTC5M_SINGLE_FILL_HEDGE` 可以在最后窗口取消缺失侧旧限价单，并在价格上限内用 aggressive FAK BUY LIMIT 补买缺失侧。它不会发送无上限 market order。
+worker 主要面向**下一轮 BTC 5 分钟市场**。它可以在轮次开始前同时挂出 YES/NO 两侧 BUY 限价单；常规入场单会作为 GTD limit order 提交，并在轮次开始时间过期。轮次开始后，默认仍然是 settlement-only；两个明确的 single-fill 风控可以在开始后动作：`BTC5M_SINGLE_FILL_PROFIT_EXIT` 可以在已成交侧已经有利润时取消缺失侧 BUY，并用 capped FAK SELL limit 卖出已成交侧；`BTC5M_SINGLE_FILL_HEDGE` 可以用两阶段规则取消缺失侧旧限价单，并在价格/成本上限内用 aggressive FAK BUY LIMIT 补买缺失侧。它不会发送无上限 market order。
 
-本地 `ttlSeconds` 只用于本地 intent/order 去重窗口。交易所层面的订单生命周期单独控制：常规入场使用在轮次开始时间过期的 GTD，profit-exit 和最终窗口 hedge 使用 FAK，未成交剩余会立即取消。
+本地 `ttlSeconds` 只用于本地 intent/order 去重窗口。交易所层面的订单生命周期单独控制：常规入场使用在轮次开始时间过期的 GTD，profit-exit 和 hedge 使用 FAK，未成交剩余会立即取消。
 
 ---
 
@@ -99,18 +99,23 @@ SELL_DISABLED_SETTLEMENT_ONLY
 
 独立的 profit-exit executor 是唯一允许的开始后 SELL 路径。
 
-最后窗口单侧补单使用独立时间门槛：
+单侧补单使用两阶段时间门槛：
 
 ```text
-secondsToEnd <= SINGLE_FILL_HEDGE_WINDOW_SECONDS
+secondsToEnd <= SINGLE_FILL_EARLY_HEDGE_WINDOW_SECONDS
 secondsToEnd > SINGLE_FILL_HEDGE_MIN_SECONDS_TO_END
 ```
+
+早期阶段只在 pair cost 接近保本时执行；最终阶段使用更宽的最终风控上限：
 
 当前默认值：
 
 ```text
+SINGLE_FILL_EARLY_HEDGE_WINDOW_SECONDS=60
+SINGLE_FILL_EARLY_HEDGE_MAX_PAIR_COST=1.02
 SINGLE_FILL_HEDGE_WINDOW_SECONDS=30
 SINGLE_FILL_HEDGE_MIN_SECONDS_TO_END=5
+SINGLE_FILL_HEDGE_MAX_PAIR_COST=1.10
 ```
 
 ---
@@ -565,11 +570,14 @@ round is running and inside the hedge window
 one BUY side exceeds the other side by at least MIN_ORDER_SHARES
 missing-side book is live/fresh
 missing-side bestAsk <= SINGLE_FILL_HEDGE_MAX_PRICE
-dominant average fill price + hedge limit <= SINGLE_FILL_HEDGE_MAX_PAIR_COST
+if secondsToEnd > SINGLE_FILL_HEDGE_WINDOW_SECONDS:
+  dominant average fill price + hedge limit <= SINGLE_FILL_EARLY_HEDGE_MAX_PAIR_COST
+else:
+  dominant average fill price + hedge limit <= SINGLE_FILL_HEDGE_MAX_PAIR_COST
 no recent local hedge duplicate exists
 ```
 
-每个最终窗口内的 hedge candidate 都会记录结构化 outcome。无论是 blocked、failed 还是 posted，dashboard 都应能看到结果；重复订单保护和短失败冷却也会记录明确 outcome，避免 final single-fill 轮次在页面上没有原因。
+每个 hedge candidate 都会记录结构化 outcome。无论是 blocked、failed 还是 posted，dashboard 都应能看到结果；重复订单保护和短失败冷却也会记录明确 outcome，避免 final single-fill 轮次在页面上没有原因。
 
 补单价格不是 market order，而是 capped aggressive FAK limit：
 
@@ -597,13 +605,14 @@ hedgeLimitPrice = min(bestAsk + SINGLE_FILL_HEDGE_PRICE_OFFSET, SINGLE_FILL_HEDG
 
 取消缺失侧 BUY 并再次对账后，worker 会对已成交侧发送 FAK SELL LIMIT。如果 bid 跌破配置底线，则跳过卖出，single 敞口继续交给 hedge/final review 路径处理。
 
-第二个例外是最后窗口单侧补单风控。触发条件：
+第二个例外是两阶段单侧补单风控。触发条件：
 
-- 当前轮次已开始且进入 `SINGLE_FILL_HEDGE_WINDOW_SECONDS`
+- 当前轮次已开始且进入 `SINGLE_FILL_EARLY_HEDGE_WINDOW_SECONDS`
 - 距离结束仍大于 `SINGLE_FILL_HEDGE_MIN_SECONDS_TO_END`
 - 一侧 BUY 成交 shares 明显大于另一侧
 - 缺失侧 live best ask 不超过 `SINGLE_FILL_HEDGE_MAX_PRICE`
-- 已成交侧均价加补单限价不超过 `SINGLE_FILL_HEDGE_MAX_PAIR_COST`
+- 在最终 hedge 窗口外，已成交侧均价加补单限价不超过 `SINGLE_FILL_EARLY_HEDGE_MAX_PAIR_COST`
+- 在最终 hedge 窗口内，已成交侧均价加补单限价不超过 `SINGLE_FILL_HEDGE_MAX_PAIR_COST`
 
 触发后，worker 会：
 
@@ -664,7 +673,7 @@ p=0.46 => win +0.54, lose -0.46
 
 这是策略的主要风险。动态定价的设计是：CHOP 分数较弱时使用更低价格，只有在 CHOP 信号更强时才提高价格。
 
-如果最后窗口补入缺失侧，结果变为：
+如果两阶段 hedge 补入缺失侧，结果变为：
 
 ```text
 hedgedPnlPerShare = 1 - originalAvgPrice - hedgeLimitPrice
@@ -685,7 +694,7 @@ no hedge and original side loses => -0.44/share
 
 最终结算复盘仍然是 cooldown 的触发点。只要最终 BUY fills 已经成对，说明 hedge 成功或原订单后来成交，不会触发 single-fill cooldown。
 
-如果最终仍是 single，cooldown 根据最后窗口 hedge 结果决定：
+如果最终仍是 single，cooldown 根据最新 hedge 结果决定：
 
 ```text
 base single                    => SINGLE_FILL_COOLDOWN_BASE_MS              默认 30m

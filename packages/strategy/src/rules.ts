@@ -28,12 +28,13 @@ export const STRATEGY_RULES: StrategyRule[] = [
     id: 'BTC5M_SINGLE_FILL_HEDGE',
     title: 'BTC 5m Single-Fill Stop-Loss Hedge',
     allocationPct: 0,
-    summary: 'In the final seconds of an active round, cancel stale missing-side entry orders and buy the missing side only if the live ask stays below the configured hedge cap.',
+    summary: 'In the last minute of an active round, cancel stale missing-side entry orders and buy the missing side only if the active early/final pair-cost cap allows it.',
     entryRules: [
-      'Round must already be running and inside SINGLE_FILL_HEDGE_WINDOW_SECONDS, but not inside SINGLE_FILL_HEDGE_MIN_SECONDS_TO_END.',
+      'Round must already be running and inside SINGLE_FILL_EARLY_HEDGE_WINDOW_SECONDS, but not inside SINGLE_FILL_HEDGE_MIN_SECONDS_TO_END.',
       'Exactly one side must have more BUY fills than the other side by at least the minimum order size.',
       'The missing-side orderbook must be live, fresh, and have bestAsk <= SINGLE_FILL_HEDGE_MAX_PRICE.',
-      'Dominant-side average fill price plus hedge limit price must be <= SINGLE_FILL_HEDGE_MAX_PAIR_COST.',
+      'Outside the final hedge window, dominant-side average fill price plus hedge limit price must be <= SINGLE_FILL_EARLY_HEDGE_MAX_PAIR_COST.',
+      'Inside the final hedge window, dominant-side average fill price plus hedge limit price must be <= SINGLE_FILL_HEDGE_MAX_PAIR_COST.',
       'The hedge is posted as a capped FAK BUY LIMIT order, not an uncapped market order.',
     ],
     exitRules: [

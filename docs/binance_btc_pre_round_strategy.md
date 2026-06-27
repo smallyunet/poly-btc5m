@@ -4,9 +4,9 @@
 
 This strategy does **not** trade BTC direction.
 
-The worker primarily targets the **next BTC 5-minute round**. It may place paired YES/NO BUY limit orders before the round starts. Normal entry orders are posted as GTD limit orders expiring at the round start timestamp. After the round starts, the default mode is still settlement-only. Two explicit single-fill risk controls can act after start: `BTC5M_SINGLE_FILL_PROFIT_EXIT` can cancel the missing-side BUY and sell the filled side with a capped FAK SELL limit when the filled side is already profitable; `BTC5M_SINGLE_FILL_HEDGE` can cancel stale missing-side limit orders in the final window and submit a capped aggressive FAK BUY LIMIT for the missing side. It never sends an uncapped market order.
+The worker primarily targets the **next BTC 5-minute round**. It may place paired YES/NO BUY limit orders before the round starts. Normal entry orders are posted as GTD limit orders expiring at the round start timestamp. After the round starts, the default mode is still settlement-only. Two explicit single-fill risk controls can act after start: `BTC5M_SINGLE_FILL_PROFIT_EXIT` can cancel the missing-side BUY and sell the filled side with a capped FAK SELL limit when the filled side is already profitable; `BTC5M_SINGLE_FILL_HEDGE` can use a two-stage rule to cancel stale missing-side limit orders and submit a capped aggressive FAK BUY LIMIT for the missing side. It never sends an uncapped market order.
 
-Local `ttlSeconds` is only used for local intent/order dedupe windows. Exchange-level order lifetime is controlled separately: normal entry uses GTD expiration at round start, while profit-exit and final-window hedge orders use FAK so unfilled remainder is cancelled immediately.
+Local `ttlSeconds` is only used for local intent/order dedupe windows. Exchange-level order lifetime is controlled separately: normal entry uses GTD expiration at round start, while profit-exit and hedge orders use FAK so unfilled remainder is cancelled immediately.
 
 ---
 
@@ -95,18 +95,23 @@ SELL_DISABLED_SETTLEMENT_ONLY
 
 The independent profit-exit executor is the only allowed post-start SELL path.
 
-The final-window single-fill hedge uses a separate time gate:
+The single-fill hedge uses a two-stage time gate:
 
 ```text
-secondsToEnd <= SINGLE_FILL_HEDGE_WINDOW_SECONDS
+secondsToEnd <= SINGLE_FILL_EARLY_HEDGE_WINDOW_SECONDS
 secondsToEnd > SINGLE_FILL_HEDGE_MIN_SECONDS_TO_END
 ```
+
+The early stage only runs when the resulting pair cost is near breakeven. The final stage uses the wider final risk cap:
 
 Current defaults:
 
 ```text
+SINGLE_FILL_EARLY_HEDGE_WINDOW_SECONDS=60
+SINGLE_FILL_EARLY_HEDGE_MAX_PAIR_COST=1.02
 SINGLE_FILL_HEDGE_WINDOW_SECONDS=30
 SINGLE_FILL_HEDGE_MIN_SECONDS_TO_END=5
+SINGLE_FILL_HEDGE_MAX_PAIR_COST=1.10
 ```
 
 ---
@@ -561,11 +566,14 @@ round is running and inside the hedge window
 one BUY side exceeds the other side by at least MIN_ORDER_SHARES
 missing-side book is live/fresh
 missing-side bestAsk <= SINGLE_FILL_HEDGE_MAX_PRICE
-dominant average fill price + hedge limit <= SINGLE_FILL_HEDGE_MAX_PAIR_COST
+if secondsToEnd > SINGLE_FILL_HEDGE_WINDOW_SECONDS:
+  dominant average fill price + hedge limit <= SINGLE_FILL_EARLY_HEDGE_MAX_PAIR_COST
+else:
+  dominant average fill price + hedge limit <= SINGLE_FILL_HEDGE_MAX_PAIR_COST
 no recent local hedge duplicate exists
 ```
 
-Every final-window hedge candidate records a structured outcome when it is blocked, fails, or posts. Duplicate-order and short failed-order cooldown guards also record explicit outcomes, so a final single-fill round should not remain blank in the dashboard.
+Every hedge candidate records a structured outcome when it is blocked, fails, or posts. Duplicate-order and short failed-order cooldown guards also record explicit outcomes, so a final single-fill round should not remain blank in the dashboard.
 
 The hedge is not a market order. It is a capped aggressive FAK limit:
 
@@ -593,13 +601,14 @@ The first exception is single-fill profit exit. Trigger conditions:
 
 After cancellation/reconciliation, the worker posts a FAK SELL LIMIT for the filled side. If the bid moves below the configured floor, it skips the sell and leaves the single exposure for the hedge/final review path.
 
-The second exception is final-window single-fill hedging. Trigger conditions:
+The second exception is two-stage single-fill hedging. Trigger conditions:
 
-- the active round has started and is inside `SINGLE_FILL_HEDGE_WINDOW_SECONDS`
+- the active round has started and is inside `SINGLE_FILL_EARLY_HEDGE_WINDOW_SECONDS`
 - more than `SINGLE_FILL_HEDGE_MIN_SECONDS_TO_END` remains
 - one BUY side materially exceeds the other side
 - the missing-side live best ask is not above `SINGLE_FILL_HEDGE_MAX_PRICE`
-- dominant-side average fill price plus hedge limit is not above `SINGLE_FILL_HEDGE_MAX_PAIR_COST`
+- outside the final hedge window, dominant-side average fill price plus hedge limit is not above `SINGLE_FILL_EARLY_HEDGE_MAX_PAIR_COST`
+- inside the final hedge window, dominant-side average fill price plus hedge limit is not above `SINGLE_FILL_HEDGE_MAX_PAIR_COST`
 
 When triggered, the worker:
 
@@ -660,7 +669,7 @@ p=0.46 => win +0.54, lose -0.46
 
 This is the main risk of the strategy. Dynamic pricing is designed to use lower prices for weaker CHOP scores and only raise price when the CHOP signal is stronger.
 
-If the final-window hedge buys the missing side, the outcome becomes:
+If the two-stage hedge buys the missing side, the outcome becomes:
 
 ```text
 hedgedPnlPerShare = 1 - originalAvgPrice - hedgeLimitPrice
@@ -681,7 +690,7 @@ The hedge is therefore a tail-loss reducer, not an unconditional return enhancer
 
 Final-round review is still the cooldown trigger. If final BUY fills are paired, the hedge succeeded or the original orders later filled, so no single-fill cooldown starts.
 
-If the final state is still single-sided, cooldown duration depends on the final-window hedge outcome:
+If the final state is still single-sided, cooldown duration depends on the latest hedge outcome:
 
 ```text
 base single                    => SINGLE_FILL_COOLDOWN_BASE_MS              default 30m

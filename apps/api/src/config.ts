@@ -56,6 +56,8 @@ export type AppConfig = {
   singleFillCooldownSecondMs: number;
   singleFillCooldownThirdMs: number;
   singleFillHedgeEnabled: boolean;
+  singleFillEarlyHedgeWindowSeconds: number;
+  singleFillEarlyHedgeMaxPairCost: number;
   singleFillHedgeWindowSeconds: number;
   singleFillHedgeMinSecondsToEnd: number;
   singleFillHedgeMaxPrice: number;
@@ -126,6 +128,8 @@ export function loadConfig(): AppConfig {
     singleFillCooldownSecondMs: parsePositiveInteger(process.env.SINGLE_FILL_COOLDOWN_SECOND_MS, 2 * 60 * 60_000),
     singleFillCooldownThirdMs: parsePositiveInteger(process.env.SINGLE_FILL_COOLDOWN_THIRD_MS, 4 * 60 * 60_000),
     singleFillHedgeEnabled: booleanEnv('SINGLE_FILL_HEDGE_ENABLED', true),
+    singleFillEarlyHedgeWindowSeconds: parsePositiveInteger(process.env.SINGLE_FILL_EARLY_HEDGE_WINDOW_SECONDS, 60),
+    singleFillEarlyHedgeMaxPairCost: numberEnv('SINGLE_FILL_EARLY_HEDGE_MAX_PAIR_COST', 1.02),
     singleFillHedgeWindowSeconds: parsePositiveInteger(process.env.SINGLE_FILL_HEDGE_WINDOW_SECONDS, 30),
     singleFillHedgeMinSecondsToEnd: parsePositiveInteger(process.env.SINGLE_FILL_HEDGE_MIN_SECONDS_TO_END, 5),
     singleFillHedgeMaxPrice: numberEnv('SINGLE_FILL_HEDGE_MAX_PRICE', 0.65),

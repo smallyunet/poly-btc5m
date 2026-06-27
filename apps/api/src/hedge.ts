@@ -4,7 +4,7 @@ import type { AppConfig } from './config';
 import type { InMemoryStore, SingleFillHedgeCandidate } from './store';
 
 export type HedgePlan =
-  | { ok: true; intent: TradeIntent; dominantLabel: 'YES' | 'NO'; dominantAvgPrice: number; missingShares: number; bestAsk: number; expectedPnlPerShare: number }
+  | { ok: true; intent: TradeIntent; hedgeMode: 'early' | 'final'; pairCostCap: number; dominantLabel: 'YES' | 'NO'; dominantAvgPrice: number; missingShares: number; bestAsk: number; expectedPnlPerShare: number }
   | { ok: false; reason: string };
 
 type ExecuteHedgesParams = {
@@ -18,6 +18,10 @@ type ExecuteHedgesParams = {
 const HEDGE_STRATEGY = 'BTC5M_SINGLE_FILL_HEDGE';
 const FAILED_HEDGE_COOLDOWN_MS = 60_000;
 const MIN_MARKETABLE_BUY_NOTIONAL_USD = 1;
+
+export function activeHedgeWindowSeconds(appConfig: AppConfig): number {
+  return Math.max(appConfig.singleFillEarlyHedgeWindowSeconds, appConfig.singleFillHedgeWindowSeconds);
+}
 
 export async function executeSingleFillHedges(params: ExecuteHedgesParams): Promise<string[]> {
   const diagnostics: string[] = [];
@@ -42,8 +46,11 @@ export function planSingleFillHedge(params: {
 }): HedgePlan {
   const nowMs = params.nowMs ?? Date.now();
   const secondsToEnd = (new Date(params.candidate.endAt).getTime() - nowMs) / 1000;
-  if (secondsToEnd > params.appConfig.singleFillHedgeWindowSeconds) return { ok: false, reason: 'NOT_IN_HEDGE_WINDOW' };
+  const hedgeWindowSeconds = activeHedgeWindowSeconds(params.appConfig);
+  if (secondsToEnd > hedgeWindowSeconds) return { ok: false, reason: 'NOT_IN_HEDGE_WINDOW' };
   if (secondsToEnd <= params.appConfig.singleFillHedgeMinSecondsToEnd) return { ok: false, reason: 'HEDGE_TOO_CLOSE_TO_EXPIRY' };
+  const hedgeMode = secondsToEnd <= params.appConfig.singleFillHedgeWindowSeconds ? 'final' : 'early';
+  const pairCostCap = hedgeMode === 'final' ? params.appConfig.singleFillHedgeMaxPairCost : params.appConfig.singleFillEarlyHedgeMaxPairCost;
 
   const activeExit = activeSellOrder(params.orders);
   if (activeExit) return { ok: false, reason: 'PROFIT_EXIT_ORDER_ACTIVE' };
@@ -69,7 +76,7 @@ export function planSingleFillHedge(params: {
   const limitPrice = roundPrice(Math.min(bestAsk + params.appConfig.singleFillHedgePriceOffset, params.appConfig.singleFillHedgeMaxPrice));
   if (limitPrice * diff < MIN_MARKETABLE_BUY_NOTIONAL_USD) return { ok: false, reason: 'HEDGE_NOTIONAL_BELOW_MIN' };
   const pairCost = dominantAvgPrice + limitPrice;
-  if (pairCost > params.appConfig.singleFillHedgeMaxPairCost + 0.000001) return { ok: false, reason: 'HEDGE_PAIR_COST_ABOVE_CAP' };
+  if (pairCost > pairCostCap + 0.000001) return { ok: false, reason: hedgeMode === 'early' ? 'EARLY_HEDGE_PAIR_COST_ABOVE_CAP' : 'HEDGE_PAIR_COST_ABOVE_CAP' };
 
   const intent: TradeIntent = {
     id: makeId('hedge-intent'),
@@ -81,7 +88,7 @@ export function planSingleFillHedge(params: {
     orderType: 'LIMIT',
     limitPrice,
     shares: diff,
-    reason: `Single-fill hedge for ${params.candidate.roundId}: buy missing ${missingLabel} with capped aggressive limit.`,
+    reason: `Single-fill ${hedgeMode} hedge for ${params.candidate.roundId}: buy missing ${missingLabel} with capped aggressive limit.`,
     status: 'generated',
     ttlSeconds: params.appConfig.singleFillHedgeWindowSeconds,
     createdAt: new Date(nowMs).toISOString(),
@@ -90,6 +97,8 @@ export function planSingleFillHedge(params: {
   return {
     ok: true,
     intent,
+    hedgeMode,
+    pairCostCap,
     dominantLabel,
     dominantAvgPrice,
     missingShares: diff,
@@ -152,13 +161,13 @@ export function buildSingleFillHedgeCheck(params: {
     conditions: [
       condition('Hedge enabled', params.appConfig.singleFillHedgeEnabled, params.appConfig.singleFillHedgeEnabled ? 'enabled' : 'disabled'),
       condition('Runtime healthy', params.runtimeStatus !== 'degraded', params.runtimeStatus),
-      condition('Final hedge window', secondsToEnd <= params.appConfig.singleFillHedgeWindowSeconds && secondsToEnd > params.appConfig.singleFillHedgeMinSecondsToEnd, `${secondsToEnd.toFixed(1)}s to end / window ${params.appConfig.singleFillHedgeWindowSeconds}s / min ${params.appConfig.singleFillHedgeMinSecondsToEnd}s`),
+      condition('Hedge window', secondsToEnd <= activeHedgeWindowSeconds(params.appConfig) && secondsToEnd > params.appConfig.singleFillHedgeMinSecondsToEnd, `${secondsToEnd.toFixed(1)}s to end / early ${params.appConfig.singleFillEarlyHedgeWindowSeconds}s / final ${params.appConfig.singleFillHedgeWindowSeconds}s / min ${params.appConfig.singleFillHedgeMinSecondsToEnd}s`),
       condition('Single-fill exposure', diff >= params.appConfig.minOrderShares, `YES ${yes.shares.toFixed(2)} / NO ${no.shares.toFixed(2)} / diff ${diff.toFixed(2)} / min ${params.appConfig.minOrderShares.toFixed(2)}`),
       condition('Missing side identified', missingLabel != null, missingLabel ? `buy missing ${missingLabel}` : 'balanced or no fill'),
       condition('Missing-side book ready', quoteGate == null, quoteGate || quoteAgeLabel(quote)),
       condition('Hedge ask cap', quote?.bestAsk != null && quote.bestAsk <= params.appConfig.singleFillHedgeMaxPrice, quote?.bestAsk == null ? 'ask missing' : `${quote.bestAsk.toFixed(3)} / cap ${params.appConfig.singleFillHedgeMaxPrice.toFixed(3)}`),
       condition('Hedge notional minimum', plan.ok || plan.reason !== 'HEDGE_NOTIONAL_BELOW_MIN', plan.ok ? `${(plan.intent.shares * plan.intent.limitPrice).toFixed(2)} / min ${MIN_MARKETABLE_BUY_NOTIONAL_USD.toFixed(2)}` : `blocked: ${plan.reason}`),
-      condition('Pair cost cap', plan.ok || plan.reason !== 'HEDGE_PAIR_COST_ABOVE_CAP', plan.ok ? `${(plan.dominantAvgPrice + plan.intent.limitPrice).toFixed(3)} / cap ${params.appConfig.singleFillHedgeMaxPairCost.toFixed(3)}` : `blocked: ${plan.reason}`),
+      condition('Pair cost cap', plan.ok || !['HEDGE_PAIR_COST_ABOVE_CAP', 'EARLY_HEDGE_PAIR_COST_ABOVE_CAP'].includes(plan.reason), plan.ok ? `${(plan.dominantAvgPrice + plan.intent.limitPrice).toFixed(3)} / ${plan.hedgeMode} cap ${plan.pairCostCap.toFixed(3)}` : `blocked: ${plan.reason}`),
       condition('Duplicate hedge guard', !params.hasRecentHedgeOrder, params.hasRecentHedgeOrder ? 'recent hedge order exists' : 'clear'),
       condition('Failed hedge cooldown', !params.hasRecentFailedHedgeOrder, params.hasRecentFailedHedgeOrder ? 'recent failed hedge order exists' : 'clear'),
       condition('Execution result', executionPassed, outcome ? `${outcome.status}: ${outcome.reason} @ ${outcome.recordedAt}` : 'no execution attempt yet'),
@@ -185,7 +194,7 @@ async function executeOneHedge(params: ExecuteHedgesParams, candidate: SingleFil
   }
 
   const executionKey = [plan.intent.roundId, plan.intent.strategy, plan.intent.tokenId, plan.intent.side].join(':');
-  if (params.store.hasRecentOrder(executionKey, params.appConfig.singleFillHedgeWindowSeconds * 1000)) {
+  if (params.store.hasRecentOrder(executionKey, activeHedgeWindowSeconds(params.appConfig) * 1000)) {
     params.store.recordSingleFillHedgeOutcome({
       roundId: candidate.roundId,
       status: 'blocked',

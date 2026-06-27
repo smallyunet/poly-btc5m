@@ -8,6 +8,7 @@ import type { PolymarketAdapter } from '../../../packages/polymarket/src';
 import type { OrderBookQuote, OrderRecord, TradeIntent } from '../../../packages/shared/src';
 
 const nowMs = new Date('2026-06-26T00:04:35.000Z').getTime();
+const earlyNowMs = new Date('2026-06-26T00:04:15.000Z').getTime();
 
 test('plans a capped buy hedge for material single-fill exposure', () => {
   const plan = planSingleFillHedge({
@@ -58,6 +59,40 @@ test('blocks a hedge when combined pair cost is above the configured cap', () =>
   });
 
   assert.deepEqual(plan, { ok: false, reason: 'HEDGE_PAIR_COST_ABOVE_CAP' });
+});
+
+test('blocks early hedge when pair cost is above the tighter early cap', () => {
+  const plan = planSingleFillHedge({
+    candidate: candidate(),
+    orders: [
+      order('YES', { filledSize: 10, avgFillPrice: 0.44, status: 'filled' }),
+      order('NO', { filledSize: 0, status: 'posted', clobOrderId: 'no-open' }),
+    ],
+    orderbooks: [quote('no-token', 0.59)],
+    appConfig: config(),
+    nowMs: earlyNowMs,
+  });
+
+  assert.deepEqual(plan, { ok: false, reason: 'EARLY_HEDGE_PAIR_COST_ABOVE_CAP' });
+});
+
+test('allows early hedge only when it can lock near breakeven', () => {
+  const plan = planSingleFillHedge({
+    candidate: candidate(),
+    orders: [
+      order('YES', { filledSize: 10, avgFillPrice: 0.44, status: 'filled' }),
+      order('NO', { filledSize: 0, status: 'posted', clobOrderId: 'no-open' }),
+    ],
+    orderbooks: [quote('no-token', 0.57)],
+    appConfig: config(),
+    nowMs: earlyNowMs,
+  });
+
+  assert.equal(plan.ok, true);
+  if (!plan.ok) return;
+  assert.equal(plan.hedgeMode, 'early');
+  assert.equal(plan.pairCostCap, 1.02);
+  assert.equal(plan.intent.limitPrice, 0.58);
 });
 
 test('does not hedge after the single filled side was sold by profit exit', () => {
@@ -194,6 +229,8 @@ function config(): AppConfig {
     singleFillCooldownSecondMs: 2 * 60 * 60_000,
     singleFillCooldownThirdMs: 4 * 60 * 60_000,
     singleFillHedgeEnabled: true,
+    singleFillEarlyHedgeWindowSeconds: 60,
+    singleFillEarlyHedgeMaxPairCost: 1.02,
     singleFillHedgeWindowSeconds: 30,
     singleFillHedgeMinSecondsToEnd: 5,
     singleFillHedgeMaxPrice: 0.65,

@@ -2,7 +2,7 @@ import type { BtcRoundConfig, FillRecord, PositionSnapshot, RoundPhase, RoundSna
 import { classifyRegime, evaluateEntry, evaluateExit, type StrategyRiskConfig } from '../../../packages/strategy/src';
 import { PolymarketAdapter, type FillTarget } from '../../../packages/polymarket/src';
 import type { AppConfig } from './config';
-import { buildSingleFillHedgeCheck, executeSingleFillHedges, planSingleFillHedge } from './hedge';
+import { activeHedgeWindowSeconds, buildSingleFillHedgeCheck, executeSingleFillHedges, planSingleFillHedge } from './hedge';
 import { executeLiveIntents } from './execution';
 import { buildSingleFillProfitExitCheck, executeSingleFillProfitExits, planSingleFillProfitExit } from './profitExit';
 import type { MarketDataService } from './marketData';
@@ -19,7 +19,7 @@ export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, dat
   diagnostics.push(...discovered.diagnostics);
   const round = captureOpeningStrike(discovered.round, store, data.latestPrice());
   const hedgeWatchTokenIds = appConfig.singleFillHedgeEnabled
-    ? store.hedgeWatchTokenIds(appConfig.singleFillHedgeWindowSeconds, appConfig.singleFillHedgeMinSecondsToEnd)
+    ? store.hedgeWatchTokenIds(activeHedgeWindowSeconds(appConfig), appConfig.singleFillHedgeMinSecondsToEnd)
     : [];
   const profitExitWatchTokenIds = appConfig.singleFillProfitExitEnabled
     ? store.profitExitWatchTokenIds(appConfig.singleFillProfitExitMaxSecondsToEnd, appConfig.singleFillProfitExitMinSecondsToEnd)
@@ -59,7 +59,7 @@ export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, dat
   await reconcileFills(appConfig, adapter, store, roundSnapshot, tokenLabels, diagnostics);
   await reconcileTrackedOrders(appConfig, adapter, store, diagnostics);
   const hedgeCandidates = appConfig.singleFillHedgeEnabled
-    ? store.singleFillHedgeCandidates(appConfig.singleFillHedgeWindowSeconds, appConfig.singleFillHedgeMinSecondsToEnd)
+    ? store.singleFillHedgeCandidates(activeHedgeWindowSeconds(appConfig), appConfig.singleFillHedgeMinSecondsToEnd)
     : [];
   const profitExitCandidates = appConfig.singleFillProfitExitEnabled
     ? store.singleFillProfitExitCandidates(appConfig.singleFillProfitExitMaxSecondsToEnd, appConfig.singleFillProfitExitMinSecondsToEnd)
@@ -129,7 +129,7 @@ function buildCurrentRoundHedgeCheck(appConfig: AppConfig, store: InMemoryStore,
     appConfig,
     runtimeStatus: store.getRuntime().status,
     outcome: store.getSingleFillHedgeOutcome(snapshot.round.id),
-    hasRecentHedgeOrder: executionKey ? store.hasRecentOrder(executionKey, appConfig.singleFillHedgeWindowSeconds * 1000) : false,
+    hasRecentHedgeOrder: executionKey ? store.hasRecentOrder(executionKey, activeHedgeWindowSeconds(appConfig) * 1000) : false,
     hasRecentFailedHedgeOrder: executionKey ? store.hasRecentFailedOrder(executionKey, 60_000) : false,
   });
 }

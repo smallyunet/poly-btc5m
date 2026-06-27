@@ -42,7 +42,7 @@ The worker runs every `BOT_TICK_MS` and produces one `DashboardState` snapshot:
 - Computes BTC path features including `cross120s`, realized range bps, two-sided excursion bps, drift/momentum ratios, range percentile, and a `chopScore`.
 - Classifies the round regime.
 - Generates paired score-based entry intents during the pre-round decision window when the regime is `CHOP`.
-- Optionally performs a capped final-window BUY hedge when one side filled and the other side did not.
+- Optionally performs a capped two-stage BUY hedge when one side filled and the other side did not.
 - Reconciles recent fills and estimates settlement/PnL after a round has ended.
 
 ## Configuration
@@ -117,6 +117,8 @@ SINGLE_FILL_COOLDOWN_REPEAT_WINDOW_MS=7200000
 SINGLE_FILL_COOLDOWN_SECOND_MS=7200000
 SINGLE_FILL_COOLDOWN_THIRD_MS=14400000
 SINGLE_FILL_HEDGE_ENABLED=true
+SINGLE_FILL_EARLY_HEDGE_WINDOW_SECONDS=60
+SINGLE_FILL_EARLY_HEDGE_MAX_PAIR_COST=1.02
 SINGLE_FILL_HEDGE_WINDOW_SECONDS=30
 SINGLE_FILL_HEDGE_MIN_SECONDS_TO_END=5
 SINGLE_FILL_HEDGE_MAX_PRICE=0.65
@@ -124,7 +126,7 @@ SINGLE_FILL_HEDGE_PRICE_OFFSET=0.01
 SINGLE_FILL_HEDGE_MAX_PAIR_COST=1.10
 ```
 
-The worker targets the next BTC 5m round for entry. It posts paired BUY limit orders before round start as GTD orders that expire at the round start timestamp, so normal entry liquidity cannot remain resting after the pre-round window. After start, it normally only reconciles fills and records settlement estimates. There are two explicit single-fill risk paths: a profit exit can cancel the missing-side BUY and sell the filled side with a capped FAK SELL limit when the filled side is already profitable; the final-window hedge can cancel stale missing-side BUY orders and submit a capped aggressive FAK BUY LIMIT for the missing side. It never sends uncapped market orders.
+The worker targets the next BTC 5m round for entry. It posts paired BUY limit orders before round start as GTD orders that expire at the round start timestamp, so normal entry liquidity cannot remain resting after the pre-round window. After start, it normally only reconciles fills and records settlement estimates. There are two explicit single-fill risk paths: a profit exit can cancel the missing-side BUY and sell the filled side with a capped FAK SELL limit when the filled side is already profitable; the two-stage hedge can cancel stale missing-side BUY orders and submit a capped aggressive FAK BUY LIMIT for the missing side. It never sends uncapped market orders.
 
 Live entry orders are configured as CLOB limit order `price + size`:
 
@@ -136,7 +138,8 @@ Live entry orders are configured as CLOB limit order `price + size`:
 - The resulting shares value becomes the `size` sent to `createOrder` for each YES/NO side.
 - `MAX_ENTRY_QUEUE_IMBALANCE` only blocks extreme YES/NO bid-queue imbalance at the entry limit. If full bid levels are unavailable, the check stays diagnostic and does not block.
 - `PARTICIPATION_*` adds a conservative PM data-api gate using event `conditionId`, top holders, and limited per-holder positions. It blocks only when fetched data shows clearly weak participation; missing/unavailable data is visible in the dashboard and does not block.
-- `SINGLE_FILL_HEDGE_MAX_PRICE` is the hard cap for the final-window missing-side hedge. `SINGLE_FILL_HEDGE_PRICE_OFFSET` lets the hedge cross the current best ask slightly while still respecting the cap.
+- `SINGLE_FILL_EARLY_HEDGE_*` controls the 60s-to-30s opportunity hedge. It only runs when the combined pair cost is near breakeven.
+- `SINGLE_FILL_HEDGE_*` controls the final 30s risk hedge. It can accept the wider final pair-cost cap to avoid carrying a single-sided exposure into settlement.
 - `SINGLE_FILL_PROFIT_EXIT_*` controls the single-fill take-profit exit. The filled side must have a fresh live bid at or above `SINGLE_FILL_PROFIT_EXIT_MIN_PRICE`, the capped FAK SELL limit must realize at least `SINGLE_FILL_PROFIT_EXIT_MIN_PNL_USD`, and stale quotes above `SINGLE_FILL_PROFIT_EXIT_MAX_ORDERBOOK_AGE_MS` are rejected.
 - Final single-fill cooldown is adaptive: base final singles pause entries for 30 minutes, price-cap hedge misses pause for 1 hour, execution/API/cancel/post failures pause for 2 hours, and repeated final singles inside 2 hours escalate to 2 hours then 4 hours.
 
