@@ -124,6 +124,44 @@ test('blocks duplicate experimental side after a non-failed order already exists
   assert.match(diagnostics[0], /LOCAL_STRATEGY_ORDER_EXISTS/);
 });
 
+test('blocks duplicate classic side after a filled entry order already exists', async () => {
+  const store = new InMemoryStore('live', 2_000, { persistencePath: false });
+  const existing = intent('YES');
+  store.recordOrder({
+    id: 'filled-classic-up',
+    intentId: existing.id,
+    strategy: existing.strategy,
+    strategyProfile: 'classic',
+    executionKey: [existing.roundId, existing.strategy, existing.tokenId, existing.side].join(':'),
+    roundId: existing.roundId,
+    eventSlug: existing.roundId,
+    tokenId: existing.tokenId,
+    label: existing.label,
+    side: existing.side,
+    price: existing.limitPrice,
+    size: existing.shares,
+    status: 'filled',
+    createdAt: new Date().toISOString(),
+  });
+  let posted = 0;
+  const adapter = adapterStub(() => {
+    posted += 1;
+    return { ok: true, orderId: 'unexpected', price: 0.44, size: 10 };
+  });
+
+  const diagnostics = await executeLiveIntents({
+    appConfig: appConfig(),
+    adapter,
+    store,
+    snapshot: snapshot({ startAt: new Date(Date.now() + 20_000).toISOString() }),
+    intents: [existing],
+    risk: risk(),
+  });
+
+  assert.equal(posted, 0);
+  assert.match(diagnostics[0], /LOCAL_STRATEGY_ORDER_EXISTS/);
+});
+
 test('blocks GTD posting when round start is too close', async () => {
   const store = new InMemoryStore('live', 2_000, { persistencePath: false });
   const nearStart = new Date(Date.now() + 1_000).toISOString();

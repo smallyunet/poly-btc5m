@@ -8,6 +8,7 @@ const FAILED_ORDER_COOLDOWN_MS = 5 * 60_000;
 const MIN_MARKETABLE_BUY_NOTIONAL_USD = 1;
 const MIN_GTD_EXPIRATION_LEAD_MS = 5_000;
 const EXPERIMENT_ENTRY_STRATEGY = 'BTC5M_NEXT_ROUND_50_49_STOP_ON_SINGLE';
+const ENTRY_STRATEGIES = new Set(['BTC5M_DUAL_45', EXPERIMENT_ENTRY_STRATEGY]);
 export type ExecuteIntentsParams = {
   appConfig: AppConfig;
   adapter: PolymarketAdapter;
@@ -193,7 +194,7 @@ async function executionGate(params: ExecuteIntentsParams, intent: TradeIntent):
   if (quoteGate) return reject(quoteGate);
 
   const dedupeWindowMs = Math.max(intent.ttlSeconds * 1000, 60_000);
-  if (intent.strategy === EXPERIMENT_ENTRY_STRATEGY && params.store.hasNonFailedOrder(executionKey)) return reject('LOCAL_STRATEGY_ORDER_EXISTS');
+  if (ENTRY_STRATEGIES.has(intent.strategy) && params.store.hasNonFailedOrder(executionKey)) return reject('LOCAL_STRATEGY_ORDER_EXISTS');
   if (params.store.hasRecentOrder(executionKey, dedupeWindowMs)) return reject('LOCAL_DUPLICATE_ORDER');
   if (params.store.hasRecentFailedOrder(executionKey, FAILED_ORDER_COOLDOWN_MS)) return reject('LOCAL_RECENT_FAILED_ORDER');
 
