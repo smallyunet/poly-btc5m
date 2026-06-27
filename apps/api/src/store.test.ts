@@ -179,6 +179,32 @@ test('experimental single fill does not trigger classic cooldown', () => {
   assert.equal(store.getActiveEntryCooldown(nowMs), null);
 });
 
+test('new experimental process ignores persisted experiment stop from before startup', () => {
+  const nowMs = Date.now();
+  const oldRoundId = roundIdFromStart(nowMs - 20 * 60_000);
+  const statePath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'poly-btc5m-store-')), 'runtime-state.json');
+  fs.writeFileSync(statePath, JSON.stringify({
+    version: 1,
+    savedAt: new Date(nowMs - 10_000).toISOString(),
+    intents: [],
+    orders: [],
+    fills: [],
+    settlements: [],
+    experimentStop: {
+      roundId: oldRoundId,
+      stoppedAt: new Date(nowMs - 10_000).toISOString(),
+      reason: 'EXPERIMENT_SINGLE_FILL',
+      yesShares: 5,
+      noShares: 0,
+    },
+  }));
+
+  const store = new InMemoryStore('live', 2_000, { persistencePath: statePath }, 'experiment_next_round');
+
+  assert.equal(store.getExperimentStop(), null);
+  assert.equal(store.getRuntime().experimentStoppedRoundId, undefined);
+});
+
 test('clears legacy cooldown records that were not created from final review', () => {
   const nowMs = Date.now();
   const roundId = roundIdFromStart(nowMs - 7 * 60_000);

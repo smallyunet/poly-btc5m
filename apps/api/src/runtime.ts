@@ -58,7 +58,15 @@ export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, dat
     : evaluatedEntry;
   const intents = [...entry.intents];
   store.recordIntents([...intents, ...entry.rejected]);
-  const executionDiagnostics = await executeLiveIntents({ appConfig, adapter, store, snapshot, intents, risk });
+  const executionDiagnostics = await executeLiveIntents({
+    appConfig,
+    adapter,
+    store,
+    snapshot,
+    intents,
+    risk,
+    experimentRunStartedAt: classicActive ? undefined : store.getExperimentRunStartedAt(),
+  });
   await reconcileFills(appConfig, adapter, store, roundSnapshot, tokenLabels, diagnostics);
   await reconcileTrackedOrders(appConfig, adapter, store, diagnostics);
   const maturedExperimentStop = appConfig.experimentStopOnSingle ? store.maybeStopExperimentOnSingle([]) : null;
@@ -134,8 +142,9 @@ function evaluateExperimentEntry(snapshot: StateSnapshot, appConfig: AppConfig, 
   const noReady = buyQuoteReady(noQuote, appConfig.maxOrderbookAgeSeconds);
   const upExecutionKey = experimentExecutionKey(snapshot, 'YES');
   const downExecutionKey = experimentExecutionKey(snapshot, 'NO');
-  const upAlreadyPlaced = store.hasNonFailedOrder(upExecutionKey);
-  const downAlreadyPlaced = store.hasNonFailedOrder(downExecutionKey);
+  const experimentRunStartedAt = store.getExperimentRunStartedAt();
+  const upAlreadyPlaced = store.hasNonFailedOrder(upExecutionKey, { since: experimentRunStartedAt });
+  const downAlreadyPlaced = store.hasNonFailedOrder(downExecutionKey, { since: experimentRunStartedAt });
 
   if (stopped) reasons.push('EXPERIMENT_STOPPED_ON_SINGLE');
   if (!inDecisionWindow) reasons.push('ROUND_ALREADY_STARTED');

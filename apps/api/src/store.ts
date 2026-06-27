@@ -110,6 +110,7 @@ export class InMemoryStore {
   private entrySignalCounts = new Map<string, number>();
   private runtimeLogs: RuntimeLogRecord[] = [];
   private strategyChecks: StrategyCheck[] = [];
+  private experimentRunStartedAt = new Date().toISOString();
   private readonly persistencePath?: string;
   private readonly maxRecords: number;
 
@@ -239,8 +240,13 @@ export class InMemoryStore {
     return this.hasRecentOrder(executionKey, windowMs, { includeFailed: true });
   }
 
-  hasNonFailedOrder(executionKey: string): boolean {
-    return this.orders.some((order) => order.executionKey === executionKey && order.status !== 'failed');
+  hasNonFailedOrder(executionKey: string, options: { since?: string } = {}): boolean {
+    const sinceMs = options.since ? toTime(options.since) : 0;
+    return this.orders.some((order) => (
+      order.executionKey === executionKey
+      && order.status !== 'failed'
+      && (!sinceMs || toTime(order.createdAt) >= sinceMs)
+    ));
   }
 
   roundFills(roundId: string): FillRecord[] {
@@ -425,16 +431,23 @@ export class InMemoryStore {
     return this.singleFillHedgeOutcomes.get(roundId);
   }
 
+  getExperimentRunStartedAt(): string {
+    return this.experimentRunStartedAt;
+  }
+
   getExperimentStop(): ExperimentStopRecord | null {
+    if (!this.experimentStop || toTime(this.experimentStop.stoppedAt) < toTime(this.experimentRunStartedAt)) return null;
     return this.experimentStop;
   }
 
   maybeStopExperimentOnSingle(newFills: FillRecord[], nowMs = Date.now()): ExperimentStopRecord | null {
-    if (this.experimentStop) return null;
+    if (this.getExperimentStop()) return null;
+    const runStartedAtMs = toTime(this.experimentRunStartedAt);
     const roundIds = new Set<string>();
     for (const fill of [...newFills, ...this.fills]) {
       if (fill.side !== 'BUY') continue;
       if (fillStrategy(fill) !== EXPERIMENT_STRATEGY) continue;
+      if (toTime(fill.matchedAt) < runStartedAtMs) continue;
       roundIds.add(fill.roundId);
     }
     for (const roundId of roundIds) {
@@ -626,10 +639,11 @@ export class InMemoryStore {
   }
 
   private runtimeWithCooldown(nowMs = Date.now()): BotRuntimeStatus {
-    const experimentFields = this.experimentStop ? {
-      experimentStoppedAt: this.experimentStop.stoppedAt,
-      experimentStoppedReason: this.experimentStop.reason,
-      experimentStoppedRoundId: this.experimentStop.roundId,
+    const experimentStop = this.getExperimentStop();
+    const experimentFields = experimentStop ? {
+      experimentStoppedAt: experimentStop.stoppedAt,
+      experimentStoppedReason: experimentStop.reason,
+      experimentStoppedRoundId: experimentStop.roundId,
     } : {};
     const activeCooldown = this.getActiveEntryCooldown(nowMs);
     if (!activeCooldown) {

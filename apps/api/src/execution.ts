@@ -16,6 +16,7 @@ export type ExecuteIntentsParams = {
   snapshot: StateSnapshot;
   intents: TradeIntent[];
   risk: StrategyRiskConfig;
+  experimentRunStartedAt?: string;
 };
 
 export async function executeLiveIntents(params: ExecuteIntentsParams): Promise<string[]> {
@@ -194,7 +195,9 @@ async function executionGate(params: ExecuteIntentsParams, intent: TradeIntent):
   if (quoteGate) return reject(quoteGate);
 
   const dedupeWindowMs = Math.max(intent.ttlSeconds * 1000, 60_000);
-  if (ENTRY_STRATEGIES.has(intent.strategy) && params.store.hasNonFailedOrder(executionKey)) return reject('LOCAL_STRATEGY_ORDER_EXISTS');
+  if (ENTRY_STRATEGIES.has(intent.strategy) && params.store.hasNonFailedOrder(executionKey, {
+    since: intent.strategy === EXPERIMENT_ENTRY_STRATEGY ? params.experimentRunStartedAt : undefined,
+  })) return reject('LOCAL_STRATEGY_ORDER_EXISTS');
   if (params.store.hasRecentOrder(executionKey, dedupeWindowMs)) return reject('LOCAL_DUPLICATE_ORDER');
   if (params.store.hasRecentFailedOrder(executionKey, FAILED_ORDER_COOLDOWN_MS)) return reject('LOCAL_RECENT_FAILED_ORDER');
 

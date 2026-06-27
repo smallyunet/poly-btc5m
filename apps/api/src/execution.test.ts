@@ -124,6 +124,45 @@ test('blocks duplicate experimental side after a non-failed order already exists
   assert.match(diagnostics[0], /LOCAL_STRATEGY_ORDER_EXISTS/);
 });
 
+test('allows experimental side again when prior order is before current run start', async () => {
+  const store = new InMemoryStore('live', 2_000, { persistencePath: false }, 'experiment_next_round');
+  const existing = intent('NO', { strategy: 'BTC5M_NEXT_ROUND_50_49_STOP_ON_SINGLE' });
+  store.recordOrder({
+    id: 'old-filled-experiment-down',
+    intentId: existing.id,
+    strategy: existing.strategy,
+    strategyProfile: 'experiment_next_round',
+    executionKey: [existing.roundId, existing.strategy, existing.tokenId, existing.side].join(':'),
+    roundId: existing.roundId,
+    eventSlug: existing.roundId,
+    tokenId: existing.tokenId,
+    label: existing.label,
+    side: existing.side,
+    price: existing.limitPrice,
+    size: existing.shares,
+    status: 'filled',
+    createdAt: new Date(Date.now() - 60_000).toISOString(),
+  });
+  let posted = 0;
+  const adapter = adapterStub(() => {
+    posted += 1;
+    return { ok: true, orderId: 'new-experiment-down', price: 0.49, size: 5 };
+  });
+
+  const diagnostics = await executeLiveIntents({
+    appConfig: appConfig(),
+    adapter,
+    store,
+    snapshot: snapshot({ startAt: new Date(Date.now() + 20_000).toISOString() }),
+    intents: [existing],
+    risk: risk(),
+    experimentRunStartedAt: new Date().toISOString(),
+  });
+
+  assert.deepEqual(diagnostics, []);
+  assert.equal(posted, 1);
+});
+
 test('blocks duplicate classic side after a filled entry order already exists', async () => {
   const store = new InMemoryStore('live', 2_000, { persistencePath: false });
   const existing = intent('YES');
