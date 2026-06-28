@@ -23,6 +23,8 @@ export type BotRuntimeStatus = {
   nextTickAt?: string;
   tickIntervalMs: number;
   version: string;
+  buildSha?: string;
+  buildTime?: string;
   dockerReady: boolean;
   activeStrategyProfile: StrategyProfile;
   entryCooldownUntil?: string;

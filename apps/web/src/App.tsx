@@ -17,7 +17,7 @@ import {
   Users
 } from 'lucide-react';
 
-import type { DashboardState, OrderBookQuote, RuntimeLogRecord, StrategyCheck } from '../../../packages/shared/src';
+import type { BotRuntimeStatus, DashboardState, OrderBookQuote, RuntimeLogRecord, StrategyCheck } from '../../../packages/shared/src';
 import { api, DASHBOARD_REFRESH_MS } from './lib/api';
 import { formatMoney, formatNumber, formatSeconds, modeLabel } from './lib/format';
 
@@ -256,6 +256,11 @@ function formatNullableMoney(value: number | null | undefined): string {
 
 function formatRatioPct(value: number | null | undefined): string {
   return value == null || !Number.isFinite(value) ? 'unknown' : `${formatNumber(value * 100, 1)}%`;
+}
+
+function runtimeBuildLabel(runtime: BotRuntimeStatus): string {
+  const sha = runtime.buildSha && runtime.buildSha !== 'unknown' ? runtime.buildSha.slice(0, 7) : runtime.version;
+  return `build ${sha}`;
 }
 
 function clamp01(value: number): number {
@@ -766,7 +771,7 @@ export function App() {
             icon={<Activity size={16} />}
             label="Runtime"
             value={state.runtime.status.toUpperCase()}
-            detail={modeLabel(state.runtime.executionMode)}
+            detail={`${modeLabel(state.runtime.executionMode)} / ${runtimeBuildLabel(state.runtime)}`}
             tone={state.runtime.executionMode === 'live' ? 'warn' : 'neutral'}
           />
           <Digest

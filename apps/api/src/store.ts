@@ -125,7 +125,9 @@ export class InMemoryStore {
       startedAt: startedAt.toISOString(),
       nextTickAt: new Date(startedAt.getTime() + tickIntervalMs).toISOString(),
       tickIntervalMs,
-      version: '0.1.0',
+      version: runtimeVersion(),
+      buildSha: optionalEnv('GIT_SHA') || optionalEnv('BUILD_SHA'),
+      buildTime: optionalEnv('BUILD_TIME'),
       dockerReady: true,
       activeStrategyProfile,
     };
@@ -863,6 +865,23 @@ function fillStrategy(fill: Pick<FillRecord, 'strategy'>): StrategyId {
 
 function strategyProfileForStrategy(strategy: StrategyId): StrategyProfile {
   return strategy === EXPERIMENT_STRATEGY ? 'experiment_next_round' : 'classic';
+}
+
+function runtimeVersion(): string {
+  const configured = optionalEnv('APP_VERSION');
+  if (configured) return configured;
+  try {
+    const raw = fs.readFileSync(path.resolve(process.cwd(), 'package.json'), 'utf8');
+    const parsed = JSON.parse(raw) as { version?: unknown };
+    return typeof parsed.version === 'string' && parsed.version.trim() ? parsed.version.trim() : 'unknown';
+  } catch {
+    return 'unknown';
+  }
+}
+
+function optionalEnv(name: string): string | undefined {
+  const value = process.env[name]?.trim();
+  return value || undefined;
 }
 
 function sum(values: number[]): number {

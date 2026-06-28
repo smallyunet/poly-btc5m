@@ -10,7 +10,13 @@ RUN npm run build
 
 FROM node:20-alpine AS runtime
 WORKDIR /app
+ARG APP_VERSION=0.1.0
+ARG GIT_SHA=unknown
+ARG BUILD_TIME=unknown
 ENV NODE_ENV=production
+ENV APP_VERSION=$APP_VERSION
+ENV GIT_SHA=$GIT_SHA
+ENV BUILD_TIME=$BUILD_TIME
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/package.json ./package.json

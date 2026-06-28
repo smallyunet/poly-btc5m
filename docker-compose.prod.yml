@@ -3,6 +3,10 @@ services:
     build:
       context: .
       target: api
+      args:
+        APP_VERSION: ${APP_VERSION:-0.1.0}
+        GIT_SHA: ${GIT_SHA:-unknown}
+        BUILD_TIME: ${BUILD_TIME:-unknown}
     restart: unless-stopped
     env_file: .env
     environment:
