@@ -32,6 +32,7 @@ const risk: StrategyRiskConfig = {
   minParticipationPositionPnlSum: 100,
   maxParticipationHolderConcentration: 0.75,
   entryOrderTtlSeconds: 30,
+  entryMinSecondsToStart: 5,
 };
 
 test('classifies a high-cross low-drift path as CHOP', () => {

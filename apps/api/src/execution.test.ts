@@ -53,7 +53,7 @@ test('blocks a paired live entry batch when active BUY orders leave insufficient
   assert.ok(storedIntents.every((item) => item.rejectionReason === 'INSUFFICIENT_AVAILABLE_COLLATERAL'));
 });
 
-test('posts live entry orders as GTD limits expiring at round start', async () => {
+test('posts live entry orders as GTC limits', async () => {
   const store = new InMemoryStore('live', 2_000, { persistencePath: false });
   const intents = [intent('YES')];
   store.recordIntents(intents);
@@ -82,8 +82,8 @@ test('posts live entry orders as GTD limits expiring at round start', async () =
   });
 
   assert.deepEqual(diagnostics, []);
-  assert.equal(postedOptions?.orderType, 'GTD');
-  assert.equal(postedOptions?.expiration, Math.floor(new Date(startAt).getTime() / 1000));
+  assert.equal(postedOptions?.orderType, 'GTC');
+  assert.equal(postedOptions?.expiration, undefined);
 });
 
 test('blocks duplicate experimental side after a non-failed order already exists', async () => {
@@ -201,7 +201,7 @@ test('blocks duplicate classic side after a filled entry order already exists', 
   assert.match(diagnostics[0], /LOCAL_STRATEGY_ORDER_EXISTS/);
 });
 
-test('blocks GTD posting when round start is too close', async () => {
+test('blocks entry posting when round start is too close', async () => {
   const store = new InMemoryStore('live', 2_000, { persistencePath: false });
   const nearStart = new Date(Date.now() + 1_000).toISOString();
   let posted = 0;
@@ -220,7 +220,7 @@ test('blocks GTD posting when round start is too close', async () => {
   });
 
   assert.equal(posted, 0);
-  assert.match(diagnostics[0], /ROUND_START_TOO_CLOSE_FOR_GTD/);
+  assert.match(diagnostics[0], /ROUND_START_TOO_CLOSE_FOR_ENTRY/);
 });
 
 function intent(label: 'YES' | 'NO', patch: Partial<TradeIntent> = {}): TradeIntent {
@@ -263,6 +263,7 @@ function appConfig(): AppConfig {
     marketConfig: {
       avoidExpirySeconds: 30,
     },
+    entryMinSecondsToStart: 15,
   } as AppConfig;
 }
 

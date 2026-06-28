@@ -69,6 +69,7 @@ export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, dat
   });
   await reconcileFills(appConfig, adapter, store, roundSnapshot, tokenLabels, diagnostics);
   await reconcileTrackedOrders(appConfig, adapter, store, diagnostics);
+  await cancelExpiringEntryOrders(appConfig, adapter, store, diagnostics);
   const maturedExperimentStop = appConfig.experimentStopOnSingle ? store.maybeStopExperimentOnSingle([]) : null;
   if (maturedExperimentStop) {
     store.recordRuntimeLog({
@@ -132,7 +133,7 @@ function applyEntryConfirmation(entry: ReturnType<typeof evaluateEntry>, signalC
 function evaluateExperimentEntry(snapshot: StateSnapshot, appConfig: AppConfig, store: InMemoryStore): StrategyEvaluation {
   const reasons: string[] = [];
   const stopped = store.getExperimentStop();
-  const inDecisionWindow = snapshot.round.secondsToStart > 0;
+  const inDecisionWindow = snapshot.round.secondsToStart >= appConfig.entryMinSecondsToStart;
   const shares = roundShares(appConfig.experimentNextRoundSharesPerSide);
   const upPrice = roundPrice(appConfig.experimentNextRoundUpLimitPrice);
   const downPrice = roundPrice(appConfig.experimentNextRoundDownLimitPrice);
@@ -173,7 +174,7 @@ function evaluateExperimentEntry(snapshot: StateSnapshot, appConfig: AppConfig, 
     conditions: [
       condition('Active profile', appConfig.activeStrategyProfile === 'experiment_next_round', appConfig.activeStrategyProfile),
       condition('Experiment not stopped', !stopped, stopped ? `${stopped.reason} on ${stopped.roundId}` : 'active'),
-      condition('Round before start', inDecisionWindow, `${snapshot.round.secondsToStart.toFixed(1)}s to start`),
+      condition('Round before start', inDecisionWindow, `${snapshot.round.secondsToStart.toFixed(1)}s to start / min ${appConfig.entryMinSecondsToStart}s`),
       condition('UP limit price', upPrice > 0 && upPrice < 1, upPrice.toFixed(3)),
       condition('DOWN limit price', downPrice > 0 && downPrice < 1, downPrice.toFixed(3)),
       condition('Shares per side', shares >= appConfig.minOrderShares, `${shares.toFixed(2)} / min ${appConfig.minOrderShares.toFixed(2)}`),
@@ -394,6 +395,30 @@ async function reconcileTrackedOrders(appConfig: AppConfig, adapter: PolymarketA
   }
 }
 
+async function cancelExpiringEntryOrders(appConfig: AppConfig, adapter: PolymarketAdapter, store: InMemoryStore, diagnostics: string[]): Promise<void> {
+  const orders = store.entryOrdersNeedingCancel(appConfig.entryCancelLeadSeconds);
+  const clobOrderIds = orders.map((order) => order.clobOrderId).filter((id): id is string => Boolean(id));
+  if (!clobOrderIds.length) return;
+  if (store.getRuntime().executionMode !== 'live') {
+    store.markOrdersCancelled(clobOrderIds);
+    return;
+  }
+  try {
+    await adapter.cancelOrders(clobOrderIds);
+    const cancelled = store.markOrdersCancelled(clobOrderIds);
+    if (cancelled) {
+      store.recordRuntimeLog({
+        level: 'warn',
+        source: 'execution',
+        message: `Cancelled ${cancelled} entry order(s) before round start.`,
+        details: { leadSeconds: appConfig.entryCancelLeadSeconds, clobOrderIds },
+      });
+    }
+  } catch (error) {
+    if (store.getRuntime().executionMode === 'live') diagnostics.push(`Entry order cancel failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
 function recordFillsAndMaybeCooldown(appConfig: AppConfig, store: InMemoryStore, fills: FillRecord[]): void {
   const newFills = store.recordFills(fills);
   const experimentStop = appConfig.experimentStopOnSingle ? store.maybeStopExperimentOnSingle(newFills) : null;
@@ -537,6 +562,7 @@ function riskConfig(appConfig: AppConfig, dryRun: boolean, entryCooldownUntil?: 
     maxMomentumRatio30s: appConfig.maxMomentumRatio30s,
     maxEntryQueueImbalance: appConfig.maxEntryQueueImbalance,
     minLiveChopScore: appConfig.minLiveChopScore,
+    entryMinSecondsToStart: appConfig.entryMinSecondsToStart,
     minParticipationHoldersPerSide: appConfig.minParticipationHoldersPerSide,
     minParticipationTopHolderSharesPerSide: appConfig.minParticipationTopHolderSharesPerSide,
     minParticipationTopPositionPnl: appConfig.minParticipationTopPositionPnl,

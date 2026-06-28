@@ -6,7 +6,6 @@ import type { InMemoryStore } from './store';
 
 const FAILED_ORDER_COOLDOWN_MS = 5 * 60_000;
 const MIN_MARKETABLE_BUY_NOTIONAL_USD = 1;
-const MIN_GTD_EXPIRATION_LEAD_MS = 5_000;
 const EXPERIMENT_ENTRY_STRATEGY = 'BTC5M_NEXT_ROUND_50_49_STOP_ON_SINGLE';
 const ENTRY_STRATEGIES = new Set(['BTC5M_DUAL_45', EXPERIMENT_ENTRY_STRATEGY]);
 export type ExecuteIntentsParams = {
@@ -77,8 +76,7 @@ async function executeOneIntent(params: ExecuteIntentsParams, intent: TradeInten
   try {
     const posted = await params.adapter.executeLimitIntent(intent, {
       execute: true,
-      orderType: 'GTD',
-      expiration: Math.floor(new Date(params.snapshot.round.startAt).getTime() / 1000),
+      orderType: 'GTC',
     });
     const order: OrderRecord = {
       id: `order-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
@@ -181,7 +179,7 @@ async function executionGate(params: ExecuteIntentsParams, intent: TradeIntent):
   if (intent.side === 'SELL') return reject('SELL_DISABLED_SETTLEMENT_ONLY');
   const msToStart = new Date(params.snapshot.round.startAt).getTime() - Date.now();
   if (msToStart <= 0) return reject('ROUND_ALREADY_STARTED');
-  if (msToStart <= MIN_GTD_EXPIRATION_LEAD_MS) return reject('ROUND_START_TOO_CLOSE_FOR_GTD');
+  if (msToStart <= params.appConfig.entryMinSecondsToStart * 1000) return reject('ROUND_START_TOO_CLOSE_FOR_ENTRY');
   if (params.snapshot.round.secondsToEnd <= params.appConfig.marketConfig.avoidExpirySeconds) return reject('ROUND_EXPIRY_TOO_CLOSE');
   if (!params.appConfig.ownerPrivateKey?.trim()) return reject('OWNER_PRIVATE_KEY_MISSING', true);
   if (!params.appConfig.depositWallet?.trim()) return reject('POLYMARKET_DEPOSIT_WALLET_MISSING', true);

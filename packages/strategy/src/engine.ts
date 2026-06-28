@@ -22,6 +22,7 @@ export type StrategyRiskConfig = {
   maxMomentumRatio30s: number;
   maxEntryQueueImbalance: number;
   minLiveChopScore: number;
+  entryMinSecondsToStart: number;
   minParticipationHoldersPerSide: number;
   minParticipationTopHolderSharesPerSide: number;
   minParticipationTopPositionPnl: number;
@@ -70,7 +71,7 @@ export function evaluateEntry(snapshot: StateSnapshot, config: StrategyRiskConfi
   const intents: TradeIntent[] = [];
   const rejected: TradeIntent[] = [];
   const reasons: string[] = [];
-  const inDecisionWindow = snapshot.round.secondsToStart <= config.entryOrderTtlSeconds && snapshot.round.secondsToStart >= 0;
+  const inDecisionWindow = snapshot.round.secondsToStart <= config.entryOrderTtlSeconds && snapshot.round.secondsToStart >= config.entryMinSecondsToStart;
   const yesQuote = quoteFor(snapshot, snapshot.round.yesTokenId);
   const noQuote = quoteFor(snapshot, snapshot.round.noTokenId);
   const booksTradable = buyQuoteReady(yesQuote, config) && buyQuoteReady(noQuote, config);
@@ -115,7 +116,7 @@ export function evaluateEntry(snapshot: StateSnapshot, config: StrategyRiskConfi
     amountUsd: shares * pairCost,
     limitPrice,
     conditions: [
-      condition('Decision window', inDecisionWindow, `${snapshot.round.secondsToStart.toFixed(1)}s to start`),
+      condition('Decision window', inDecisionWindow, `${snapshot.round.secondsToStart.toFixed(1)}s to start / min ${config.entryMinSecondsToStart}s`),
       condition('Single-fill cooldown', !cooldownActive, cooldownActive ? cooldownLabel(config.entryCooldownUntil, config.entryCooldownReason) : 'inactive'),
       condition('Regime is CHOP', snapshot.regime === 'CHOP', snapshot.regime),
       condition('CHOP score threshold', snapshot.features.chopScore >= config.minChopScore, `${snapshot.features.chopScore.toFixed(1)} / ${config.minChopScore}`),
