@@ -272,9 +272,9 @@ export class PolymarketAdapter {
     return page
       .map((position: any): PositionSnapshot | null => {
         const tokenId = String(position.asset || position.tokenId || position.token_id || '');
-        const label = tokenLabels.get(tokenId) || positionLabel(position);
+        const label = tokenLabels.get(tokenId);
         const shares = finiteNumber(position.size ?? position.balance);
-        if (!tokenId || shares == null || shares <= 0) return null;
+        if (!tokenId || !label || shares == null || shares <= 0) return null;
         return {
           tokenId,
           label,
@@ -389,13 +389,6 @@ function dedupeTargets(targets: FillTarget[]): FillTarget[] {
     seen.add(key);
     return Boolean(target.tokenId);
   });
-}
-
-function positionLabel(position: Record<string, unknown>): PositionSnapshot['label'] {
-  const raw = String(position.outcome || position.outcomeName || '').trim().toLowerCase();
-  if (raw === 'up') return 'YES';
-  if (raw === 'down') return 'NO';
-  return 'UNKNOWN';
 }
 
 function orderError(posted: any): string | undefined {
