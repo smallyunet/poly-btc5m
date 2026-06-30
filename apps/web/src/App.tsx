@@ -170,6 +170,19 @@ function formatEtTime(value: string): string {
   })} ET`;
 }
 
+function formatRelativeAge(ms: number, nowMs = Date.now()): string {
+  if (!Number.isFinite(ms) || ms <= 0) return 'n/a';
+  const diffMs = Math.max(0, nowMs - ms);
+  const minutes = Math.floor(diffMs / 60_000);
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  const remainingHours = hours % 24;
+  return remainingHours > 0 ? `${days}d ${remainingHours}h ago` : `${days}d ago`;
+}
+
 function formatEtClock(ms: number): string {
   if (!Number.isFinite(ms) || ms <= 0) return 'n/a';
   return new Intl.DateTimeFormat('en-US', {
@@ -1272,14 +1285,18 @@ export function App() {
                             </div>
                           </div>
 
-                          <DataTable headers={['Time (ET)', 'Market', 'Round Status', 'Orders', 'Submitted Buy Orders', 'Filled Buy Shares', 'Unfilled', 'Settlement PnL']}>
+                          <DataTable
+                            headers={['Time (ET)', 'Age', 'Market', 'Round Status', 'Orders', 'Submitted Buy Orders', 'Filled Buy Shares', 'Unfilled', 'Settlement PnL']}
+                            className="executionTable dailyExecutionTable"
+                          >
                             {day.rounds.map((round) => {
                               const hasUnfilled = round.unfilledOrders > 0;
                               const fillLabel = fillStateLabel(round.filledBuyYes, round.filledBuyNo);
                               const status = roundStatusSummary(round);
                               return (
                                 <tr key={round.roundId}>
-                                  <td className="mono">{round.timeLabel}</td>
+                                  <td className="mono timeCell">{round.timeLabel}</td>
+                                  <td className="ageCell"><span>{formatRelativeAge(round.startTime)}</span></td>
                                   <td>
                                     <div className="marketCell">
                                       {round.imageUrl ? (
@@ -1294,7 +1311,7 @@ export function App() {
                                     <Badge tone={status.tone}>{status.label}</Badge>
                                     <span className="mutedBlock">{status.detail}</span>
                                   </td>
-                                  <td>
+                                  <td className="orderCountCell">
                                     <span className="mono">{round.orderCount}</span>
                                     <span className="mutedInline"> {round.buyOrderCount} buy / {round.sellOrderCount} sell</span>
                                   </td>
@@ -1342,13 +1359,17 @@ export function App() {
               {activitySubTab === 'rounds' && (
                 roundSummaries.length > 0 ? (
                   <>
-                    <DataTable headers={['Market', 'Round ID', 'Round Status', 'Orders', 'Submitted Buy Orders', 'Filled Buy Shares', 'Filled Sell Shares', 'Unfilled', 'Settlement PnL']}>
+                    <DataTable
+                      headers={['Age', 'Market', 'Round ID', 'Round Status', 'Orders', 'Submitted Buy Orders', 'Filled Buy Shares', 'Filled Sell Shares', 'Unfilled', 'Settlement PnL']}
+                      className="executionTable roundExecutionTable"
+                    >
                       {roundPagination.pageRows.map((round) => {
                         const hasUnfilled = round.unfilledOrders > 0;
                         const fillLabel = fillStateLabel(round.filledBuyYes, round.filledBuyNo);
                         const status = roundStatusSummary(round);
                         return (
                           <tr key={round.roundId}>
+                            <td className="ageCell"><span>{formatRelativeAge(round.startTime)}</span></td>
                             <td>
                               <div className="marketCell">
                                 {round.imageUrl ? (
@@ -1364,7 +1385,7 @@ export function App() {
                               <Badge tone={status.tone}>{status.label}</Badge>
                               <span className="mutedBlock">{status.detail}</span>
                             </td>
-                            <td>
+                            <td className="orderCountCell">
                               <span className="mono">{round.orderCount}</span>
                               <span className="mutedInline"> {round.buyOrderCount} buy / {round.sellOrderCount} sell</span>
                             </td>
@@ -1741,10 +1762,10 @@ function OrderbookTable({ quotes, yesTokenId, noTokenId }: { quotes: OrderBookQu
   );
 }
 
-function DataTable({ headers, children }: { headers: string[]; children: React.ReactNode }) {
+function DataTable({ headers, children, className = '' }: { headers: string[]; children: React.ReactNode; className?: string }) {
   return (
     <div className="tableWrap">
-      <table>
+      <table className={className}>
         <thead>
           <tr>
             {headers.map((header) => <th key={header}>{header}</th>)}
