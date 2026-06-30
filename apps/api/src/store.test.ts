@@ -205,51 +205,6 @@ test('new experimental process ignores persisted experiment stop from before sta
   assert.equal(store.getRuntime().experimentStoppedRoundId, undefined);
 });
 
-test('finds live entry orders that need cancellation before round start', () => {
-  const nowMs = Date.now();
-  const cancelRoundId = roundIdFromStart(nowMs + 4_000);
-  const laterRoundId = roundIdFromStart(nowMs + 30_000);
-  const store = new InMemoryStore('live', 2_000, { persistencePath: false });
-
-  store.recordOrder(order(cancelRoundId, 'YES', {
-    id: 'classic-entry',
-    strategy: 'BTC5M_DUAL_45',
-    strategyProfile: 'classic',
-    clobOrderId: 'clob-classic-entry',
-    createdAt: new Date(nowMs - 2_000).toISOString(),
-  }));
-  store.recordOrder(order(cancelRoundId, 'NO', {
-    id: 'experiment-entry',
-    strategy: 'BTC5M_NEXT_ROUND_50_49_STOP_ON_SINGLE',
-    strategyProfile: 'experiment_next_round',
-    clobOrderId: 'clob-experiment-entry',
-    createdAt: new Date(nowMs - 1_000).toISOString(),
-  }));
-  store.recordOrder(order(cancelRoundId, 'YES', {
-    id: 'failed-entry',
-    strategy: 'BTC5M_DUAL_45',
-    strategyProfile: 'classic',
-    clobOrderId: 'clob-failed-entry',
-    status: 'failed',
-  }));
-  store.recordOrder(order(cancelRoundId, 'YES', {
-    id: 'hedge-order',
-    strategy: 'BTC5M_SINGLE_FILL_HEDGE',
-    strategyProfile: 'classic',
-    clobOrderId: 'clob-hedge-order',
-  }));
-  store.recordOrder(order(laterRoundId, 'YES', {
-    id: 'later-entry',
-    strategy: 'BTC5M_DUAL_45',
-    strategyProfile: 'classic',
-    clobOrderId: 'clob-later-entry',
-  }));
-
-  const orders = store.entryOrdersNeedingCancel(10, nowMs);
-
-  assert.deepEqual(orders.map((item) => item.id), ['classic-entry', 'experiment-entry']);
-});
-
 test('clears legacy cooldown records that were not created from final review', () => {
   const nowMs = Date.now();
   const roundId = roundIdFromStart(nowMs - 7 * 60_000);

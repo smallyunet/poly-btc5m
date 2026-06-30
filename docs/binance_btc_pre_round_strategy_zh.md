@@ -4,9 +4,9 @@
 
 该策略**不**交易 BTC 方向。
 
-worker 主要面向**下一轮 BTC 5 分钟市场**。它可以在轮次开始前同时挂出 YES/NO 两侧 BUY 限价单；常规入场单会作为 GTD limit order 提交，并在轮次开始时间过期。轮次开始后，默认仍然是 settlement-only；两个明确的 single-fill 风控可以在开始后动作：`BTC5M_SINGLE_FILL_PROFIT_EXIT` 可以在已成交侧已经有利润时取消缺失侧 BUY，并用 capped FAK SELL limit 卖出已成交侧；`BTC5M_SINGLE_FILL_HEDGE` 可以用三阶段规则取消缺失侧旧限价单，并在价格/成本上限内用 aggressive FAK BUY LIMIT 补买缺失侧。它不会发送无上限 market order。
+worker 主要面向**下一轮 BTC 5 分钟市场**。它可以在轮次开始前同时挂出 YES/NO 两侧 BUY 限价单；由于短 GTD expiration 可能被 CLOB 拒绝，常规入场单会作为 GTC limit order 提交。轮次开始后，默认仍然是 settlement-only，除非明确的 single-fill 风控触发：`BTC5M_SINGLE_FILL_PROFIT_EXIT` 可以在已成交侧已经有利润时取消缺失侧 BUY，并用 capped FAK SELL limit 卖出已成交侧；`BTC5M_SINGLE_FILL_HEDGE` 可以用三阶段规则取消缺失侧旧限价单，并在价格/成本上限内用 aggressive FAK BUY LIMIT 补买缺失侧。它不会发送无上限 market order。
 
-本地 `ttlSeconds` 只用于本地 intent/order 去重窗口。交易所层面的订单生命周期单独控制：常规入场使用在轮次开始时间过期的 GTD，profit-exit 和 hedge 使用 FAK，未成交剩余会立即取消。
+本地 `ttlSeconds` 只用于本地 intent/order 去重窗口。交易所层面的订单生命周期单独控制：常规入场使用 GTC，profit-exit 和 hedge 使用 FAK，未成交剩余会立即取消。
 
 ---
 
@@ -522,7 +522,7 @@ Intent 字段：
 - orderType: `LIMIT`
 - ttlSeconds: `decisionLeadSeconds`
 
-`ttlSeconds` 是本地元数据/去重信息。实盘入场会把这些 intent 作为 GTD limit order 提交到 CLOB，过期时间设置为 `round.startAt`。
+`ttlSeconds` 是本地元数据/去重信息。实盘入场会把这些 intent 作为 GTC limit order 提交到 CLOB。系统没有通用的 post-start entry cancellation；开盘后的风险管理由 profit-exit 和 hedge 规则负责。
 
 ---
 

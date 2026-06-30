@@ -129,7 +129,7 @@ SINGLE_FILL_HEDGE_PRICE_OFFSET=0.01
 SINGLE_FILL_HEDGE_MAX_PAIR_COST=1.10
 ```
 
-The worker targets the next BTC 5m round for entry. It posts paired BUY limit orders before round start as GTD orders that expire at the round start timestamp, so normal entry liquidity cannot remain resting after the pre-round window. After start, it normally only reconciles fills and records settlement estimates. There are two explicit single-fill risk paths: a profit exit can cancel the missing-side BUY and sell the filled side with a capped FAK SELL limit when the filled side is already profitable; the three-stage hedge can cancel stale missing-side BUY orders and submit a capped aggressive FAK BUY LIMIT for the missing side. It never sends uncapped market orders.
+The worker targets the next BTC 5m round for entry. It posts paired BUY limit orders before round start as GTC orders because short GTD expirations can be rejected by CLOB. After start, it normally only reconciles fills and records settlement estimates unless an explicit single-fill risk path triggers: a profit exit can cancel the missing-side BUY and sell the filled side with a capped FAK SELL limit when the filled side is already profitable; the three-stage hedge can cancel stale missing-side BUY orders and submit a capped aggressive FAK BUY LIMIT for the missing side. It never sends uncapped market orders.
 
 Live entry orders are configured as CLOB limit order `price + size`:
 

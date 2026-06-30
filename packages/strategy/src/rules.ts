@@ -13,7 +13,7 @@ export const STRATEGY_RULES: StrategyRule[] = [
       'Extreme imbalance in YES vs NO bid queue at the entry limit is blocked; mild imbalance is only diagnostic.',
       'Shares are score-tiered: low CHOP scores reduce size, mid scores use base size, and very high scores get only a small size increase.',
       'No duplicate local or Polymarket open order may exist for the same round/token.',
-      'Live entry orders are posted as GTC limit orders; the runtime cancels unfilled entry orders before round start.',
+      'Live entry orders are posted as GTC limit orders; post-start risk is handled by the profit-exit and hedge rules.',
     ],
     exitRules: [
       'If both sides fill, hold paired exposure through settlement.',

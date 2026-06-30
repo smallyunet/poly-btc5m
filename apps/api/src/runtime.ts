@@ -69,7 +69,6 @@ export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, dat
   });
   await reconcileFills(appConfig, adapter, store, roundSnapshot, tokenLabels, diagnostics);
   await reconcileTrackedOrders(appConfig, adapter, store, diagnostics);
-  await cancelExpiringEntryOrders(appConfig, adapter, store, diagnostics);
   const maturedExperimentStop = appConfig.experimentStopOnSingle ? store.maybeStopExperimentOnSingle([]) : null;
   if (maturedExperimentStop) {
     store.recordRuntimeLog({
@@ -392,30 +391,6 @@ async function reconcileTrackedOrders(appConfig: AppConfig, adapter: PolymarketA
     }
   } catch (error) {
     if (store.getRuntime().executionMode === 'live') diagnostics.push(`Order reconciliation failed: ${error instanceof Error ? error.message : String(error)}`);
-  }
-}
-
-async function cancelExpiringEntryOrders(appConfig: AppConfig, adapter: PolymarketAdapter, store: InMemoryStore, diagnostics: string[]): Promise<void> {
-  const orders = store.entryOrdersNeedingCancel(appConfig.entryCancelLeadSeconds);
-  const clobOrderIds = orders.map((order) => order.clobOrderId).filter((id): id is string => Boolean(id));
-  if (!clobOrderIds.length) return;
-  if (store.getRuntime().executionMode !== 'live') {
-    store.markOrdersCancelled(clobOrderIds);
-    return;
-  }
-  try {
-    await adapter.cancelOrders(clobOrderIds);
-    const cancelled = store.markOrdersCancelled(clobOrderIds);
-    if (cancelled) {
-      store.recordRuntimeLog({
-        level: 'warn',
-        source: 'execution',
-        message: `Cancelled ${cancelled} entry order(s) before round start.`,
-        details: { leadSeconds: appConfig.entryCancelLeadSeconds, clobOrderIds },
-      });
-    }
-  } catch (error) {
-    if (store.getRuntime().executionMode === 'live') diagnostics.push(`Entry order cancel failed: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 

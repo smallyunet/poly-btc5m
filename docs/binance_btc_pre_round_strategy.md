@@ -4,9 +4,9 @@
 
 This strategy does **not** trade BTC direction.
 
-The worker primarily targets the **next BTC 5-minute round**. It may place paired YES/NO BUY limit orders before the round starts. Normal entry orders are posted as GTD limit orders expiring at the round start timestamp. After the round starts, the default mode is still settlement-only. Two explicit single-fill risk controls can act after start: `BTC5M_SINGLE_FILL_PROFIT_EXIT` can cancel the missing-side BUY and sell the filled side with a capped FAK SELL limit when the filled side is already profitable; `BTC5M_SINGLE_FILL_HEDGE` can use a three-stage rule to cancel stale missing-side limit orders and submit a capped aggressive FAK BUY LIMIT for the missing side. It never sends an uncapped market order.
+The worker primarily targets the **next BTC 5-minute round**. It may place paired YES/NO BUY limit orders before the round starts. Normal entry orders are posted as GTC limit orders because short GTD expirations can be rejected by CLOB. After the round starts, the default mode is still settlement-only unless one of the explicit single-fill risk controls triggers: `BTC5M_SINGLE_FILL_PROFIT_EXIT` can cancel the missing-side BUY and sell the filled side with a capped FAK SELL limit when the filled side is already profitable; `BTC5M_SINGLE_FILL_HEDGE` can use a three-stage rule to cancel stale missing-side limit orders and submit a capped aggressive FAK BUY LIMIT for the missing side. It never sends an uncapped market order.
 
-Local `ttlSeconds` is only used for local intent/order dedupe windows. Exchange-level order lifetime is controlled separately: normal entry uses GTD expiration at round start, while profit-exit and hedge orders use FAK so unfilled remainder is cancelled immediately.
+Local `ttlSeconds` is only used for local intent/order dedupe windows. Exchange-level order lifetime is controlled separately: normal entry uses GTC, while profit-exit and hedge orders use FAK so unfilled remainder is cancelled immediately.
 
 ---
 
@@ -518,7 +518,7 @@ Intent fields:
 - orderType: `LIMIT`
 - ttlSeconds: `decisionLeadSeconds`
 
-`ttlSeconds` is local metadata/dedupe. Live entry execution posts these intents to the CLOB as GTD limit orders with expiration set to `round.startAt`.
+`ttlSeconds` is local metadata/dedupe. Live entry execution posts these intents to the CLOB as GTC limit orders. There is no generic post-start entry cancellation path; post-start risk management is handled by the profit-exit and hedge rules.
 
 ---
 

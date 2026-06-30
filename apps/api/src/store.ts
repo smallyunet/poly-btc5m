@@ -89,7 +89,6 @@ type ExperimentStopRecord = {
 const FINAL_SINGLE_FILL_GRACE_MS = 60_000;
 const CLASSIC_ENTRY_STRATEGY: StrategyId = 'BTC5M_DUAL_45';
 const EXPERIMENT_STRATEGY: StrategyId = 'BTC5M_NEXT_ROUND_50_49_STOP_ON_SINGLE';
-const ENTRY_STRATEGIES = new Set<StrategyId>([CLASSIC_ENTRY_STRATEGY, EXPERIMENT_STRATEGY]);
 const PRICE_CAP_HEDGE_REASONS = new Set(['HEDGE_ASK_ABOVE_CAP', 'HEDGE_PAIR_COST_ABOVE_CAP', 'EARLY_HEDGE_PAIR_COST_ABOVE_CAP', 'EMERGENCY_HEDGE_PAIR_COST_ABOVE_CAP']);
 const BENIGN_HEDGE_REASONS = new Set(['NO_MATERIAL_SINGLE_FILL_EXPOSURE', 'NOT_IN_HEDGE_WINDOW', 'HEDGE_TOO_CLOSE_TO_EXPIRY']);
 
@@ -340,21 +339,6 @@ export class InMemoryStore {
     return this.orders
       .filter((order) => order.status === 'posted' || order.status === 'partially_filled')
       .sort((a, b) => toTime(b.createdAt) - toTime(a.createdAt))
-      .slice(0, limit);
-  }
-
-  entryOrdersNeedingCancel(leadSeconds: number, nowMs = Date.now(), limit = 100): OrderRecord[] {
-    return this.orders
-      .filter((order) => {
-        if (!order.clobOrderId) return false;
-        if (order.side !== 'BUY') return false;
-        if (!ENTRY_STRATEGIES.has(orderStrategy(order))) return false;
-        if (order.status !== 'posted' && order.status !== 'partially_filled') return false;
-        const startMs = roundStartMs(order.roundId);
-        if (startMs == null) return false;
-        return startMs - nowMs <= leadSeconds * 1000;
-      })
-      .sort((a, b) => toTime(a.createdAt) - toTime(b.createdAt))
       .slice(0, limit);
   }
 

@@ -42,7 +42,6 @@ export type AppConfig = {
   minLiveChopScore: number;
   entryConfirmTicks: number;
   entryMinSecondsToStart: number;
-  entryCancelLeadSeconds: number;
   participationEnabled: boolean;
   participationCacheMs: number;
   participationTopHoldersPerSide: number;
@@ -124,7 +123,6 @@ export function loadConfig(): AppConfig {
     minLiveChopScore: numberEnv('MIN_LIVE_CHOP_SCORE', 80),
     entryConfirmTicks: parsePositiveInteger(process.env.ENTRY_CONFIRM_TICKS, 3),
     entryMinSecondsToStart: parsePositiveInteger(process.env.ENTRY_MIN_SECONDS_TO_START, 15),
-    entryCancelLeadSeconds: parsePositiveInteger(process.env.ENTRY_CANCEL_LEAD_SECONDS, 10),
     participationEnabled: booleanEnv('PARTICIPATION_ENABLED', true),
     participationCacheMs: parsePositiveInteger(process.env.PARTICIPATION_CACHE_MS, 30_000),
     participationTopHoldersPerSide: parsePositiveInteger(process.env.PARTICIPATION_TOP_HOLDERS_PER_SIDE, 8),
