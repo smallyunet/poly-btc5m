@@ -20,10 +20,14 @@ type AccountSummary = {
 };
 
 export class TelegramNotifier {
+  private readonly startedAtMs = Date.now();
+  private bootstrapped = false;
+
   constructor(private readonly options: TelegramNotifierOptions) {}
 
   async notifyAfterTick(state: DashboardState): Promise<void> {
     if (!this.enabled()) return;
+    this.bootstrapExistingRoundSummaries(state);
     const pending = this.pendingNotifications(state);
     if (!pending.length) return;
 
@@ -61,6 +65,10 @@ export class TelegramNotifier {
     for (const settlement of settlements) {
       const key = `${settlement.roundId}:${settlement.status}`;
       if (notifiedRoundKeys.has(key)) continue;
+      if (roundEndMs(settlement.roundId) < this.startedAtMs) {
+        this.options.store.markTelegramRoundSummaryNotified(key);
+        continue;
+      }
       const orders = state.orders.filter((order) => order.roundId === settlement.roundId);
       if (this.options.appConfig.telegramRoundSummaryOnOrderOnly && !orders.length) continue;
       const fills = state.fills.filter((fill) => fill.roundId === settlement.roundId);
@@ -71,6 +79,19 @@ export class TelegramNotifier {
       };
     }
     return null;
+  }
+
+  private bootstrapExistingRoundSummaries(state: DashboardState): void {
+    if (this.bootstrapped) return;
+    this.bootstrapped = true;
+    const notifiedRoundKeys = new Set(this.options.store.getTelegramNotificationState().notifiedRoundSummaryKeys);
+    for (const settlement of state.settlements) {
+      const key = `${settlement.roundId}:${settlement.status}`;
+      if (notifiedRoundKeys.has(key)) continue;
+      if (roundEndMs(settlement.roundId) <= this.startedAtMs) {
+        this.options.store.markTelegramRoundSummaryNotified(key);
+      }
+    }
   }
 
   private nextIdleSummary(state: DashboardState, lastIdleSummaryAt: string | undefined): PendingNotification | null {
@@ -177,7 +198,7 @@ function fillSideSummary(fills: FillRecord[], label: 'YES' | 'NO'): string {
 
 function formatAccountSummary(account: AccountSummary): string {
   if (account.error) return 'Account: balance unavailable';
-  const allowance = account.allowance == null ? 'unknown' : formatMoney(account.allowance);
+  const allowance = account.allowance == null ? 'unknown' : account.allowance > 1_000_000_000 ? 'unlimited' : formatMoney(account.allowance);
   return `Account: balance ${formatMoney(account.balance ?? 0)} | allowance ${allowance}`;
 }
 
@@ -202,6 +223,13 @@ function latestTime(values: string[]): number {
 function toTime(value: string): number {
   const time = new Date(value).getTime();
   return Number.isFinite(time) ? time : 0;
+}
+
+function roundEndMs(roundId: string): number {
+  const match = roundId.match(/btc-updown-5m-(\d+)$/);
+  const startSeconds = Number(match?.[1]);
+  if (!Number.isFinite(startSeconds) || startSeconds <= 0) return 0;
+  return startSeconds * 1000 + 5 * 60_000;
 }
 
 function sum(values: number[]): number {

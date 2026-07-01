@@ -31,10 +31,13 @@ test('sends a round summary with on-demand balance and marks the summary notifie
   let balanceReads = 0;
   let sentText = '';
   const markedRoundKeys: string[] = [];
+  const roundId = futureRoundId();
   const notifier = new TelegramNotifier({
     appConfig: config(),
     store: fakeStore({
-      markTelegramRoundSummaryNotified: (key) => markedRoundKeys.push(key),
+      markTelegramRoundSummaryNotified: (key) => {
+        markedRoundKeys.push(key);
+      },
     }),
     adapter: {
       async getCollateralBalanceAllowance() {
@@ -48,8 +51,8 @@ test('sends a round summary with on-demand balance and marks the summary notifie
     orders: [{
       id: 'order-1',
       intentId: 'intent-1',
-      roundId: 'btc-updown-5m-2000',
-      eventSlug: 'btc-updown-5m-2000',
+      roundId,
+      eventSlug: roundId,
       tokenId: 'yes-token',
       label: 'YES',
       side: 'BUY',
@@ -60,8 +63,8 @@ test('sends a round summary with on-demand balance and marks the summary notifie
     }],
     fills: [{
       id: 'fill-1',
-      roundId: 'btc-updown-5m-2000',
-      eventSlug: 'btc-updown-5m-2000',
+      roundId,
+      eventSlug: roundId,
       tokenId: 'yes-token',
       label: 'YES',
       side: 'BUY',
@@ -70,9 +73,9 @@ test('sends a round summary with on-demand balance and marks the summary notifie
       matchedAt: new Date(Date.now() - 30_000).toISOString(),
     }],
     settlements: [{
-      id: 'settlement-btc-updown-5m-2000',
-      roundId: 'btc-updown-5m-2000',
-      eventSlug: 'btc-updown-5m-2000',
+      id: `settlement-${roundId}`,
+      roundId,
+      eventSlug: roundId,
       marketTitle: 'BTC test round',
       resolvedAt: new Date().toISOString(),
       winningLabel: 'YES',
@@ -93,9 +96,72 @@ test('sends a round summary with on-demand balance and marks the summary notifie
   });
 
   assert.equal(balanceReads, 1);
-  assert.deepEqual(markedRoundKeys, ['btc-updown-5m-2000:settled']);
+  assert.deepEqual(markedRoundKeys, [`${roundId}:settled`]);
   assert.match(sentText, /BTC5M Round Summary/);
   assert.match(sentText, /Account: balance \$12\.34/);
+});
+
+test('bootstraps historical round summaries without sending backlog notifications', async () => {
+  let balanceReads = 0;
+  let fetchCalls = 0;
+  const markedRoundKeys: string[] = [];
+  const notificationState: TelegramNotificationState = { notifiedRoundSummaryKeys: [] };
+  const notifier = new TelegramNotifier({
+    appConfig: config(),
+    store: fakeStore({
+      getTelegramNotificationState: () => notificationState,
+      markTelegramRoundSummaryNotified: (key) => {
+        notificationState.notifiedRoundSummaryKeys.push(key);
+        markedRoundKeys.push(key);
+      },
+    }),
+    adapter: {
+      async getCollateralBalanceAllowance() {
+        balanceReads += 1;
+        return { balance: 12.34, allowance: 20 };
+      },
+    } as PolymarketAdapter,
+  });
+
+  const state = dashboardState({
+    orders: [{
+      id: 'old-order-1',
+      intentId: 'old-intent-1',
+      roundId: 'btc-updown-5m-2000',
+      eventSlug: 'btc-updown-5m-2000',
+      tokenId: 'yes-token',
+      label: 'YES',
+      side: 'BUY',
+      price: 0.45,
+      size: 10,
+      status: 'filled',
+      createdAt: new Date(Date.now() - 60_000).toISOString(),
+    }],
+    settlements: [{
+      id: 'settlement-btc-updown-5m-2000',
+      roundId: 'btc-updown-5m-2000',
+      eventSlug: 'btc-updown-5m-2000',
+      resolvedAt: new Date().toISOString(),
+      winningLabel: 'YES',
+      yesShares: 10,
+      noShares: 0,
+      totalCost: 4.5,
+      payout: 10,
+      pnl: 5.5,
+      status: 'settled',
+    }],
+  });
+
+  await withFetch(async () => {
+    fetchCalls += 1;
+    return new Response(JSON.stringify({ ok: true }), { status: 200 });
+  }, async () => {
+    await notifier.notifyAfterTick(state);
+  });
+
+  assert.equal(balanceReads, 0);
+  assert.equal(fetchCalls, 0);
+  assert.deepEqual(markedRoundKeys, ['btc-updown-5m-2000:settled']);
 });
 
 function config(): AppConfig {
@@ -202,6 +268,10 @@ function dashboardState(overrides: Partial<DashboardState> = {}): DashboardState
     strategyChecks: [],
     ...overrides,
   };
+}
+
+function futureRoundId(): string {
+  return `btc-updown-5m-${Math.floor(Date.now() / 1000) + 60}`;
 }
 
 async function withFetch(run: () => Promise<void>): Promise<void>;
