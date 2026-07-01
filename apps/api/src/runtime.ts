@@ -1,4 +1,4 @@
-import type { BtcRoundConfig, FillRecord, PositionSnapshot, RoundPhase, RoundSnapshot, SettlementRecord, StateSnapshot, StrategyCheck, StrategyCondition, TradeIntent } from '../../../packages/shared/src';
+import type { BtcRoundConfig, FillRecord, OrderBookQuote, OrderbookCapacityTier, OrderbookDepthLevel, OrderbookDepthSnapshot, PositionSnapshot, RoundPhase, RoundSnapshot, SettlementRecord, StateSnapshot, StrategyCheck, StrategyCondition, TradeIntent } from '../../../packages/shared/src';
 import { classifyRegime, evaluateEntry, evaluateExit, type StrategyEvaluation, type StrategyRiskConfig } from '../../../packages/strategy/src';
 import { PolymarketAdapter, type FillTarget } from '../../../packages/polymarket/src';
 import type { AppConfig } from './config';
@@ -52,6 +52,7 @@ export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, dat
   const activeCooldown = store.getActiveEntryCooldown();
   const risk = riskConfig(appConfig, store.getRuntime().executionMode !== 'live', activeCooldown?.expiresAt, activeCooldown ? `single fill on ${activeCooldown.roundId}` : undefined);
   const snapshot: StateSnapshot = { ...baseSnapshot, regime: classifyRegime(baseSnapshot, risk) };
+  snapshot.orderbookDepth = buildOrderbookDepthSnapshot(snapshot, appConfig);
   const evaluatedEntry = classicActive ? evaluateEntry(snapshot, risk) : evaluateExperimentEntry(snapshot, appConfig, store);
   const entry = classicActive
     ? applyEntryConfirmation(evaluatedEntry, store.recordEntrySignal(snapshot.round.id, evaluatedEntry.intents.length > 0), appConfig.entryConfirmTicks)
@@ -101,6 +102,127 @@ export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, dat
   store.recordSnapshot(finalSnapshot, data.status());
   store.recordStrategyChecks([...entry.checks, ...exit.checks, hedgeCheck, profitExitCheck]);
   return finalSnapshot;
+}
+
+function buildOrderbookDepthSnapshot(snapshot: StateSnapshot, appConfig: AppConfig): OrderbookDepthSnapshot {
+  const activeLimitPrice = strategyEntryLimitPrice(snapshot, appConfig);
+  const baseSharesPerSide = appConfig.dynamicSharesEnabled
+    ? Math.min(appConfig.orderSharesPerSide * sharesMultiplierFromScore(snapshot.features.chopScore), appConfig.maxOrderSharesPerSide)
+    : appConfig.orderSharesPerSide;
+  const yesQuote = snapshot.orderbooks.find((quote) => quote.tokenId === snapshot.round.yesTokenId);
+  const noQuote = snapshot.orderbooks.find((quote) => quote.tokenId === snapshot.round.noTokenId);
+  const diagnostics: string[] = [];
+  if (!yesQuote) diagnostics.push('UP book is missing from current WSS snapshot.');
+  if (!noQuote) diagnostics.push('DOWN book is missing from current WSS snapshot.');
+  if (!yesQuote?.bids?.length || !yesQuote.asks?.length) diagnostics.push('UP book depth levels are incomplete.');
+  if (!noQuote?.bids?.length || !noQuote.asks?.length) diagnostics.push('DOWN book depth levels are incomplete.');
+
+  const levels = [0.42, 0.44, 0.45, 0.46, 0.49, 0.5, 0.51, 0.55, 0.6, 0.65]
+    .map((limitPrice) => depthLevel(limitPrice, yesQuote, noQuote));
+  const activeLevel = levels.find((level) => Math.abs(level.limitPrice - activeLimitPrice) < 0.000001)
+    || depthLevel(activeLimitPrice, yesQuote, noQuote);
+  const tiers = capacityTiers(activeLevel, activeLimitPrice);
+
+  return {
+    status: diagnostics.length ? 'insufficient' : 'ready',
+    updatedAt: new Date().toISOString(),
+    roundId: snapshot.round.id,
+    activeLimitPrice,
+    baseSharesPerSide: roundShares(baseSharesPerSide),
+    levels,
+    tiers,
+    diagnostics,
+  };
+}
+
+function depthLevel(limitPrice: number, yesQuote: OrderBookQuote | undefined, noQuote: OrderBookQuote | undefined): OrderbookDepthLevel {
+  const yes = sideDepth(limitPrice, yesQuote);
+  const no = sideDepth(limitPrice, noQuote);
+  const pairedImmediateShares = Math.min(yes.askShares, no.askShares);
+  const pairedImmediateCostUsd = pairedImmediateShares > 0
+    ? costForShares(yesQuote?.asks || [], pairedImmediateShares, limitPrice) + costForShares(noQuote?.asks || [], pairedImmediateShares, limitPrice)
+    : 0;
+  const minBidQueueShares = Math.min(yes.bidQueueShares, no.bidQueueShares);
+  const minBidAtLimitShares = Math.min(yes.bidAtLimitShares, no.bidAtLimitShares);
+  const smallerQueue = Math.min(yes.bidQueueShares, no.bidQueueShares);
+  const largerQueue = Math.max(yes.bidQueueShares, no.bidQueueShares);
+  return {
+    limitPrice,
+    pairedImmediateShares: roundShares(pairedImmediateShares),
+    pairedImmediateCostUsd: roundMoney(pairedImmediateCostUsd),
+    maxPairNotionalUsd: roundMoney(pairedImmediateShares * limitPrice * 2),
+    minBidQueueShares: roundShares(minBidQueueShares),
+    minBidAtLimitShares: roundShares(minBidAtLimitShares),
+    queueRatio: smallerQueue > 0 ? roundRatio(largerQueue / smallerQueue) : null,
+  };
+}
+
+function sideDepth(limitPrice: number, quote: OrderBookQuote | undefined): { askShares: number; bidQueueShares: number; bidAtLimitShares: number } {
+  const asks = quote?.asks || [];
+  const bids = quote?.bids || [];
+  return {
+    askShares: asks.filter((level) => level.price <= limitPrice + 0.000001).reduce((total, level) => total + level.size, 0),
+    bidQueueShares: bids.filter((level) => level.price >= limitPrice - 0.000001).reduce((total, level) => total + level.size, 0),
+    bidAtLimitShares: bids.filter((level) => Math.abs(level.price - limitPrice) < 0.000001).reduce((total, level) => total + level.size, 0),
+  };
+}
+
+function costForShares(levels: OrderBookQuote['asks'], shares: number, limitPrice: number): number {
+  let remaining = shares;
+  let cost = 0;
+  for (const level of [...(levels || [])].sort((a, b) => a.price - b.price)) {
+    if (level.price > limitPrice + 0.000001 || remaining <= 0) break;
+    const take = Math.min(remaining, level.size);
+    cost += take * level.price;
+    remaining -= take;
+  }
+  return remaining <= 0.000001 ? cost : 0;
+}
+
+function capacityTiers(activeLevel: OrderbookDepthLevel, activeLimitPrice: number): OrderbookCapacityTier[] {
+  const exactBasis = activeLevel.minBidAtLimitShares > 0 ? activeLevel.minBidAtLimitShares : activeLevel.minBidQueueShares;
+  const specs: Array<Pick<OrderbookCapacityTier, 'label' | 'queueSharePct' | 'exactLevelSharePct' | 'tone'>> = [
+    { label: 'safe', queueSharePct: 0.05, exactLevelSharePct: 0.1, tone: 'good' },
+    { label: 'conservative', queueSharePct: 0.1, exactLevelSharePct: 0.25, tone: 'good' },
+    { label: 'aggressive', queueSharePct: 0.2, exactLevelSharePct: 0.5, tone: 'warn' },
+    { label: 'stretched', queueSharePct: 0.35, exactLevelSharePct: 0.75, tone: 'bad' },
+  ];
+  return specs.map((spec) => {
+    const byQueue = activeLevel.minBidQueueShares * spec.queueSharePct;
+    const byExact = exactBasis * spec.exactLevelSharePct;
+    const shares = Math.max(0, Math.min(byQueue, byExact));
+    return {
+      ...spec,
+      maxSharesPerSide: roundShares(shares),
+      maxPairAmountUsd: roundMoney(shares * activeLimitPrice * 2),
+    };
+  });
+}
+
+function strategyEntryLimitPrice(snapshot: StateSnapshot, appConfig: AppConfig): number {
+  if (!appConfig.dynamicLimitEnabled) return roundPrice(appConfig.dualLimitPrice);
+  const scorePrice = priceFromScore(snapshot.features.chopScore);
+  const timeCap = snapshot.round.secondsToStart > 15 ? 0.45 : 0.46;
+  const pairCostCap = appConfig.maxPairCost / 2;
+  const capped = Math.min(scorePrice, timeCap, appConfig.maxDynamicLimitPrice, pairCostCap);
+  return roundPrice(Math.max(appConfig.minDynamicLimitPrice, capped));
+}
+
+function priceFromScore(score: number): number {
+  if (score >= 95) return 0.46;
+  if (score >= 90) return 0.45;
+  if (score >= 80) return 0.44;
+  return 0.42;
+}
+
+function sharesMultiplierFromScore(score: number): number {
+  if (score >= 95) return 1.25;
+  if (score >= 80) return 1;
+  return 0.5;
+}
+
+function roundRatio(value: number): number {
+  return Math.round(value * 100) / 100;
 }
 
 function applyEntryConfirmation(entry: ReturnType<typeof evaluateEntry>, signalCount: number, requiredTicks: number): ReturnType<typeof evaluateEntry> {

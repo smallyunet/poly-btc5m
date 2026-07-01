@@ -352,8 +352,8 @@ export function quoteFromBook(tokenId: string, book: any, source: 'ws'): OrderBo
     imbalance: totalDepth > 0 ? (bidDepth - askDepth) / totalDepth : null,
     updatedAt: new Date().toISOString(),
     source,
-    bids: bids.slice(0, 10),
-    asks: asks.slice(0, 10),
+    bids,
+    asks,
   };
 }
 

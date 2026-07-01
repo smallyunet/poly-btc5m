@@ -17,7 +17,7 @@ import {
   Users
 } from 'lucide-react';
 
-import type { BotRuntimeStatus, DashboardState, OrderBookQuote, RuntimeLogRecord, StrategyCheck } from '../../../packages/shared/src';
+import type { BotRuntimeStatus, DashboardState, OrderBookQuote, OrderbookDepthSnapshot, RuntimeLogRecord, StrategyCheck } from '../../../packages/shared/src';
 import { api, DASHBOARD_REFRESH_MS } from './lib/api';
 import { formatMoney, formatNumber, formatSeconds, modeLabel } from './lib/format';
 
@@ -1233,6 +1233,7 @@ export function App() {
           <div className="panel">
             <h2>Polymarket CLOB Order Books</h2>
             <OrderbookExecutionSummary quotes={snapshot.orderbooks} yesTokenId={snapshot.round.yesTokenId} noTokenId={snapshot.round.noTokenId} />
+            <OrderbookCapacityPanel depth={snapshot.orderbookDepth} />
             <OrderbookTable quotes={snapshot.orderbooks} yesTokenId={snapshot.round.yesTokenId} noTokenId={snapshot.round.noTokenId} />
           </div>
         )}
@@ -1732,6 +1733,100 @@ function OrderbookExecutionSummary({ quotes, yesTokenId, noTokenId }: { quotes: 
       />
     </div>
   );
+}
+
+function OrderbookCapacityPanel({ depth }: { depth?: OrderbookDepthSnapshot }) {
+  if (!depth) {
+    return (
+      <div className="orderbookCapacityBlock">
+        <p className="emptyText">No orderbook depth capacity snapshot yet</p>
+      </div>
+    );
+  }
+  const activeLevel = nearestDepthLevel(depth);
+
+  return (
+    <div className="orderbookCapacityBlock">
+      <div className="capacityHeader">
+        <div>
+          <h3>Strategy Capacity</h3>
+          <p>
+            Active limit {formatCapacityPrice(depth.activeLimitPrice)} / current size {formatCapacityShares(depth.baseSharesPerSide)} shares per side / {formatEtTime(depth.updatedAt)}
+          </p>
+        </div>
+        <Badge tone={depth.status === 'ready' ? 'good' : 'warn'}>{depth.status.toUpperCase()}</Badge>
+      </div>
+
+      {depth.diagnostics.length > 0 && (
+        <div className="capacityDiagnostics">
+          {depth.diagnostics.map((item) => <span key={item}>{item}</span>)}
+        </div>
+      )}
+
+      <div className="capacityTierGrid">
+        {depth.tiers.map((tier) => (
+          <DecisionMetric
+            key={tier.label}
+            label={tier.label}
+            value={`${formatCapacityShares(tier.maxSharesPerSide)} sh`}
+            detail={`~${formatMoney(tier.maxPairAmountUsd)} pair / ${formatNumber(tier.exactLevelSharePct * 100, 0)}% level cap`}
+            tone={tier.tone}
+          />
+        ))}
+      </div>
+
+      <div className="capacityFocus">
+        <DecisionMetric
+          label="Active Maker Queue"
+          value={formatCapacityShares(activeLevel?.minBidQueueShares ?? 0)}
+          detail={`min shares at-or-above ${formatCapacityPrice(depth.activeLimitPrice)}`}
+          tone={(activeLevel?.minBidQueueShares ?? 0) >= depth.baseSharesPerSide * 10 ? 'good' : 'warn'}
+        />
+        <DecisionMetric
+          label="Same-Level Queue"
+          value={formatCapacityShares(activeLevel?.minBidAtLimitShares ?? 0)}
+          detail="thin side at exact active limit"
+          tone={(activeLevel?.minBidAtLimitShares ?? 0) >= depth.baseSharesPerSide * 5 ? 'good' : 'warn'}
+        />
+        <DecisionMetric
+          label="Immediate Fill"
+          value={formatCapacityShares(activeLevel?.pairedImmediateShares ?? 0)}
+          detail={`marketable shares at ${formatCapacityPrice(depth.activeLimitPrice)}`}
+          tone={(activeLevel?.pairedImmediateShares ?? 0) > 0 ? 'warn' : 'neutral'}
+        />
+      </div>
+
+      <DataTable headers={['Limit', 'Immediate Pair', 'Immediate Cost', 'Maker Queue', 'Same-Level Queue', 'Queue Ratio']}>
+        {depth.levels.map((level) => (
+          <tr key={level.limitPrice} className={Math.abs(level.limitPrice - depth.activeLimitPrice) < 0.000001 ? 'activeDepthRow' : undefined}>
+            <td className="mono">{formatCapacityPrice(level.limitPrice)}</td>
+            <td className="mono">{formatCapacityShares(level.pairedImmediateShares)} sh</td>
+            <td className="mono">{formatMoney(level.pairedImmediateCostUsd)}</td>
+            <td className="mono">{formatCapacityShares(level.minBidQueueShares)} sh</td>
+            <td className="mono">{formatCapacityShares(level.minBidAtLimitShares)} sh</td>
+            <td className="mono">{level.queueRatio == null ? '-' : `${formatNumber(level.queueRatio, 2)}x`}</td>
+          </tr>
+        ))}
+      </DataTable>
+    </div>
+  );
+}
+
+function nearestDepthLevel(depth: OrderbookDepthSnapshot) {
+  return depth.levels.find((level) => Math.abs(level.limitPrice - depth.activeLimitPrice) < 0.000001)
+    || depth.levels.reduce((closest, level) => (
+      Math.abs(level.limitPrice - depth.activeLimitPrice) < Math.abs(closest.limitPrice - depth.activeLimitPrice) ? level : closest
+    ), depth.levels[0]);
+}
+
+function formatCapacityPrice(value: number): string {
+  return `${Math.round(value * 100)}c`;
+}
+
+function formatCapacityShares(value: number): string {
+  if (!Number.isFinite(value)) return '-';
+  if (Math.abs(value) >= 1000) return `${formatNumber(value / 1000, 1)}k`;
+  return formatNumber(value, value >= 100 ? 0 : 1);
 }
 
 function OrderbookTable({ quotes, yesTokenId, noTokenId }: { quotes: OrderBookQuote[]; yesTokenId: string; noTokenId: string }) {

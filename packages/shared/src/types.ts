@@ -85,6 +85,36 @@ export type OrderBookQuote = {
   asks?: OrderBookLevel[];
 };
 
+export type OrderbookDepthLevel = {
+  limitPrice: number;
+  pairedImmediateShares: number;
+  pairedImmediateCostUsd: number;
+  maxPairNotionalUsd: number;
+  minBidQueueShares: number;
+  minBidAtLimitShares: number;
+  queueRatio: number | null;
+};
+
+export type OrderbookCapacityTier = {
+  label: 'safe' | 'conservative' | 'aggressive' | 'stretched';
+  maxSharesPerSide: number;
+  maxPairAmountUsd: number;
+  queueSharePct: number;
+  exactLevelSharePct: number;
+  tone: 'good' | 'warn' | 'bad' | 'neutral';
+};
+
+export type OrderbookDepthSnapshot = {
+  status: 'ready' | 'insufficient';
+  updatedAt: string;
+  roundId: string;
+  activeLimitPrice: number;
+  baseSharesPerSide: number;
+  levels: OrderbookDepthLevel[];
+  tiers: OrderbookCapacityTier[];
+  diagnostics: string[];
+};
+
 export type BtcFeatureSnapshot = {
   price: number | null;
   strike: number;
@@ -177,6 +207,7 @@ export type StateSnapshot = {
   features: BtcFeatureSnapshot;
   regime: Regime;
   orderbooks: OrderBookQuote[];
+  orderbookDepth?: OrderbookDepthSnapshot;
   positions: PositionSnapshot[];
   positionReadStatus: 'enabled' | 'disabled';
   participation?: MarketParticipationSnapshot;
