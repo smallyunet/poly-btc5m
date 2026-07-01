@@ -198,8 +198,7 @@ function fillSideSummary(fills: FillRecord[], label: 'YES' | 'NO'): string {
 
 function formatAccountSummary(account: AccountSummary): string {
   if (account.error) return 'Account: balance unavailable';
-  const allowance = account.allowance == null ? 'unknown' : account.allowance > 1_000_000_000 ? 'unlimited' : formatMoney(account.allowance);
-  return `Account: balance ${formatMoney(account.balance ?? 0)} | allowance ${allowance}`;
+  return `Account: balance ${formatMoney(account.balance ?? 0)}`;
 }
 
 function topBlockers(check: StrategyCheck | undefined): string {

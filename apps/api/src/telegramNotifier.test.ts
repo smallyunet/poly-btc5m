@@ -99,6 +99,7 @@ test('sends a round summary with on-demand balance and marks the summary notifie
   assert.deepEqual(markedRoundKeys, [`${roundId}:settled`]);
   assert.match(sentText, /BTC5M Round Summary/);
   assert.match(sentText, /Account: balance \$12\.34/);
+  assert.doesNotMatch(sentText, /allowance/i);
 });
 
 test('bootstraps historical round summaries without sending backlog notifications', async () => {
