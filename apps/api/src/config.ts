@@ -79,6 +79,11 @@ export type AppConfig = {
   experimentNextRoundDownLimitPrice: number;
   experimentNextRoundSharesPerSide: number;
   experimentStopOnSingle: boolean;
+  telegramNotifyEnabled: boolean;
+  telegramBotToken?: string;
+  telegramChatId?: string;
+  telegramRoundSummaryOnOrderOnly: boolean;
+  telegramIdleSummaryIntervalMs: number;
   marketConfig: BtcMarketConfig;
 };
 
@@ -160,6 +165,11 @@ export function loadConfig(): AppConfig {
     experimentNextRoundDownLimitPrice: numberEnv('EXPERIMENT_NEXT_ROUND_DOWN_LIMIT_PRICE', 0.49),
     experimentNextRoundSharesPerSide: numberEnv('EXPERIMENT_NEXT_ROUND_SHARES_PER_SIDE', orderSharesPerSide),
     experimentStopOnSingle: booleanEnv('EXPERIMENT_STOP_ON_SINGLE', true),
+    telegramNotifyEnabled: booleanEnv('TELEGRAM_NOTIFY_ENABLED', false),
+    telegramBotToken: process.env.TELEGRAM_BOT_TOKEN,
+    telegramChatId: process.env.TELEGRAM_CHAT_ID || process.env.TELEGRAM_USER_ID,
+    telegramRoundSummaryOnOrderOnly: booleanEnv('TELEGRAM_ROUND_SUMMARY_ON_ORDER_ONLY', true),
+    telegramIdleSummaryIntervalMs: parsePositiveInteger(process.env.TELEGRAM_IDLE_SUMMARY_INTERVAL_MS, 4 * 60 * 60_000),
     marketConfig: loadMarketConfig(),
   };
 }

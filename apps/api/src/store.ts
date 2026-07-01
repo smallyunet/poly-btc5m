@@ -51,6 +51,7 @@ type PersistedRuntimeState = {
   orders: OrderRecord[];
   fills: FillRecord[];
   settlements: SettlementRecord[];
+  telegramNotifications?: TelegramNotificationState;
   roundStrikes?: Record<string, number>;
   singleFillCooldown?: SingleFillCooldownRecord | null;
   singleFillCooldownRoundIds?: string[];
@@ -86,6 +87,11 @@ type ExperimentStopRecord = {
   noShares: number;
 };
 
+export type TelegramNotificationState = {
+  notifiedRoundSummaryKeys: string[];
+  lastIdleSummaryAt?: string;
+};
+
 const FINAL_SINGLE_FILL_GRACE_MS = 60_000;
 const CLASSIC_ENTRY_STRATEGY: StrategyId = 'BTC5M_DUAL_45';
 const EXPERIMENT_STRATEGY: StrategyId = 'BTC5M_NEXT_ROUND_50_49_STOP_ON_SINGLE';
@@ -110,6 +116,7 @@ export class InMemoryStore {
   private entrySignalCounts = new Map<string, number>();
   private runtimeLogs: RuntimeLogRecord[] = [];
   private strategyChecks: StrategyCheck[] = [];
+  private telegramNotifications: TelegramNotificationState = { notifiedRoundSummaryKeys: [] };
   private experimentRunStartedAt = new Date().toISOString();
   private readonly persistencePath?: string;
   private readonly maxRecords: number;
@@ -546,6 +553,32 @@ export class InMemoryStore {
     return record;
   }
 
+  getTelegramNotificationState(): TelegramNotificationState {
+    return {
+      notifiedRoundSummaryKeys: [...this.telegramNotifications.notifiedRoundSummaryKeys],
+      lastIdleSummaryAt: this.telegramNotifications.lastIdleSummaryAt,
+    };
+  }
+
+  markTelegramRoundSummaryNotified(key: string): void {
+    if (!key.trim()) return;
+    const keys = new Set(this.telegramNotifications.notifiedRoundSummaryKeys);
+    keys.add(key);
+    this.telegramNotifications = {
+      ...this.telegramNotifications,
+      notifiedRoundSummaryKeys: [...keys].slice(-500),
+    };
+    this.persistState();
+  }
+
+  markTelegramIdleSummaryNotified(sentAt = new Date().toISOString()): void {
+    this.telegramNotifications = {
+      ...this.telegramNotifications,
+      lastIdleSummaryAt: sentAt,
+    };
+    this.persistState();
+  }
+
   dashboardState(): DashboardState {
     if (!this.latestSnapshot) throw new Error('No snapshot has been captured yet.');
     return {
@@ -570,6 +603,7 @@ export class InMemoryStore {
       this.orders = Array.isArray(parsed.orders) ? parsed.orders.filter(isOrderRecordLike).slice(0, this.maxRecords) : [];
       this.fills = Array.isArray(parsed.fills) ? parsed.fills.filter(isFillRecordLike).slice(0, this.maxRecords) : [];
       this.settlements = Array.isArray(parsed.settlements) ? parsed.settlements.slice(0, this.maxRecords) : [];
+      this.telegramNotifications = isTelegramNotificationStateLike(parsed.telegramNotifications) ? parsed.telegramNotifications : { notifiedRoundSummaryKeys: [] };
       this.roundStrikes = new Map(Object.entries(parsed.roundStrikes || {}).filter(([, strike]) => Number.isFinite(strike) && strike > 0));
       this.singleFillCooldown = isSingleFillCooldownLike(parsed.singleFillCooldown) ? parsed.singleFillCooldown : null;
       this.singleFillCooldownRoundIds = new Set(Array.isArray(parsed.singleFillCooldownRoundIds) ? parsed.singleFillCooldownRoundIds.filter((roundId): roundId is string => typeof roundId === 'string') : []);
@@ -624,6 +658,7 @@ export class InMemoryStore {
         orders: this.orders,
         fills: this.fills,
         settlements: this.settlements,
+        telegramNotifications: this.telegramNotifications,
         roundStrikes: Object.fromEntries(this.roundStrikes),
         singleFillCooldown: this.singleFillCooldown,
         singleFillCooldownRoundIds: [...this.singleFillCooldownRoundIds],
@@ -802,6 +837,14 @@ function isExperimentStopLike(value: unknown): value is ExperimentStopRecord {
     && typeof item.reason === 'string'
     && typeof item.yesShares === 'number'
     && typeof item.noShares === 'number';
+}
+
+function isTelegramNotificationStateLike(value: unknown): value is TelegramNotificationState {
+  if (!value || typeof value !== 'object') return false;
+  const item = value as Partial<TelegramNotificationState>;
+  return Array.isArray(item.notifiedRoundSummaryKeys)
+    && item.notifiedRoundSummaryKeys.every((key) => typeof key === 'string')
+    && (item.lastIdleSummaryAt == null || typeof item.lastIdleSummaryAt === 'string');
 }
 
 function normalizeCooldownPolicy(value: number | SingleFillCooldownPolicy): SingleFillCooldownPolicy {

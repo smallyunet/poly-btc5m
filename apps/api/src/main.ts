@@ -6,6 +6,7 @@ import { Btc5mRoundDiscovery } from './roundDiscovery';
 import { runBotTick } from './runtime';
 import { createServer } from './server';
 import { InMemoryStore } from './store';
+import { TelegramNotifier } from './telegramNotifier';
 
 async function main() {
   const config = loadConfig();
@@ -19,6 +20,7 @@ async function main() {
   const data = new MarketDataService(config, store);
   const discovery = new Btc5mRoundDiscovery(config);
   const participation = new ParticipationService(config);
+  const telegramNotifier = new TelegramNotifier({ appConfig: config, store, adapter });
   data.start();
 
   let tickRunning = false;
@@ -37,6 +39,12 @@ async function main() {
         message: `${source} tick completed.`,
         details: { roundId: snapshot.round.id, phase: snapshot.round.phase, regime: snapshot.regime, diagnostics: snapshot.diagnostics },
       });
+      try {
+        await telegramNotifier.notifyAfterTick(store.dashboardState());
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        store.recordRuntimeLog({ level: 'warn', source: 'telegram', message: `Telegram notifier skipped after ${source} tick: ${message}` });
+      }
       console.log('[api] tick', JSON.stringify({ source, capturedAt: snapshot.capturedAt, round: snapshot.round.id, phase: snapshot.round.phase, regime: snapshot.regime }));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

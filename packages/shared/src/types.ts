@@ -289,7 +289,7 @@ export type SettlementRecord = {
 export type RuntimeLogRecord = {
   id: string;
   level: 'info' | 'warn' | 'error';
-  source: 'worker' | 'api' | 'execution' | 'market-data' | 'operator';
+  source: 'worker' | 'api' | 'execution' | 'market-data' | 'operator' | 'telegram';
   message: string;
   createdAt: string;
   details?: unknown;
