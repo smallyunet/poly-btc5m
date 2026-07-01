@@ -6,13 +6,21 @@ APP_DIR="${APP_DIR:-~/apps/poly-btc5m}"
 COMPOSE_FILE="docker-compose.prod.yml"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+APP_VERSION="$(node -p "require('${ROOT_DIR}/package.json').version")"
+GIT_SHA="$(git -C "${ROOT_DIR}" rev-parse --short HEAD)"
+if ! git -C "${ROOT_DIR}" diff --quiet || ! git -C "${ROOT_DIR}" diff --cached --quiet; then
+  GIT_SHA="${GIT_SHA}-dirty"
+fi
+BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+export APP_VERSION GIT_SHA BUILD_TIME
 
 remote_compose() {
   local compose_args="$1"
-  ssh "${SERVER}" "cd ${APP_DIR} && if docker compose version >/dev/null 2>&1; then docker compose ${compose_args}; elif command -v docker-compose >/dev/null 2>&1; then docker-compose ${compose_args}; else echo 'Docker Compose is not installed' >&2; exit 1; fi"
+  ssh "${SERVER}" "cd ${APP_DIR} && APP_VERSION='${APP_VERSION}' GIT_SHA='${GIT_SHA}' BUILD_TIME='${BUILD_TIME}' && export APP_VERSION GIT_SHA BUILD_TIME && if docker compose version >/dev/null 2>&1; then docker compose ${compose_args}; elif command -v docker-compose >/dev/null 2>&1; then docker-compose ${compose_args}; else echo 'Docker Compose is not installed' >&2; exit 1; fi"
 }
 
 echo "[deploy] server=${SERVER} app_dir=${APP_DIR}"
+echo "[deploy] version=${APP_VERSION} git_sha=${GIT_SHA} build_time=${BUILD_TIME}"
 
 ssh "${SERVER}" "mkdir -p ${APP_DIR}/data"
 
