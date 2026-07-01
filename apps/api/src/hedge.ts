@@ -20,6 +20,8 @@ type ExecuteHedgesParams = {
 const HEDGE_STRATEGY = 'BTC5M_SINGLE_FILL_HEDGE';
 const CLASSIC_ENTRY_STRATEGY = 'BTC5M_DUAL_45';
 const FAILED_HEDGE_COOLDOWN_MS = 60_000;
+const FAK_NO_MATCH_RETRY_LIMIT = 2;
+const FAK_NO_MATCH_RETRY_DELAY_MS = 750;
 const MIN_MARKETABLE_BUY_NOTIONAL_USD = 1;
 
 export function activeHedgeWindowSeconds(appConfig: AppConfig): number {
@@ -306,33 +308,33 @@ async function executeOneHedge(params: ExecuteHedgesParams, candidate: SingleFil
   }
 
   try {
-    const posted = await params.adapter.executeLimitIntent(finalPlan.intent, { execute: true, orderType: 'FAK' });
+    const { posted, plan: postedPlan, attempts, retryReasons } = await postHedgeWithFakNoMatchRetry(params, candidate, finalPlan);
     params.store.recordOrder({
-      ...localHedgeOrder(candidate, finalPlan.intent, executionKey),
+      ...localHedgeOrder(candidate, postedPlan.intent, executionKey),
       id: `hedge-order-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
       clobOrderId: posted.orderId,
       price: posted.price,
       size: posted.size,
       status: posted.ok ? 'posted' : 'failed',
       error: posted.error,
-      rawResponse: posted.raw,
+      rawResponse: retryReasons.length ? { posted: posted.raw, retryReasons, attempts } : posted.raw,
     });
-    params.store.updateIntent(finalPlan.intent.id, { status: posted.ok ? 'executed' : 'failed', rejectionReason: posted.ok ? undefined : posted.error || 'CLOB_POST_FAILED' });
+    params.store.updateIntent(postedPlan.intent.id, { status: posted.ok ? 'executed' : 'failed', rejectionReason: posted.ok ? undefined : posted.error || 'CLOB_POST_FAILED' });
     params.store.recordSingleFillHedgeOutcome({
       roundId: candidate.roundId,
       status: posted.ok ? 'posted' : 'failed',
-      reason: posted.ok ? 'HEDGE_POSTED' : posted.error || 'CLOB_POST_FAILED',
+      reason: posted.ok ? (attempts > 1 ? `HEDGE_POSTED_AFTER_${attempts}_ATTEMPTS` : 'HEDGE_POSTED') : posted.error || 'CLOB_POST_FAILED',
       recordedAt: new Date().toISOString(),
     });
     params.store.recordRuntimeLog({
       level: posted.ok ? 'warn' : 'error',
       source: 'execution',
       message: posted.ok
-        ? `Single-fill hedge posted for ${finalPlan.intent.label} at ${posted.price.toFixed(3)}; expected locked PnL/share ${finalPlan.expectedPnlPerShare.toFixed(3)}.`
-        : `Single-fill hedge failed for ${finalPlan.intent.label}: ${posted.error || 'CLOB_POST_FAILED'}.`,
-      details: { roundId: candidate.roundId, intent: finalPlan.intent, dominantLabel: finalPlan.dominantLabel, dominantAvgPrice: finalPlan.dominantAvgPrice, bestAsk: finalPlan.bestAsk },
+        ? `Single-fill hedge posted for ${postedPlan.intent.label} at ${posted.price.toFixed(3)} after ${attempts} attempt(s); expected locked PnL/share ${postedPlan.expectedPnlPerShare.toFixed(3)}.`
+        : `Single-fill hedge failed for ${postedPlan.intent.label}: ${posted.error || 'CLOB_POST_FAILED'}.`,
+      details: { roundId: candidate.roundId, intent: postedPlan.intent, dominantLabel: postedPlan.dominantLabel, dominantAvgPrice: postedPlan.dominantAvgPrice, bestAsk: postedPlan.bestAsk, attempts, retryReasons },
     });
-    return posted.ok ? null : `Single-fill hedge failed for ${finalPlan.intent.label}: ${posted.error || 'CLOB_POST_FAILED'}.`;
+    return posted.ok ? null : `Single-fill hedge failed for ${postedPlan.intent.label}: ${posted.error || 'CLOB_POST_FAILED'}.`;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     params.store.recordOrder({ ...localHedgeOrder(candidate, finalPlan.intent, executionKey), status: 'failed', error: message, rawResponse: { error: message } });
@@ -346,6 +348,41 @@ async function executeOneHedge(params: ExecuteHedgesParams, candidate: SingleFil
     params.store.recordRuntimeLog({ level: 'error', source: 'execution', message: `Single-fill hedge failed for ${finalPlan.intent.label}: ${message}.` });
     return `Single-fill hedge failed for ${finalPlan.intent.label}: ${message}.`;
   }
+}
+
+async function postHedgeWithFakNoMatchRetry(
+  params: ExecuteHedgesParams,
+  candidate: SingleFillHedgeCandidate,
+  initialPlan: Extract<HedgePlan, { ok: true }>,
+): Promise<{ posted: Awaited<ReturnType<PolymarketAdapter['executeLimitIntent']>>; plan: Extract<HedgePlan, { ok: true }>; attempts: number; retryReasons: string[] }> {
+  let plan = initialPlan;
+  const retryReasons: string[] = [];
+  for (let attempt = 1; attempt <= FAK_NO_MATCH_RETRY_LIMIT + 1; attempt += 1) {
+    const posted = await params.adapter.executeLimitIntent(plan.intent, { execute: true, orderType: 'FAK' });
+    if (posted.ok || !isFakNoMatchError(posted.error) || attempt > FAK_NO_MATCH_RETRY_LIMIT) {
+      return { posted, plan, attempts: attempt, retryReasons };
+    }
+
+    retryReasons.push(posted.error || 'FAK_NO_MATCH');
+    await delay(FAK_NO_MATCH_RETRY_DELAY_MS);
+    await reconcileCandidateFills(params, params.store.roundOrders(candidate.roundId, CLASSIC_ENTRY_STRATEGY));
+    const nextPlan = planSingleFillHedge({
+      candidate,
+      orders: params.store.roundOrders(candidate.roundId, CLASSIC_ENTRY_STRATEGY),
+      orderbooks: params.orderbooks,
+      appConfig: params.appConfig,
+    });
+    if (!nextPlan.ok) {
+      return {
+        posted: { ok: false, price: plan.intent.limitPrice, size: roundShares(plan.intent.shares), error: `FAK_RETRY_REPLAN_BLOCKED: ${nextPlan.reason}`, raw: { retryReasons } },
+        plan,
+        attempts: attempt,
+        retryReasons,
+      };
+    }
+    plan = { ...nextPlan, intent: { ...nextPlan.intent, id: initialPlan.intent.id } };
+  }
+  throw new Error('unreachable');
 }
 
 async function reconcileCandidateFills(params: ExecuteHedgesParams, orders: OrderRecord[]): Promise<void> {
@@ -445,6 +482,15 @@ function quoteAgeLabel(quote: OrderBookQuote | undefined): string {
   const ageSeconds = (Date.now() - new Date(quote.updatedAt).getTime()) / 1000;
   const ask = quote.bestAsk == null ? ', ask missing' : `, ask ${quote.bestAsk.toFixed(3)}`;
   return `${quote.source}, ${Number.isFinite(ageSeconds) ? ageSeconds.toFixed(1) : 'unknown'}s old${ask}`;
+}
+
+function isFakNoMatchError(error: string | undefined): boolean {
+  const normalized = (error || '').toLowerCase();
+  return normalized.includes('no orders found to match') && normalized.includes('fak');
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function localHedgeOrder(candidate: SingleFillHedgeCandidate, intent: TradeIntent, executionKey: string): OrderRecord {

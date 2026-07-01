@@ -18,6 +18,8 @@ type ExecuteProfitExitParams = {
 const PROFIT_EXIT_STRATEGY = 'BTC5M_SINGLE_FILL_PROFIT_EXIT';
 const CLASSIC_ENTRY_STRATEGY = 'BTC5M_DUAL_45';
 const FAILED_EXIT_COOLDOWN_MS = 60_000;
+const FAK_NO_MATCH_RETRY_LIMIT = 2;
+const FAK_NO_MATCH_RETRY_DELAY_MS = 750;
 
 export async function executeSingleFillProfitExits(params: ExecuteProfitExitParams): Promise<string[]> {
   const diagnostics: string[] = [];
@@ -178,32 +180,27 @@ async function executeOneProfitExit(params: ExecuteProfitExitParams, candidate: 
   }
 
   try {
-    const availableShares = await params.adapter.getAvailableShares(finalPlan.intent.tokenId);
-    if (availableShares + 0.000001 < finalPlan.intent.shares) {
-      params.store.updateIntent(finalPlan.intent.id, { status: 'failed', rejectionReason: 'EXIT_SHARES_UNAVAILABLE' });
-      return `Single-fill profit exit blocked: EXIT_SHARES_UNAVAILABLE (${availableShares.toFixed(2)} / ${finalPlan.intent.shares.toFixed(2)}).`;
-    }
-    const posted = await params.adapter.executeLimitIntent(finalPlan.intent, { execute: true, orderType: 'FAK' });
+    const { posted, plan: postedPlan, attempts, retryReasons } = await postProfitExitWithFakNoMatchRetry(params, candidate, finalPlan);
     params.store.recordOrder({
-      ...localExitOrder(candidate, finalPlan.intent, executionKey),
+      ...localExitOrder(candidate, postedPlan.intent, executionKey),
       id: `profit-exit-order-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
       clobOrderId: posted.orderId,
       price: posted.price,
       size: posted.size,
       status: posted.ok ? 'posted' : 'failed',
       error: posted.error,
-      rawResponse: posted.raw,
+      rawResponse: retryReasons.length ? { posted: posted.raw, retryReasons, attempts } : posted.raw,
     });
-    params.store.updateIntent(finalPlan.intent.id, { status: posted.ok ? 'executed' : 'failed', rejectionReason: posted.ok ? undefined : posted.error || 'CLOB_POST_FAILED' });
+    params.store.updateIntent(postedPlan.intent.id, { status: posted.ok ? 'executed' : 'failed', rejectionReason: posted.ok ? undefined : posted.error || 'CLOB_POST_FAILED' });
     params.store.recordRuntimeLog({
       level: posted.ok ? 'warn' : 'error',
       source: 'execution',
       message: posted.ok
-        ? `Single-fill profit exit posted for ${finalPlan.intent.label} at ${posted.price.toFixed(3)}; expected PnL ${finalPlan.expectedPnlUsd.toFixed(2)}.`
-        : `Single-fill profit exit failed for ${finalPlan.intent.label}: ${posted.error || 'CLOB_POST_FAILED'}.`,
-      details: { roundId: candidate.roundId, intent: finalPlan.intent, avgPrice: finalPlan.avgPrice, bestBid: finalPlan.bestBid, expectedPnlUsd: finalPlan.expectedPnlUsd },
+        ? `Single-fill profit exit posted for ${postedPlan.intent.label} at ${posted.price.toFixed(3)} after ${attempts} attempt(s); expected PnL ${postedPlan.expectedPnlUsd.toFixed(2)}.`
+        : `Single-fill profit exit failed for ${postedPlan.intent.label}: ${posted.error || 'CLOB_POST_FAILED'}.`,
+      details: { roundId: candidate.roundId, intent: postedPlan.intent, avgPrice: postedPlan.avgPrice, bestBid: postedPlan.bestBid, expectedPnlUsd: postedPlan.expectedPnlUsd, attempts, retryReasons },
     });
-    return posted.ok ? null : `Single-fill profit exit failed for ${finalPlan.intent.label}: ${posted.error || 'CLOB_POST_FAILED'}.`;
+    return posted.ok ? null : `Single-fill profit exit failed for ${postedPlan.intent.label}: ${posted.error || 'CLOB_POST_FAILED'}.`;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     params.store.recordOrder({ ...localExitOrder(candidate, finalPlan.intent, executionKey), status: 'failed', error: message, rawResponse: { error: message } });
@@ -211,6 +208,51 @@ async function executeOneProfitExit(params: ExecuteProfitExitParams, candidate: 
     params.store.recordRuntimeLog({ level: 'error', source: 'execution', message: `Single-fill profit exit failed for ${finalPlan.intent.label}: ${message}.` });
     return `Single-fill profit exit failed for ${finalPlan.intent.label}: ${message}.`;
   }
+}
+
+async function postProfitExitWithFakNoMatchRetry(
+  params: ExecuteProfitExitParams,
+  candidate: SingleFillProfitExitCandidate,
+  initialPlan: Extract<ProfitExitPlan, { ok: true }>,
+): Promise<{ posted: Awaited<ReturnType<PolymarketAdapter['executeLimitIntent']>>; plan: Extract<ProfitExitPlan, { ok: true }>; attempts: number; retryReasons: string[] }> {
+  let plan = initialPlan;
+  const retryReasons: string[] = [];
+  for (let attempt = 1; attempt <= FAK_NO_MATCH_RETRY_LIMIT + 1; attempt += 1) {
+    const availableShares = await params.adapter.getAvailableShares(plan.intent.tokenId);
+    if (availableShares + 0.000001 < plan.intent.shares) {
+      return {
+        posted: { ok: false, price: plan.intent.limitPrice, size: roundShares(plan.intent.shares), error: `EXIT_SHARES_UNAVAILABLE (${availableShares.toFixed(2)} / ${plan.intent.shares.toFixed(2)})`, raw: { retryReasons } },
+        plan,
+        attempts: attempt,
+        retryReasons,
+      };
+    }
+
+    const posted = await params.adapter.executeLimitIntent(plan.intent, { execute: true, orderType: 'FAK' });
+    if (posted.ok || !isFakNoMatchError(posted.error) || attempt > FAK_NO_MATCH_RETRY_LIMIT) {
+      return { posted, plan, attempts: attempt, retryReasons };
+    }
+
+    retryReasons.push(posted.error || 'FAK_NO_MATCH');
+    await delay(FAK_NO_MATCH_RETRY_DELAY_MS);
+    await reconcileCandidateFills(params, params.store.roundOrders(candidate.roundId, CLASSIC_ENTRY_STRATEGY));
+    const nextPlan = planSingleFillProfitExit({
+      candidate,
+      orders: params.store.roundOrders(candidate.roundId, CLASSIC_ENTRY_STRATEGY),
+      orderbooks: params.orderbooks,
+      appConfig: params.appConfig,
+    });
+    if (!nextPlan.ok) {
+      return {
+        posted: { ok: false, price: plan.intent.limitPrice, size: roundShares(plan.intent.shares), error: `FAK_RETRY_REPLAN_BLOCKED: ${nextPlan.reason}`, raw: { retryReasons } },
+        plan,
+        attempts: attempt,
+        retryReasons,
+      };
+    }
+    plan = { ...nextPlan, intent: { ...nextPlan.intent, id: initialPlan.intent.id } };
+  }
+  throw new Error('unreachable');
 }
 
 async function reconcileCandidateFills(params: ExecuteProfitExitParams, orders: OrderRecord[]): Promise<void> {
@@ -319,6 +361,15 @@ function quoteAgeLabel(quote: OrderBookQuote | undefined): string {
 
 function benignProfitExitReason(reason: string | undefined): boolean {
   return !reason || ['NO_SINGLE_PROFIT_EXIT_EXPOSURE', 'NOT_IN_PROFIT_EXIT_WINDOW', 'PROFIT_EXIT_TOO_CLOSE_TO_EXPIRY', 'PROFIT_EXIT_DISABLED'].includes(reason);
+}
+
+function isFakNoMatchError(error: string | undefined): boolean {
+  const normalized = (error || '').toLowerCase();
+  return normalized.includes('no orders found to match') && normalized.includes('fak');
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function makeId(prefix: string): string {

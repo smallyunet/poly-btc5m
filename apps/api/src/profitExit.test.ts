@@ -2,8 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import type { AppConfig } from './config';
-import { planSingleFillProfitExit } from './profitExit';
-import type { OrderBookQuote, OrderRecord } from '../../../packages/shared/src';
+import { executeSingleFillProfitExits, planSingleFillProfitExit } from './profitExit';
+import { InMemoryStore } from './store';
+import type { OrderBookQuote, OrderRecord, TradeIntent } from '../../../packages/shared/src';
+import type { PolymarketAdapter } from '../../../packages/polymarket/src';
 import type { SingleFillProfitExitCandidate } from './store';
 
 const nowMs = new Date('2026-06-26T00:02:00.000Z').getTime();
@@ -43,6 +45,55 @@ test('blocks profit exit when the live bid is below the configured floor', () =>
   });
 
   assert.deepEqual(plan, { ok: false, reason: 'EXIT_BID_BELOW_MIN' });
+});
+
+test('retries a profit-exit FAK when the book has no matching orders', async () => {
+  const now = Date.now();
+  const activeCandidate = {
+    ...candidate(),
+    startAt: new Date(now - 3 * 60_000).toISOString(),
+    endAt: new Date(now + 90_000).toISOString(),
+    secondsToEnd: 90,
+  };
+  const store = new InMemoryStore('live', 2_000, { persistencePath: false });
+  store.recordOrder(order('YES', 'BUY', { filledSize: 10, avgFillPrice: 0.45, status: 'filled' }));
+  store.recordOrder(order('NO', 'BUY', { filledSize: 0, status: 'posted', clobOrderId: 'no-open' }));
+  let attempts = 0;
+  const adapter = {
+    async getRecentFillsForTargets() {
+      return [];
+    },
+    async cancelOrders() {
+      return {};
+    },
+    async getAvailableShares() {
+      return 10;
+    },
+    async executeLimitIntent(_intent: TradeIntent, options: { execute: boolean; orderType?: string }) {
+      attempts += 1;
+      assert.equal(options.orderType, 'FAK');
+      if (attempts === 1) {
+        return {
+          ok: false,
+          price: 0.5,
+          size: 10,
+          error: 'no orders found to match with FAK order. FAK orders are partially filled or killed if no match is found.',
+        };
+      }
+      return { ok: true, orderId: 'profit-exit-order', price: 0.5, size: 10 };
+    },
+  } as unknown as PolymarketAdapter;
+
+  const diagnostics = await executeSingleFillProfitExits({
+    appConfig: { ...config(), executionMode: 'live', ownerPrivateKey: '0xabc', depositWallet: '0xwallet' },
+    adapter,
+    store,
+    candidates: [activeCandidate],
+    orderbooks: [{ ...quote('yes-token', 0.5), updatedAt: new Date().toISOString() }],
+  });
+
+  assert.deepEqual(diagnostics, []);
+  assert.equal(attempts, 2);
 });
 
 function config(): AppConfig {

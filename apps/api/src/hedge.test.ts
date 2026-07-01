@@ -230,6 +230,51 @@ test('executes final-window hedge as a FAK limit', async () => {
   assert.equal(postedOptions?.orderType, 'FAK');
 });
 
+test('retries a hedge FAK when the book has no matching orders', async () => {
+  const now = Date.now();
+  const activeCandidate = candidate({
+    startAt: new Date(now - 4 * 60_000).toISOString(),
+    endAt: new Date(now + 25_000).toISOString(),
+    secondsToEnd: 25,
+  });
+  const store = new InMemoryStore('live', 2_000, { persistencePath: false });
+  store.recordOrder(order('YES', { roundId: activeCandidate.roundId, eventSlug: activeCandidate.eventSlug, filledSize: 10, avgFillPrice: 0.44, status: 'filled' }));
+  store.recordOrder(order('NO', { roundId: activeCandidate.roundId, eventSlug: activeCandidate.eventSlug, filledSize: 0, status: 'posted', clobOrderId: 'no-open' }));
+  let attempts = 0;
+  const adapter = {
+    async getRecentFillsForTargets() {
+      return [];
+    },
+    async cancelOrders() {
+      return {};
+    },
+    async executeLimitIntent(_intent: TradeIntent, options: { execute: boolean; orderType?: string }) {
+      attempts += 1;
+      assert.equal(options.orderType, 'FAK');
+      if (attempts === 1) {
+        return {
+          ok: false,
+          price: 0.6,
+          size: 10,
+          error: 'no orders found to match with FAK order. FAK orders are partially filled or killed if no match is found.',
+        };
+      }
+      return { ok: true, orderId: 'hedge-order', price: 0.6, size: 10 };
+    },
+  } as unknown as PolymarketAdapter;
+
+  const diagnostics = await executeSingleFillHedges({
+    appConfig: { ...config(), executionMode: 'live', ownerPrivateKey: '0xabc', depositWallet: '0xwallet' },
+    adapter,
+    store,
+    candidates: [activeCandidate],
+    orderbooks: [quote('no-token', 0.59)],
+  });
+
+  assert.deepEqual(diagnostics, []);
+  assert.equal(attempts, 2);
+});
+
 function config(): AppConfig {
   return {
     port: 8788,
