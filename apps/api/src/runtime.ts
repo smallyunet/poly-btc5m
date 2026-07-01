@@ -2,7 +2,7 @@ import type { BtcRoundConfig, FillRecord, PositionSnapshot, RoundPhase, RoundSna
 import { classifyRegime, evaluateEntry, evaluateExit, type StrategyEvaluation, type StrategyRiskConfig } from '../../../packages/strategy/src';
 import { PolymarketAdapter, type FillTarget } from '../../../packages/polymarket/src';
 import type { AppConfig } from './config';
-import { activeHedgeWindowSeconds, buildSingleFillHedgeCheck, executeSingleFillHedges, planSingleFillHedge } from './hedge';
+import { activeHedgeWindowSeconds, buildSingleFillHedgeCheck, executeSingleFillHedges, hedgeExposureOrders, planSingleFillHedge } from './hedge';
 import { executeLiveIntents } from './execution';
 import { buildSingleFillProfitExitCheck, executeSingleFillProfitExits, planSingleFillProfitExit, profitExitExposureOrders } from './profitExit';
 import type { MarketDataService } from './marketData';
@@ -253,7 +253,7 @@ function buildCurrentRoundHedgeCheck(appConfig: AppConfig, store: InMemoryStore,
     yesTokenId: snapshot.round.yesTokenId,
     noTokenId: snapshot.round.noTokenId,
   };
-  const orders = store.roundOrders(snapshot.round.id, 'BTC5M_DUAL_45');
+  const orders = hedgeExposureOrders(store.roundOrders(snapshot.round.id));
   const plan = planSingleFillHedge({ candidate, orders, orderbooks, appConfig });
   const executionKey = plan.ok ? [plan.intent.roundId, plan.intent.strategy, plan.intent.tokenId, plan.intent.side].join(':') : undefined;
   return buildSingleFillHedgeCheck({

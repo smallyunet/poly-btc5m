@@ -19,6 +19,7 @@ type ExecuteHedgesParams = {
 
 const HEDGE_STRATEGY = 'BTC5M_SINGLE_FILL_HEDGE';
 const CLASSIC_ENTRY_STRATEGY = 'BTC5M_DUAL_45';
+const PROFIT_EXIT_STRATEGY = 'BTC5M_SINGLE_FILL_PROFIT_EXIT';
 const FAILED_HEDGE_COOLDOWN_MS = 60_000;
 const FAK_NO_MATCH_RETRY_LIMIT = 2;
 const FAK_NO_MATCH_RETRY_DELAY_MS = 750;
@@ -213,7 +214,7 @@ export function buildSingleFillHedgeCheck(params: {
 async function executeOneHedge(params: ExecuteHedgesParams, candidate: SingleFillHedgeCandidate): Promise<string | null> {
   const orders = params.store.roundOrders(candidate.roundId, CLASSIC_ENTRY_STRATEGY);
   await reconcileCandidateFills(params, orders);
-  const plan = planSingleFillHedge({ candidate, orders: params.store.roundOrders(candidate.roundId, CLASSIC_ENTRY_STRATEGY), orderbooks: params.orderbooks, appConfig: params.appConfig });
+  const plan = planSingleFillHedge({ candidate, orders: hedgeExposureOrders(params.store.roundOrders(candidate.roundId)), orderbooks: params.orderbooks, appConfig: params.appConfig });
 
   if (!plan.ok) {
     params.store.recordSingleFillHedgeOutcome({
@@ -262,7 +263,7 @@ async function executeOneHedge(params: ExecuteHedgesParams, candidate: SingleFil
   }
 
   await reconcileCandidateFills(params, params.store.roundOrders(candidate.roundId, CLASSIC_ENTRY_STRATEGY));
-  const finalPlan = planSingleFillHedge({ candidate, orders: params.store.roundOrders(candidate.roundId, CLASSIC_ENTRY_STRATEGY), orderbooks: params.orderbooks, appConfig: params.appConfig });
+  const finalPlan = planSingleFillHedge({ candidate, orders: hedgeExposureOrders(params.store.roundOrders(candidate.roundId)), orderbooks: params.orderbooks, appConfig: params.appConfig });
   if (!finalPlan.ok) {
     params.store.recordSingleFillHedgeOutcome({
       roundId: candidate.roundId,
@@ -368,7 +369,7 @@ async function postHedgeWithFakNoMatchRetry(
     await reconcileCandidateFills(params, params.store.roundOrders(candidate.roundId, CLASSIC_ENTRY_STRATEGY));
     const nextPlan = planSingleFillHedge({
       candidate,
-      orders: params.store.roundOrders(candidate.roundId, CLASSIC_ENTRY_STRATEGY),
+      orders: hedgeExposureOrders(params.store.roundOrders(candidate.roundId)),
       orderbooks: params.orderbooks,
       appConfig: params.appConfig,
     });
@@ -436,6 +437,14 @@ function netExposure(orders: OrderRecord[], label: 'YES' | 'NO'): { shares: numb
   const shares = roundShares(Math.max(0, buyFilled - sellFilled));
   const costBasis = Math.max(0, buyCost - sellProceeds);
   return { shares, avgPrice: shares > 0 ? costBasis / shares : 0 };
+}
+
+export function hedgeExposureOrders(orders: OrderRecord[]): OrderRecord[] {
+  return orders.filter((order) => {
+    if (order.strategy === HEDGE_STRATEGY || order.strategy === PROFIT_EXIT_STRATEGY) return true;
+    if (order.strategy === CLASSIC_ENTRY_STRATEGY) return true;
+    return !order.strategy && order.strategyProfile !== 'experiment_next_round';
+  });
 }
 
 function activeSellOrder(orders: OrderRecord[]): OrderRecord | undefined {

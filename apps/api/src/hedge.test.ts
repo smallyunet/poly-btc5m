@@ -163,6 +163,72 @@ test('does not hedge after the single filled side was sold by profit exit', () =
   assert.deepEqual(plan, { ok: false, reason: 'NO_MATERIAL_SINGLE_FILL_EXPOSURE' });
 });
 
+test('does not execute a hedge after a prior profit exit sell fill', async () => {
+  const now = Date.now();
+  const activeCandidate = candidate({
+    startAt: new Date(now - 4 * 60_000).toISOString(),
+    endAt: new Date(now + 25_000).toISOString(),
+    secondsToEnd: 25,
+  });
+  const store = new InMemoryStore('live', 2_000, { persistencePath: false });
+  store.recordOrder(order('YES', {
+    id: 'classic-yes-buy',
+    roundId: activeCandidate.roundId,
+    eventSlug: activeCandidate.eventSlug,
+    strategy: 'BTC5M_DUAL_45',
+    filledSize: 10,
+    avgFillPrice: 0.44,
+    status: 'filled',
+  }));
+  store.recordOrder(order('NO', {
+    id: 'classic-no-buy',
+    roundId: activeCandidate.roundId,
+    eventSlug: activeCandidate.eventSlug,
+    strategy: 'BTC5M_DUAL_45',
+    filledSize: 0,
+    status: 'cancelled',
+    clobOrderId: 'no-cancelled',
+  }));
+  store.recordOrder(order('YES', {
+    id: 'profit-exit-yes-sell',
+    intentId: 'profit-exit-intent',
+    roundId: activeCandidate.roundId,
+    eventSlug: activeCandidate.eventSlug,
+    strategy: 'BTC5M_SINGLE_FILL_PROFIT_EXIT',
+    side: 'SELL',
+    filledSize: 10,
+    avgFillPrice: 0.51,
+    status: 'filled',
+  }));
+  let cancelAttempts = 0;
+  let postAttempts = 0;
+  const adapter = {
+    async getRecentFillsForTargets() {
+      return [];
+    },
+    async cancelOrders() {
+      cancelAttempts += 1;
+      return {};
+    },
+    async executeLimitIntent() {
+      postAttempts += 1;
+      throw new Error('should not post hedge after profit exit');
+    },
+  } as unknown as PolymarketAdapter;
+
+  const diagnostics = await executeSingleFillHedges({
+    appConfig: { ...config(), executionMode: 'live', ownerPrivateKey: '0xabc', depositWallet: '0xwallet' },
+    adapter,
+    store,
+    candidates: [activeCandidate],
+    orderbooks: [quote('no-token', 0.59)],
+  });
+
+  assert.deepEqual(diagnostics, []);
+  assert.equal(cancelAttempts, 0);
+  assert.equal(postAttempts, 0);
+});
+
 test('pauses hedge while a profit-exit sell order is awaiting reconciliation', () => {
   const plan = planSingleFillHedge({
     candidate: candidate(),
