@@ -163,8 +163,9 @@ function buildRoundSummary(state: DashboardState, settlement: SettlementRecord, 
     `Status: ${statusLabel}${settlement.winningLabel ? `, winner ${settlement.winningLabel}` : ''}`,
     `Orders: ${orders.length} total, ${filledOrders} filled/partial, ${cancelledOrders} cancelled, ${failedOrders} failed`,
     `Fills: ${fillSideSummary(fills, 'YES')} | ${fillSideSummary(fills, 'NO')}`,
-    `Cost: ${formatMoney(settlement.totalCost)} | Payout: ${formatMoney(settlement.payout)} | PnL: ${formatSignedMoney(settlement.pnl)}`,
-    `Total settled PnL: ${formatSignedMoney(totalSettledPnl(state))}`,
+    `Cost: ${formatMoney(settlement.totalCost)} | Payout: ${formatMoney(settlement.payout)}`,
+    `PnL: ${formatPnlStatus(settlement.pnl)}`,
+    `Total settled PnL: ${formatPnlStatus(totalSettledPnl(state))}`,
     `Runtime: ${state.runtime.executionMode}, ${state.runtime.status}`,
   ].join('\n');
 }
@@ -180,7 +181,7 @@ function buildIdleSummary(state: DashboardState, referenceMs: number): string {
     `Phase: ${state.latestSnapshot.round.phase}, ${state.latestSnapshot.round.secondsToStart > 0 ? `${Math.round(state.latestSnapshot.round.secondsToStart)}s to start` : `${Math.round(state.latestSnapshot.round.secondsToEnd)}s to end`}`,
     `Regime: ${state.latestSnapshot.regime}, chop ${formatNumber(state.latestSnapshot.features.chopScore, 1)}`,
     `Open orders: ${openOrders} | Positions: ${state.latestSnapshot.positions.length}`,
-    `Total settled PnL: ${formatSignedMoney(totalSettledPnl(state))}`,
+    `Total settled PnL: ${formatPnlStatus(totalSettledPnl(state))}`,
     `Runtime: ${state.runtime.executionMode}, ${state.runtime.status}`,
     `Cooldown: ${state.runtime.entryCooldownUntil ? `${state.runtime.entryCooldownReason || 'active'} until ${state.runtime.entryCooldownUntil}` : 'none'}`,
     `Top blockers: ${blockers || 'none'}`,
@@ -241,6 +242,12 @@ function formatMoney(value: number): string {
 
 function formatSignedMoney(value: number): string {
   return `${value >= 0 ? '+' : '-'}$${formatNumber(Math.abs(value), 2)}`;
+}
+
+function formatPnlStatus(value: number): string {
+  if (value > 0) return `🟢 PROFIT ${formatSignedMoney(value)}`;
+  if (value < 0) return `🔴 LOSS ${formatSignedMoney(value)}`;
+  return `⚪ FLAT ${formatSignedMoney(value)}`;
 }
 
 function formatNumber(value: number, digits: number): string {

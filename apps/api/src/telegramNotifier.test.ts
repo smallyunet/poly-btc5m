@@ -98,6 +98,8 @@ test('sends a round summary with on-demand balance and marks the summary notifie
   assert.equal(balanceReads, 1);
   assert.deepEqual(markedRoundKeys, [`${roundId}:settled`]);
   assert.match(sentText, /BTC5M Round Summary/);
+  assert.match(sentText, /PnL: 🟢 PROFIT \+\$5\.50/);
+  assert.match(sentText, /Total settled PnL: 🟢 PROFIT \+\$5\.50/);
   assert.match(sentText, /Account: balance \$12\.34/);
   assert.doesNotMatch(sentText, /allowance/i);
 });
