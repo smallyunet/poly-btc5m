@@ -17,6 +17,7 @@ type ExecuteProfitExitParams = {
 
 const PROFIT_EXIT_STRATEGY = 'BTC5M_SINGLE_FILL_PROFIT_EXIT';
 const CLASSIC_ENTRY_STRATEGY = 'BTC5M_DUAL_45';
+const HEDGE_STRATEGY = 'BTC5M_SINGLE_FILL_HEDGE';
 const FAILED_EXIT_COOLDOWN_MS = 60_000;
 const FAK_NO_MATCH_RETRY_LIMIT = 2;
 const FAK_NO_MATCH_RETRY_DELAY_MS = 750;
@@ -143,8 +144,9 @@ export function buildSingleFillProfitExitCheck(params: {
 }
 
 async function executeOneProfitExit(params: ExecuteProfitExitParams, candidate: SingleFillProfitExitCandidate): Promise<string | null> {
-  await reconcileCandidateFills(params, params.store.roundOrders(candidate.roundId, CLASSIC_ENTRY_STRATEGY));
-  const plan = planSingleFillProfitExit({ candidate, orders: params.store.roundOrders(candidate.roundId, CLASSIC_ENTRY_STRATEGY), orderbooks: params.orderbooks, appConfig: params.appConfig });
+  const entryOrders = params.store.roundOrders(candidate.roundId, CLASSIC_ENTRY_STRATEGY);
+  await reconcileCandidateFills(params, entryOrders);
+  const plan = planSingleFillProfitExit({ candidate, orders: profitExitExposureOrders(params.store.roundOrders(candidate.roundId)), orderbooks: params.orderbooks, appConfig: params.appConfig });
   if (!plan.ok) {
     if (!benignProfitExitReason(plan.reason)) {
       params.store.recordRuntimeLog({ level: 'warn', source: 'execution', message: `Single-fill profit exit skipped for ${candidate.roundId}: ${plan.reason}.` });
@@ -159,8 +161,8 @@ async function executeOneProfitExit(params: ExecuteProfitExitParams, candidate: 
   const cancelResult = await cancelMissingSideBuyOrders(params, candidate.roundId, plan.missingLabel);
   if (!cancelResult.ok) return `Single-fill profit exit blocked for ${plan.exitLabel}: ${cancelResult.reason}.`;
 
-  await reconcileCandidateFills(params, params.store.roundOrders(candidate.roundId, CLASSIC_ENTRY_STRATEGY));
-  const finalPlan = planSingleFillProfitExit({ candidate, orders: params.store.roundOrders(candidate.roundId, CLASSIC_ENTRY_STRATEGY), orderbooks: params.orderbooks, appConfig: params.appConfig });
+  await reconcileCandidateFills(params, entryOrders);
+  const finalPlan = planSingleFillProfitExit({ candidate, orders: profitExitExposureOrders(params.store.roundOrders(candidate.roundId)), orderbooks: params.orderbooks, appConfig: params.appConfig });
   if (!finalPlan.ok) return null;
   params.store.recordIntents([finalPlan.intent]);
 
@@ -238,7 +240,7 @@ async function postProfitExitWithFakNoMatchRetry(
     await reconcileCandidateFills(params, params.store.roundOrders(candidate.roundId, CLASSIC_ENTRY_STRATEGY));
     const nextPlan = planSingleFillProfitExit({
       candidate,
-      orders: params.store.roundOrders(candidate.roundId, CLASSIC_ENTRY_STRATEGY),
+      orders: profitExitExposureOrders(params.store.roundOrders(candidate.roundId)),
       orderbooks: params.orderbooks,
       appConfig: params.appConfig,
     });
@@ -306,6 +308,14 @@ function netExposure(orders: OrderRecord[], label: 'YES' | 'NO'): { netShares: n
     netShares: roundShares(Math.max(0, buyFilled - sellFilled)),
     avgBuyPrice: buyFilled > 0 ? buyCost / buyFilled : 0,
   };
+}
+
+export function profitExitExposureOrders(orders: OrderRecord[]): OrderRecord[] {
+  return orders.filter((order) => {
+    if (order.strategy === PROFIT_EXIT_STRATEGY || order.strategy === HEDGE_STRATEGY) return true;
+    if (order.strategy === CLASSIC_ENTRY_STRATEGY) return true;
+    return !order.strategy && order.strategyProfile !== 'experiment_next_round';
+  });
 }
 
 function buyShares(orders: OrderRecord[], label: 'YES' | 'NO'): number {

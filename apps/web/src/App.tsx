@@ -131,6 +131,13 @@ function fillStateLabel(yesShares: number, noShares: number): 'paired' | 'single
   return 'none';
 }
 
+function netFilledShares(round: Pick<RoundExecutionSummary, 'filledBuyYes' | 'filledBuyNo' | 'filledSellYes' | 'filledSellNo'>) {
+  return {
+    yes: Math.max(0, round.filledBuyYes - round.filledSellYes),
+    no: Math.max(0, round.filledBuyNo - round.filledSellNo),
+  };
+}
+
 function roundStatusSummary(round: RoundExecutionSummary): RoundStatusSummary {
   if (round.failedOrderCount > 0) {
     return {
@@ -146,12 +153,13 @@ function roundStatusSummary(round: RoundExecutionSummary): RoundStatusSummary {
       detail: `${round.unfilledOrders} orders / ${formatShares(round.unfilledShares)} shares`,
     };
   }
-  const fillLabel = fillStateLabel(round.filledBuyYes, round.filledBuyNo);
+  const net = netFilledShares(round);
+  const fillLabel = fillStateLabel(net.yes, net.no);
   if (fillLabel === 'paired') {
-    return { label: 'paired', tone: 'good', detail: `UP ${formatShares(round.filledBuyYes)} / DOWN ${formatShares(round.filledBuyNo)}` };
+    return { label: 'paired', tone: 'good', detail: `UP ${formatShares(net.yes)} / DOWN ${formatShares(net.no)}` };
   }
   if (fillLabel === 'single') {
-    return { label: 'single', tone: 'warn', detail: `UP ${formatShares(round.filledBuyYes)} / DOWN ${formatShares(round.filledBuyNo)}` };
+    return { label: 'single', tone: 'warn', detail: `UP ${formatShares(net.yes)} / DOWN ${formatShares(net.no)}` };
   }
   if (round.settlementStatus === 'settled') {
     return { label: 'settled', tone: 'neutral', detail: round.settlementPnl == null ? 'settled without local fills' : formatMoney(round.settlementPnl) };
@@ -434,8 +442,14 @@ function buildDailyExecutionSummaries(rounds: RoundExecutionSummary[]): DailyExe
       orderCount: sortedRounds.reduce((total, round) => total + round.orderCount, 0),
       buyOrderCount: sortedRounds.reduce((total, round) => total + round.buyOrderCount, 0),
       sellOrderCount: sortedRounds.reduce((total, round) => total + round.sellOrderCount, 0),
-      pairedRounds: sortedRounds.filter((round) => fillStateLabel(round.filledBuyYes, round.filledBuyNo) === 'paired').length,
-      singleRounds: sortedRounds.filter((round) => fillStateLabel(round.filledBuyYes, round.filledBuyNo) === 'single').length,
+      pairedRounds: sortedRounds.filter((round) => {
+        const net = netFilledShares(round);
+        return fillStateLabel(net.yes, net.no) === 'paired';
+      }).length,
+      singleRounds: sortedRounds.filter((round) => {
+        const net = netFilledShares(round);
+        return fillStateLabel(net.yes, net.no) === 'single';
+      }).length,
       unfilledOrders: sortedRounds.reduce((total, round) => total + round.unfilledOrders, 0),
       unfilledShares: sortedRounds.reduce((total, round) => total + round.unfilledShares, 0),
       settledRounds: sortedRounds.filter((round) => round.settlementStatus === 'settled').length,
@@ -1291,7 +1305,8 @@ export function App() {
                           >
                             {day.rounds.map((round) => {
                               const hasUnfilled = round.unfilledOrders > 0;
-                              const fillLabel = fillStateLabel(round.filledBuyYes, round.filledBuyNo);
+                              const net = netFilledShares(round);
+                              const fillLabel = fillStateLabel(net.yes, net.no);
                               const status = roundStatusSummary(round);
                               return (
                                 <tr key={round.roundId}>
@@ -1323,7 +1338,7 @@ export function App() {
                                   <td className="mono">
                                     UP {formatShares(round.filledBuyYes)} / DOWN {formatShares(round.filledBuyNo)}
                                     {' '}
-                                    <Badge tone={fillStateTone(round.filledBuyYes, round.filledBuyNo)}>{fillLabel}</Badge>
+                                    <Badge tone={fillStateTone(net.yes, net.no)}>{fillLabel}</Badge>
                                   </td>
                                   <td>
                                     <Badge tone={hasUnfilled ? 'warn' : 'good'}>
@@ -1365,7 +1380,8 @@ export function App() {
                     >
                       {roundPagination.pageRows.map((round) => {
                         const hasUnfilled = round.unfilledOrders > 0;
-                        const fillLabel = fillStateLabel(round.filledBuyYes, round.filledBuyNo);
+                        const net = netFilledShares(round);
+                        const fillLabel = fillStateLabel(net.yes, net.no);
                         const status = roundStatusSummary(round);
                         return (
                           <tr key={round.roundId}>
@@ -1397,7 +1413,7 @@ export function App() {
                             <td className="mono">
                               UP {formatShares(round.filledBuyYes)} / DOWN {formatShares(round.filledBuyNo)}
                               {' '}
-                              <Badge tone={fillStateTone(round.filledBuyYes, round.filledBuyNo)}>{fillLabel}</Badge>
+                              <Badge tone={fillStateTone(net.yes, net.no)}>{fillLabel}</Badge>
                             </td>
                             <td className="mono">
                               UP {formatShares(round.filledSellYes)} / DOWN {formatShares(round.filledSellNo)}

@@ -47,6 +47,22 @@ test('blocks profit exit when the live bid is below the configured floor', () =>
   assert.deepEqual(plan, { ok: false, reason: 'EXIT_BID_BELOW_MIN' });
 });
 
+test('blocks profit exit after the filled side has already been sold', () => {
+  const plan = planSingleFillProfitExit({
+    candidate: candidate(),
+    orders: [
+      order('YES', 'BUY', { filledSize: 10, avgFillPrice: 0.45, status: 'filled' }),
+      order('YES', 'SELL', { filledSize: 10, avgFillPrice: 0.51, status: 'filled', strategy: 'BTC5M_SINGLE_FILL_PROFIT_EXIT' }),
+      order('NO', 'BUY', { filledSize: 0, status: 'posted', clobOrderId: 'no-open' }),
+    ],
+    orderbooks: [quote('yes-token', 0.6)],
+    appConfig: config(),
+    nowMs,
+  });
+
+  assert.deepEqual(plan, { ok: false, reason: 'NO_SINGLE_PROFIT_EXIT_EXPOSURE' });
+});
+
 test('retries a profit-exit FAK when the book has no matching orders', async () => {
   const now = Date.now();
   const activeCandidate = {
@@ -94,6 +110,44 @@ test('retries a profit-exit FAK when the book has no matching orders', async () 
 
   assert.deepEqual(diagnostics, []);
   assert.equal(attempts, 2);
+});
+
+test('does not execute another profit exit after a prior exit sell fill', async () => {
+  const now = Date.now();
+  const activeCandidate = {
+    ...candidate(),
+    startAt: new Date(now - 3 * 60_000).toISOString(),
+    endAt: new Date(now + 90_000).toISOString(),
+    secondsToEnd: 90,
+  };
+  const store = new InMemoryStore('live', 2_000, { persistencePath: false });
+  store.recordOrder(order('YES', 'BUY', { filledSize: 10, avgFillPrice: 0.45, status: 'filled' }));
+  store.recordOrder(order('YES', 'SELL', { filledSize: 10, avgFillPrice: 0.51, status: 'filled', strategy: 'BTC5M_SINGLE_FILL_PROFIT_EXIT' }));
+  store.recordOrder(order('NO', 'BUY', { filledSize: 0, status: 'posted', clobOrderId: 'no-open' }));
+  let balanceReads = 0;
+  const adapter = {
+    async getRecentFillsForTargets() {
+      return [];
+    },
+    async getAvailableShares() {
+      balanceReads += 1;
+      return 0;
+    },
+    async executeLimitIntent() {
+      throw new Error('should not post duplicate profit exit');
+    },
+  } as unknown as PolymarketAdapter;
+
+  const diagnostics = await executeSingleFillProfitExits({
+    appConfig: { ...config(), executionMode: 'live', ownerPrivateKey: '0xabc', depositWallet: '0xwallet' },
+    adapter,
+    store,
+    candidates: [activeCandidate],
+    orderbooks: [{ ...quote('yes-token', 0.6), updatedAt: new Date().toISOString() }],
+  });
+
+  assert.deepEqual(diagnostics, []);
+  assert.equal(balanceReads, 0);
 });
 
 function config(): AppConfig {

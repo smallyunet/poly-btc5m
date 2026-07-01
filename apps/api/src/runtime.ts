@@ -4,7 +4,7 @@ import { PolymarketAdapter, type FillTarget } from '../../../packages/polymarket
 import type { AppConfig } from './config';
 import { activeHedgeWindowSeconds, buildSingleFillHedgeCheck, executeSingleFillHedges, planSingleFillHedge } from './hedge';
 import { executeLiveIntents } from './execution';
-import { buildSingleFillProfitExitCheck, executeSingleFillProfitExits, planSingleFillProfitExit } from './profitExit';
+import { buildSingleFillProfitExitCheck, executeSingleFillProfitExits, planSingleFillProfitExit, profitExitExposureOrders } from './profitExit';
 import type { MarketDataService } from './marketData';
 import type { ParticipationService } from './participation';
 import type { Btc5mRoundDiscovery } from './roundDiscovery';
@@ -280,7 +280,7 @@ function buildCurrentRoundProfitExitCheck(appConfig: AppConfig, store: InMemoryS
     yesTokenId: snapshot.round.yesTokenId,
     noTokenId: snapshot.round.noTokenId,
   };
-  const orders = store.roundOrders(snapshot.round.id, 'BTC5M_DUAL_45');
+  const orders = profitExitExposureOrders(store.roundOrders(snapshot.round.id));
   const plan = planSingleFillProfitExit({ candidate, orders, orderbooks, appConfig });
   const executionKey = plan.ok ? [plan.intent.roundId, plan.intent.strategy, plan.intent.tokenId, plan.intent.side].join(':') : undefined;
   return buildSingleFillProfitExitCheck({
