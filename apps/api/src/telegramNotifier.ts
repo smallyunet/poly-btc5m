@@ -33,7 +33,7 @@ export class TelegramNotifier {
 
     const account = await this.loadAccountSummary();
     for (const notification of pending) {
-      const text = `${notification.text}\n\n${formatAccountSummary(account)}`;
+      const text = `${notification.text}\n${formatAccountSummary(account)}`;
       const sent = await this.sendMessage(text);
       if (!sent) continue;
       if (notification.kind === 'round-summary') {
@@ -213,11 +213,10 @@ function fillSideSummary(fills: FillRecord[], label: 'YES' | 'NO'): string {
 }
 
 function formatAccountSummary(account: AccountSummary): string {
-  return formatTelegramSummary('Account', [
-    section('Wallet', [
-      ['Balance', account.error ? 'unavailable' : formatMoney(account.balance ?? 0)],
-    ]),
-  ]);
+  return [
+    '<b>Account</b>',
+    formatRow('Balance', account.error ? 'unavailable' : formatMoney(account.balance ?? 0)),
+  ].join('\n');
 }
 
 function topBlockers(check: StrategyCheck | undefined): string[] {
@@ -290,7 +289,7 @@ function formatTelegramSummary(title: string, sections: SummarySection[]): strin
   return [
     `<b>${escapeHtml(title)}</b>`,
     ...sections.filter((item) => item.rows?.length || item.lines?.length).map(formatSection),
-  ].join('\n\n');
+  ].join('\n');
 }
 
 function section(heading: string, rows: [string, string][]): SummarySection {
@@ -305,16 +304,15 @@ function blockersSection(blockers: string[]): SummarySection {
 }
 
 function formatSection(section: SummarySection): string {
-  const lines = section.rows ? formatRows(section.rows) : section.lines || [];
+  const lines = section.rows ? section.rows.map(([label, value]) => formatRow(label, value)) : (section.lines || []).map(escapeHtml);
   return [
     `<b>${escapeHtml(section.heading)}</b>`,
-    `<pre>${escapeHtml(lines.join('\n'))}</pre>`,
+    ...lines,
   ].join('\n');
 }
 
-function formatRows(rows: [string, string][]): string[] {
-  const labelWidth = Math.min(10, Math.max(...rows.map(([label]) => label.length)));
-  return rows.map(([label, value]) => `${label.padEnd(labelWidth)}  ${value}`);
+function formatRow(label: string, value: string): string {
+  return `<b>${escapeHtml(label)}</b>: ${escapeHtml(value)}`;
 }
 
 function escapeHtml(value: string): string {
