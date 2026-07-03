@@ -33,7 +33,7 @@ export class TelegramNotifier {
 
     const account = await this.loadAccountSummary();
     for (const notification of pending) {
-      const text = `${notification.text}\n${formatAccountSummary(account)}`;
+      const text = `${notification.text}\n\n${formatAccountSummary(account)}`;
       const sent = await this.sendMessage(text);
       if (!sent) continue;
       if (notification.kind === 'round-summary') {
@@ -289,7 +289,7 @@ function formatTelegramSummary(title: string, sections: SummarySection[]): strin
   return [
     `<b>${escapeHtml(title)}</b>`,
     ...sections.filter((item) => item.rows?.length || item.lines?.length).map(formatSection),
-  ].join('\n');
+  ].join('\n\n');
 }
 
 function section(heading: string, rows: [string, string][]): SummarySection {
@@ -312,7 +312,7 @@ function formatSection(section: SummarySection): string {
 }
 
 function formatRow(label: string, value: string): string {
-  return `<b>${escapeHtml(label)}</b>: ${escapeHtml(value)}`;
+  return `${escapeHtml(label)}: ${escapeHtml(value)}`;
 }
 
 function escapeHtml(value: string): string {

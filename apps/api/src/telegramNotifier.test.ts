@@ -103,10 +103,10 @@ test('sends a round summary with on-demand balance and marks the summary notifie
   assert.equal(parseMode, 'HTML');
   assert.match(sentText, /BTC5M Round Summary/);
   assert.match(sentText, /<b>PnL<\/b>/);
-  assert.match(sentText, /<b>Round<\/b>: 🟢 PROFIT \+\$5\.50/);
-  assert.match(sentText, /<b>Settled<\/b>: 🟢 PROFIT \+\$5\.50/);
+  assert.match(sentText, /Round: 🟢 PROFIT \+\$5\.50/);
+  assert.match(sentText, /Settled: 🟢 PROFIT \+\$5\.50/);
   assert.match(sentText, /<b>Account<\/b>/);
-  assert.match(sentText, /<b>Balance<\/b>: \$12\.34/);
+  assert.match(sentText, /Balance: \$12\.34/);
   assert.doesNotMatch(sentText, /<pre>/);
   assert.doesNotMatch(sentText, /allowance/i);
 });
