@@ -30,6 +30,7 @@ test('does not read balance when no Telegram notification is pending', async () 
 test('sends a round summary with on-demand balance and marks the summary notified', async () => {
   let balanceReads = 0;
   let sentText = '';
+  let parseMode = '';
   const markedRoundKeys: string[] = [];
   const roundId = futureRoundId();
   const notifier = new TelegramNotifier({
@@ -89,7 +90,9 @@ test('sends a round summary with on-demand balance and marks the summary notifie
   });
 
   await withFetch(async (_url, init) => {
-    sentText = JSON.parse(String(init?.body)).text;
+    const body = JSON.parse(String(init?.body));
+    sentText = body.text;
+    parseMode = body.parse_mode;
     return new Response(JSON.stringify({ ok: true }), { status: 200 });
   }, async () => {
     await notifier.notifyAfterTick(state);
@@ -97,10 +100,13 @@ test('sends a round summary with on-demand balance and marks the summary notifie
 
   assert.equal(balanceReads, 1);
   assert.deepEqual(markedRoundKeys, [`${roundId}:settled`]);
+  assert.equal(parseMode, 'HTML');
   assert.match(sentText, /BTC5M Round Summary/);
-  assert.match(sentText, /PnL: 🟢 PROFIT \+\$5\.50/);
-  assert.match(sentText, /Total settled PnL: 🟢 PROFIT \+\$5\.50/);
-  assert.match(sentText, /Account: balance \$12\.34/);
+  assert.match(sentText, /<b>PnL<\/b>/);
+  assert.match(sentText, /Round\s+🟢 PROFIT \+\$5\.50/);
+  assert.match(sentText, /Settled\s+🟢 PROFIT \+\$5\.50/);
+  assert.match(sentText, /<b>Account<\/b>/);
+  assert.match(sentText, /Balance\s+\$12\.34/);
   assert.doesNotMatch(sentText, /allowance/i);
 });
 

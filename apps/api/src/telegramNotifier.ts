@@ -134,6 +134,7 @@ export class TelegramNotifier {
         body: JSON.stringify({
           chat_id: chatId,
           text: truncateTelegramMessage(text),
+          parse_mode: 'HTML',
           disable_web_page_preview: true,
         }),
       });
@@ -157,35 +158,49 @@ function buildRoundSummary(state: DashboardState, settlement: SettlementRecord, 
   const filledOrders = orders.filter((order) => order.status === 'filled' || order.status === 'partially_filled').length;
   const failedOrders = orders.filter((order) => order.status === 'failed').length;
   const cancelledOrders = orders.filter((order) => order.status === 'cancelled').length;
-  return [
-    'BTC5M Round Summary',
-    `Round: ${title}`,
-    `Status: ${statusLabel}${settlement.winningLabel ? `, winner ${settlement.winningLabel}` : ''}`,
-    `Orders: ${orders.length} total, ${filledOrders} filled/partial, ${cancelledOrders} cancelled, ${failedOrders} failed`,
-    `Fills: ${fillSideSummary(fills, 'YES')} | ${fillSideSummary(fills, 'NO')}`,
-    `Cost: ${formatMoney(settlement.totalCost)} | Payout: ${formatMoney(settlement.payout)}`,
-    `PnL: ${formatPnlStatus(settlement.pnl)}`,
-    `Total settled PnL: ${formatPnlStatus(totalSettledPnl(state))}`,
-    `Runtime: ${state.runtime.executionMode}, ${state.runtime.status}`,
-  ].join('\n');
+  return formatTelegramSummary('BTC5M Round Summary', [
+    section('Market', [
+      ['Round', title],
+      ['Status', `${statusLabel}${settlement.winningLabel ? `, winner ${settlement.winningLabel}` : ''}`],
+    ]),
+    section('Orders', [
+      ['Orders', `${orders.length} total, ${filledOrders} filled/partial, ${cancelledOrders} cancelled, ${failedOrders} failed`],
+      ['Fills', `${fillSideSummary(fills, 'YES')} | ${fillSideSummary(fills, 'NO')}`],
+      ['Cost', `${formatMoney(settlement.totalCost)} | Payout ${formatMoney(settlement.payout)}`],
+    ]),
+    section('PnL', [
+      ['Round', formatPnlStatus(settlement.pnl)],
+      ['Settled', formatPnlStatus(totalSettledPnl(state))],
+    ]),
+    section('System', [
+      ['Runtime', `${state.runtime.executionMode}, ${state.runtime.status}`],
+    ]),
+  ]);
 }
 
 function buildIdleSummary(state: DashboardState, referenceMs: number): string {
   const entryCheck = state.strategyChecks.find((check) => check.strategy === 'BTC5M_DUAL_45' || check.strategy === 'BTC5M_NEXT_ROUND_50_49_STOP_ON_SINGLE');
   const blockers = topBlockers(entryCheck);
   const openOrders = state.orders.filter((order) => order.status === 'posted' || order.status === 'partially_filled' || (state.runtime.executionMode === 'monitor' && order.status === 'local')).length;
-  return [
-    'BTC5M Idle Summary',
-    `No new order for: ${formatDuration(Date.now() - referenceMs)}`,
-    `Current round: ${state.latestSnapshot.round.title || state.latestSnapshot.round.id}`,
-    `Phase: ${state.latestSnapshot.round.phase}, ${state.latestSnapshot.round.secondsToStart > 0 ? `${Math.round(state.latestSnapshot.round.secondsToStart)}s to start` : `${Math.round(state.latestSnapshot.round.secondsToEnd)}s to end`}`,
-    `Regime: ${state.latestSnapshot.regime}, chop ${formatNumber(state.latestSnapshot.features.chopScore, 1)}`,
-    `Open orders: ${openOrders} | Positions: ${state.latestSnapshot.positions.length}`,
-    `Total settled PnL: ${formatPnlStatus(totalSettledPnl(state))}`,
-    `Runtime: ${state.runtime.executionMode}, ${state.runtime.status}`,
-    `Cooldown: ${state.runtime.entryCooldownUntil ? `${state.runtime.entryCooldownReason || 'active'} until ${state.runtime.entryCooldownUntil}` : 'none'}`,
-    `Top blockers: ${blockers || 'none'}`,
-  ].join('\n');
+  return formatTelegramSummary('BTC5M Idle Summary', [
+    section('Idle', [
+      ['No order', formatDuration(Date.now() - referenceMs)],
+      ['Round', state.latestSnapshot.round.title || state.latestSnapshot.round.id],
+      ['Phase', `${state.latestSnapshot.round.phase}, ${state.latestSnapshot.round.secondsToStart > 0 ? `${Math.round(state.latestSnapshot.round.secondsToStart)}s to start` : `${Math.round(state.latestSnapshot.round.secondsToEnd)}s to end`}`],
+    ]),
+    section('Market', [
+      ['Regime', `${state.latestSnapshot.regime}, chop ${formatNumber(state.latestSnapshot.features.chopScore, 1)}`],
+      ['Open', `${openOrders} orders | ${state.latestSnapshot.positions.length} positions`],
+      ['Cooldown', state.runtime.entryCooldownUntil ? `${state.runtime.entryCooldownReason || 'active'} until ${state.runtime.entryCooldownUntil}` : 'none'],
+    ]),
+    section('PnL', [
+      ['Settled', formatPnlStatus(totalSettledPnl(state))],
+    ]),
+    section('System', [
+      ['Runtime', `${state.runtime.executionMode}, ${state.runtime.status}`],
+    ]),
+    blockersSection(blockers),
+  ]);
 }
 
 function fillSideSummary(fills: FillRecord[], label: 'YES' | 'NO'): string {
@@ -198,18 +213,20 @@ function fillSideSummary(fills: FillRecord[], label: 'YES' | 'NO'): string {
 }
 
 function formatAccountSummary(account: AccountSummary): string {
-  if (account.error) return 'Account: balance unavailable';
-  return `Account: balance ${formatMoney(account.balance ?? 0)}`;
+  return formatTelegramSummary('Account', [
+    section('Wallet', [
+      ['Balance', account.error ? 'unavailable' : formatMoney(account.balance ?? 0)],
+    ]),
+  ]);
 }
 
-function topBlockers(check: StrategyCheck | undefined): string {
-  if (!check) return '';
-  if (check.blockers.length) return check.blockers.slice(0, 4).join(', ');
+function topBlockers(check: StrategyCheck | undefined): string[] {
+  if (!check) return [];
+  if (check.blockers.length) return check.blockers.slice(0, 4);
   return check.conditions
     .filter((condition) => !condition.passed)
     .slice(0, 4)
-    .map((condition) => condition.label)
-    .join(', ');
+    .map((condition) => condition.label);
 }
 
 function totalSettledPnl(state: DashboardState): number {
@@ -263,8 +280,54 @@ function formatDuration(ms: number): string {
   return `${hours}h ${minutes}m`;
 }
 
+type SummarySection = {
+  heading: string;
+  rows?: [string, string][];
+  lines?: string[];
+};
+
+function formatTelegramSummary(title: string, sections: SummarySection[]): string {
+  return [
+    `<b>${escapeHtml(title)}</b>`,
+    ...sections.filter((item) => item.rows?.length || item.lines?.length).map(formatSection),
+  ].join('\n\n');
+}
+
+function section(heading: string, rows: [string, string][]): SummarySection {
+  return { heading, rows };
+}
+
+function blockersSection(blockers: string[]): SummarySection {
+  return {
+    heading: 'Top blockers',
+    lines: blockers.length ? blockers.map((blocker) => `- ${blocker}`) : ['none'],
+  };
+}
+
+function formatSection(section: SummarySection): string {
+  const lines = section.rows ? formatRows(section.rows) : section.lines || [];
+  return [
+    `<b>${escapeHtml(section.heading)}</b>`,
+    `<pre>${escapeHtml(lines.join('\n'))}</pre>`,
+  ].join('\n');
+}
+
+function formatRows(rows: [string, string][]): string[] {
+  const labelWidth = Math.min(10, Math.max(...rows.map(([label]) => label.length)));
+  return rows.map(([label, value]) => `${label.padEnd(labelWidth)}  ${value}`);
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
 function truncateTelegramMessage(text: string): string {
   const maxLength = 3900;
   if (text.length <= maxLength) return text;
-  return `${text.slice(0, maxLength - 14)}\n... truncated`;
+  const plainText = text.replace(/<\/?[^>]+>/g, '');
+  const truncated = `${plainText.slice(0, maxLength - 80)}\n... truncated`;
+  return `<b>BTC5M Notification</b>\n<pre>${escapeHtml(truncated)}</pre>`;
 }
