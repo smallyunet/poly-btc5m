@@ -192,8 +192,30 @@ export type PositionSnapshot = {
   shares: number;
   avgPrice: number;
   currentPrice?: number;
+  currentValue?: number;
+  cashPnl?: number;
+  percentPnl?: number;
   openedAt?: string;
   lastTradeAt?: string;
+};
+
+export type PortfolioSnapshot = {
+  status: 'enabled' | 'disabled' | 'partial' | 'unavailable';
+  updatedAt: string;
+  accountAddress?: string;
+  hasOwnerPrivateKey: boolean;
+  hasDepositWallet: boolean;
+  collateralBalance?: number;
+  collateralAllowance?: number | null;
+  positions: PositionSnapshot[];
+  positionCount: number;
+  positionValue: number;
+  positionCost: number;
+  unrealizedPnl: number;
+  settledPnl: number;
+  totalPnl: number;
+  roiPct: number | null;
+  diagnostics: string[];
 };
 
 export type ParticipationSideSnapshot = {
@@ -229,6 +251,7 @@ export type StateSnapshot = {
   orderbookDepth?: OrderbookDepthSnapshot;
   positions: PositionSnapshot[];
   positionReadStatus: 'enabled' | 'disabled';
+  portfolio?: PortfolioSnapshot;
   participation?: MarketParticipationSnapshot;
   diagnostics: string[];
 };

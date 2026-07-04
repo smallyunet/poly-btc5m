@@ -620,6 +620,66 @@ button.primary:hover:not(:disabled) {
   top: 16px;
 }
 
+.portfolioWorkspace {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.portfolioHero {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 14px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.01);
+}
+
+.portfolioIdentity {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.portfolioIdentity strong {
+  font-family: var(--font-mono);
+  font-size: 18px;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.portfolioIdentity p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.portfolioMetricGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.portfolioDiagnostics {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid rgba(245, 158, 11, 0.28);
+  border-radius: 8px;
+  background: rgba(245, 158, 11, 0.06);
+}
+
+.portfolioDiagnostics span {
+  color: var(--color-warning);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
 .span-4 { grid-column: span 4; }
 .span-6 { grid-column: span 6; }
 .span-8 { grid-column: span 8; }
@@ -2248,6 +2308,10 @@ td.mono {
     grid-template-columns: 1fr;
   }
 
+  .portfolioMetricGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .terminalContextRail {
     position: static;
   }
@@ -2642,6 +2706,14 @@ td.mono {
     align-items: flex-start;
     flex-direction: column;
     gap: 4px;
+  }
+
+  .portfolioHero {
+    flex-direction: column;
+  }
+
+  .portfolioMetricGrid {
+    grid-template-columns: 1fr;
   }
 
   .metricValue {

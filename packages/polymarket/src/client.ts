@@ -256,7 +256,7 @@ export class PolymarketAdapter {
     });
   }
 
-  async getCurrentPositions(tokenLabels: Map<string, 'YES' | 'NO'>): Promise<PositionSnapshot[]> {
+  async getPortfolioPositions(tokenLabels: Map<string, 'YES' | 'NO'> = new Map()): Promise<PositionSnapshot[]> {
     const address = this.config.depositWallet?.trim();
     if (!address) throw new Error('POLYMARKET_DEPOSIT_WALLET is required for position reads.');
 
@@ -272,9 +272,9 @@ export class PolymarketAdapter {
     return page
       .map((position: any): PositionSnapshot | null => {
         const tokenId = String(position.asset || position.tokenId || position.token_id || '');
-        const label = tokenLabels.get(tokenId);
+        const label = tokenLabels.get(tokenId) || 'UNKNOWN';
         const shares = finiteNumber(position.size ?? position.balance);
-        if (!tokenId || !label || shares == null || shares <= 0) return null;
+        if (!tokenId || shares == null || shares <= 0) return null;
         return {
           tokenId,
           label,
@@ -282,11 +282,18 @@ export class PolymarketAdapter {
           shares: roundShares(shares),
           avgPrice: finiteNumber(position.avgPrice ?? position.avg_price) ?? 0,
           currentPrice: finiteNumber(position.curPrice ?? position.currentPrice ?? position.price) ?? undefined,
+          currentValue: finiteNumber(position.currentValue ?? position.current_value ?? position.value) ?? undefined,
+          cashPnl: finiteNumber(position.cashPnl ?? position.cash_pnl ?? position.pnl) ?? undefined,
+          percentPnl: finiteNumber(position.percentPnl ?? position.percent_pnl ?? position.percentPnlOpen ?? position.percent_pnl_open) ?? undefined,
           openedAt: typeof position.createdAt === 'string' ? position.createdAt : undefined,
           lastTradeAt: typeof position.lastTradeAt === 'string' ? position.lastTradeAt : undefined,
         };
       })
       .filter((item): item is PositionSnapshot => Boolean(item));
+  }
+
+  async getCurrentPositions(tokenLabels: Map<string, 'YES' | 'NO'>): Promise<PositionSnapshot[]> {
+    return (await this.getPortfolioPositions(tokenLabels)).filter((position) => position.label !== 'UNKNOWN');
   }
 
   private async authenticatedClient(): Promise<any> {

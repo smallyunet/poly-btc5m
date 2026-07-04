@@ -223,6 +223,10 @@ export class InMemoryStore {
     this.persistState();
   }
 
+  settledPnl(): number {
+    return roundMoney(sum(this.settlements.filter((settlement) => settlement.status === 'settled').map((settlement) => settlement.pnl)));
+  }
+
   recordStrategyChecks(checks: StrategyCheck[]): void {
     this.strategyChecks = checks;
   }
@@ -938,6 +942,10 @@ function optionalEnv(name: string): string | undefined {
 
 function sum(values: number[]): number {
   return values.reduce((total, value) => total + value, 0);
+}
+
+function roundMoney(value: number): number {
+  return Math.round(value * 100) / 100;
 }
 
 function isRoundEnded(roundId: string, nowMs: number, graceMs: number): boolean {

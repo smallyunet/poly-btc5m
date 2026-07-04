@@ -8,7 +8,9 @@ import {
   Terminal,
   Cpu,
   Search,
-  Info
+  Info,
+  WalletCards,
+  PieChart
 } from 'lucide-react';
 
 import type { BotRuntimeStatus, DashboardState, RuntimeLogRecord, StrategyCheck } from '../../../packages/shared/src';
@@ -22,7 +24,7 @@ import { RoundTimelinePipeline } from './components/RoundTimelinePipeline';
 import { OrderbookCapacityPanel, OrderbookExecutionSummary, OrderbookTable } from './components/dashboard/OrderbookPanels';
 import { Badge, DataTable, DecisionMetric, PaginationControls, Shell } from './components/dashboard/Ui';
 
-type TabType = 'terminal' | 'orderbooks' | 'activity' | 'strategy' | 'logs';
+type TabType = 'terminal' | 'portfolio' | 'orderbooks' | 'activity' | 'strategy' | 'logs';
 type ActivitySubTab = 'daily' | 'rounds' | 'orders';
 type DashboardOrder = DashboardState['orders'][number];
 type DashboardFill = DashboardState['fills'][number];
@@ -79,7 +81,7 @@ const ROUND_PAGE_SIZE = 20;
 const ORDER_PAGE_SIZE = 25;
 const DAILY_PAGE_SIZE = 1;
 const LOG_PAGE_SIZE = 75;
-const TAB_TYPES: TabType[] = ['terminal', 'orderbooks', 'activity', 'strategy', 'logs'];
+const TAB_TYPES: TabType[] = ['terminal', 'portfolio', 'orderbooks', 'activity', 'strategy', 'logs'];
 
 function isTabType(value: string | null): value is TabType {
   return TAB_TYPES.includes(value as TabType);
@@ -116,6 +118,42 @@ function netFilledShares(round: Pick<RoundExecutionSummary, 'filledBuyYes' | 'fi
     yes: Math.max(0, round.filledBuyYes - round.filledSellYes),
     no: Math.max(0, round.filledBuyNo - round.filledSellNo),
   };
+}
+
+function portfolioStatusTone(status?: NonNullable<DashboardState['latestSnapshot']['portfolio']>['status']): 'good' | 'warn' | 'bad' | 'neutral' {
+  if (status === 'enabled') return 'good';
+  if (status === 'partial') return 'warn';
+  if (status === 'unavailable') return 'bad';
+  return 'neutral';
+}
+
+function portfolioStatusLabel(status?: NonNullable<DashboardState['latestSnapshot']['portfolio']>['status']): string {
+  if (status === 'enabled') return 'ready';
+  if (status === 'partial') return 'partial';
+  if (status === 'unavailable') return 'unavailable';
+  return 'disabled';
+}
+
+function formatSignedMoney(value: number): string {
+  return `${value >= 0 ? '+' : ''}${formatMoney(value)}`;
+}
+
+function formatPercentValue(value: number | null | undefined): string {
+  return value == null || !Number.isFinite(value) ? 'n/a' : `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`;
+}
+
+function positionValue(position: DashboardState['latestSnapshot']['positions'][number]): number {
+  if (position.currentValue != null) return position.currentValue;
+  return position.shares * (position.currentPrice ?? position.avgPrice);
+}
+
+function positionCost(position: DashboardState['latestSnapshot']['positions'][number]): number {
+  return position.shares * position.avgPrice;
+}
+
+function positionPnl(position: DashboardState['latestSnapshot']['positions'][number]): number {
+  if (position.cashPnl != null) return position.cashPnl;
+  return positionValue(position) - positionCost(position);
 }
 
 function roundStatusSummary(round: RoundExecutionSummary): RoundStatusSummary {
@@ -564,6 +602,7 @@ export function App() {
   }
 
   const snapshot = state.latestSnapshot;
+  const portfolio = snapshot.portfolio;
   const entryCheck = state.strategyChecks.find((check) => check.strategy === 'BTC5M_DUAL_45');
   const entryEligibleLabel = entryCheck?.status === 'eligible' ? 'entry eligible' : 'entry blocked';
   const entryConditions = entryCheck?.conditions || [];
@@ -596,6 +635,7 @@ export function App() {
     || (state.runtime.executionMode === 'monitor' && order.status === 'local')
   )).length;
   const pnl = state.settlements.reduce((sum, item) => sum + item.pnl, 0);
+  const portfolioPnl = portfolio?.totalPnl ?? pnl;
   const signalLogCount = state.runtimeLogs.filter((log) => !isRoutineHeartbeatLog(log)).length;
   const alertLogCount = state.runtimeLogs.filter((log) => log.level === 'warn' || log.level === 'error').length;
 
@@ -731,12 +771,15 @@ export function App() {
         
         {/* Navigation Tabs */}
         <nav className="tabBar">
-          <button className={`tabBtn ${activeTab === 'terminal' ? 'active' : ''}`} onClick={() => setActiveTab('terminal')}>
-            <Terminal size={14} /> Terminal
-          </button>
-          <button className={`tabBtn ${activeTab === 'orderbooks' ? 'active' : ''}`} onClick={() => setActiveTab('orderbooks')}>
-            <BookOpen size={14} /> Order Books
-          </button>
+	          <button className={`tabBtn ${activeTab === 'terminal' ? 'active' : ''}`} onClick={() => setActiveTab('terminal')}>
+	            <Terminal size={14} /> Terminal
+	          </button>
+	          <button className={`tabBtn ${activeTab === 'portfolio' ? 'active' : ''}`} onClick={() => setActiveTab('portfolio')}>
+	            <WalletCards size={14} /> Portfolio
+	          </button>
+	          <button className={`tabBtn ${activeTab === 'orderbooks' ? 'active' : ''}`} onClick={() => setActiveTab('orderbooks')}>
+	            <BookOpen size={14} /> Order Books
+	          </button>
           <button className={`tabBtn ${activeTab === 'activity' ? 'active' : ''}`} onClick={() => setActiveTab('activity')}>
             <History size={14} /> Activity & PnL
           </button>
@@ -798,11 +841,11 @@ export function App() {
             <strong>{feedLabel}</strong>
             <em>Binance {state.feed.binanceConnected ? 'on' : 'off'}</em>
           </div>
-          <div className={`terminalStat pnl ${pnl > 0 ? 'good' : pnl < 0 ? 'bad' : 'neutral'}`}>
-            <span>Net PnL</span>
-            <strong>{formatMoney(pnl)}</strong>
-            <em>{activeOrders} open / {state.settlements.length} settled</em>
-          </div>
+	          <div className={`terminalStat pnl ${portfolioPnl > 0 ? 'good' : portfolioPnl < 0 ? 'bad' : 'neutral'}`}>
+	            <span>Portfolio</span>
+	            <strong>{formatSignedMoney(portfolioPnl)}</strong>
+	            <em>{portfolio ? `${portfolio.positionCount} positions / ${portfolioStatusLabel(portfolio.status)}` : `${activeOrders} open / ${state.settlements.length} settled`}</em>
+	          </div>
         </div>
       </section>
 
@@ -1232,11 +1275,95 @@ export function App() {
               )}
             </aside>
           </div>
-        )}
+	        )}
+	
+	        {activeTab === 'portfolio' && (
+	          <div className="portfolioWorkspace">
+	            <section className="panel">
+	              <h2>
+	                Account Portfolio
+	                <span className="panelSubTitle">{portfolio?.updatedAt ? `updated ${formatEtTime(portfolio.updatedAt)}` : 'waiting for snapshot'}</span>
+	              </h2>
 
-        {activeTab === 'orderbooks' && (
-          <div className="panel">
-            <h2>Polymarket CLOB Order Books</h2>
+	              {portfolio ? (
+	                <>
+	                  <div className="portfolioHero">
+	                    <div className="portfolioIdentity">
+	                      <span className="decisionKicker">Configured Account</span>
+	                      <strong title={portfolio.accountAddress || ''}>{portfolio.accountAddress ? shortenTokenId(portfolio.accountAddress) : 'not configured'}</strong>
+	                      <p>{portfolio.hasOwnerPrivateKey ? 'CLOB balance reads enabled' : 'OWNER_PRIVATE_KEY missing; positions only'}</p>
+	                    </div>
+	                    <Badge tone={portfolioStatusTone(portfolio.status)}>{portfolioStatusLabel(portfolio.status)}</Badge>
+	                  </div>
+
+	                  <div className="portfolioMetricGrid">
+		                    <DecisionMetric label="Collateral Balance" value={portfolio.collateralBalance == null ? 'n/a' : formatMoney(portfolio.collateralBalance)} detail="CLOB collateral" tone={portfolio.collateralBalance == null ? 'neutral' : 'good'} />
+		                    <DecisionMetric label="Allowance" value={portfolio.collateralAllowance == null ? 'n/a' : formatMoney(portfolio.collateralAllowance)} detail="CLOB allowance" tone={portfolio.collateralAllowance == null ? 'neutral' : 'good'} />
+		                    <DecisionMetric label="Position Value" value={formatMoney(portfolio.positionValue)} detail={`${portfolio.positionCount} positions`} tone={portfolio.positionValue > 0 ? 'good' : 'neutral'} />
+		                    <DecisionMetric label="Open Cost" value={formatMoney(portfolio.positionCost)} detail="avg entry basis" tone="neutral" />
+		                    <DecisionMetric label="Unrealized PnL" value={formatSignedMoney(portfolio.unrealizedPnl)} detail="active positions" tone={portfolio.unrealizedPnl > 0 ? 'good' : portfolio.unrealizedPnl < 0 ? 'bad' : 'neutral'} />
+		                    <DecisionMetric label="Settled PnL" value={formatSignedMoney(portfolio.settledPnl)} detail={`${state.settlements.length} records`} tone={portfolio.settledPnl > 0 ? 'good' : portfolio.settledPnl < 0 ? 'bad' : 'neutral'} />
+		                    <DecisionMetric label="Total PnL" value={formatSignedMoney(portfolio.totalPnl)} detail="settled + unrealized" tone={portfolio.totalPnl > 0 ? 'good' : portfolio.totalPnl < 0 ? 'bad' : 'neutral'} />
+		                    <DecisionMetric label="ROI" value={formatPercentValue(portfolio.roiPct)} detail="PnL / open cost" tone={portfolio.roiPct == null ? 'neutral' : portfolio.roiPct > 0 ? 'good' : portfolio.roiPct < 0 ? 'bad' : 'neutral'} />
+	                  </div>
+
+	                  {portfolio.diagnostics.length > 0 && (
+	                    <div className="portfolioDiagnostics">
+	                      {portfolio.diagnostics.map((item) => (
+	                        <span key={item}>{item}</span>
+	                      ))}
+	                    </div>
+	                  )}
+	                </>
+	              ) : (
+	                <div className="empty" style={{ minHeight: '120px' }}>
+	                  <Info size={20} style={{ color: 'var(--text-muted)' }} />
+	                  <p className="emptyText">No portfolio snapshot has been captured yet</p>
+	                </div>
+	              )}
+	            </section>
+
+	            <section className="panel">
+	              <h2>
+	                Active Positions
+	                <span className="panelSubTitle">{portfolio ? `${portfolio.positionCount} open positions` : 'no account data'}</span>
+	              </h2>
+	              {portfolio && portfolio.positions.length > 0 ? (
+	                <DataTable headers={['Market', 'Outcome', 'Shares', 'Avg', 'Value', 'PnL', 'ROI']}>
+	                  {portfolio.positions.map((position) => {
+	                    const value = positionValue(position);
+	                    const cost = positionCost(position);
+	                    const pnlValue = positionPnl(position);
+	                    const roi = cost > 0 ? (pnlValue / cost) * 100 : null;
+	                    return (
+	                      <tr key={position.tokenId}>
+	                        <td>
+	                          <span className="marketTitle">{position.title || 'Polymarket position'}</span>
+	                          <span className="mutedBlock mono">{shortenTokenId(position.tokenId)}</span>
+	                        </td>
+	                        <td><Badge tone={outcomeTone(position.label)}>{outcomeLabel(position.label)}</Badge></td>
+	                        <td className="mono">{formatNumber(position.shares, 2)}</td>
+	                        <td className="mono">${position.avgPrice.toFixed(3)}</td>
+	                        <td className="mono">{formatMoney(value)}</td>
+	                        <td className={`mono ${pnlValue >= 0 ? 'pass' : 'fail'}`}>{formatSignedMoney(pnlValue)}</td>
+	                        <td className={`mono ${roi == null ? '' : roi >= 0 ? 'pass' : 'fail'}`}>{formatPercentValue(roi)}</td>
+	                      </tr>
+	                    );
+	                  })}
+	                </DataTable>
+	              ) : (
+	                <div className="empty" style={{ minHeight: '140px' }}>
+	                  <PieChart size={22} style={{ color: 'var(--text-muted)' }} />
+	                  <p className="emptyText">{portfolio?.status === 'disabled' ? 'Configure POLYMARKET_DEPOSIT_WALLET to load account positions' : 'No active positions found for this account'}</p>
+	                </div>
+	              )}
+	            </section>
+	          </div>
+	        )}
+
+	        {activeTab === 'orderbooks' && (
+	          <div className="panel">
+	            <h2>Polymarket CLOB Order Books</h2>
             <OrderbookExecutionSummary quotes={snapshot.orderbooks} yesTokenId={snapshot.round.yesTokenId} noTokenId={snapshot.round.noTokenId} />
             <OrderbookCapacityPanel depth={snapshot.orderbookDepth} />
             <OrderbookTable quotes={snapshot.orderbooks} yesTokenId={snapshot.round.yesTokenId} noTokenId={snapshot.round.noTokenId} />

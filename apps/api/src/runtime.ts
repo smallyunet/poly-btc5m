@@ -1,4 +1,4 @@
-import type { BtcRoundConfig, FillRecord, OrderBookQuote, OrderbookCapacityTier, OrderbookDepthLevel, OrderbookDepthSnapshot, PositionSnapshot, RoundPhase, RoundSnapshot, SettlementRecord, StateSnapshot, StrategyCheck, StrategyCondition, TradeIntent } from '../../../packages/shared/src';
+import type { BtcRoundConfig, FillRecord, OrderBookQuote, OrderbookCapacityTier, OrderbookDepthLevel, OrderbookDepthSnapshot, PortfolioSnapshot, PositionSnapshot, RoundPhase, RoundSnapshot, SettlementRecord, StateSnapshot, StrategyCheck, StrategyCondition, TradeIntent } from '../../../packages/shared/src';
 import { classifyRegime, evaluateEntry, evaluateExit, type StrategyEvaluation, type StrategyRiskConfig } from '../../../packages/strategy/src';
 import { PolymarketAdapter, type FillTarget } from '../../../packages/polymarket/src';
 import type { AppConfig } from './config';
@@ -36,7 +36,8 @@ export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, dat
     [round.yesTokenId, 'YES'],
     [round.noTokenId, 'NO'],
   ]);
-  const positions = await loadPositions(appConfig, adapter, tokenLabels, diagnostics);
+  const portfolio = await loadPortfolio(appConfig, adapter, tokenLabels, store.settledPnl(), diagnostics);
+  const positions = portfolio.positions.filter((position) => position.label !== 'UNKNOWN');
   const baseSnapshot: StateSnapshot = {
     id: `snapshot-${Date.now()}`,
     capturedAt: new Date().toISOString(),
@@ -46,6 +47,7 @@ export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, dat
     orderbooks,
     positions,
     positionReadStatus: appConfig.depositWallet?.trim() ? 'enabled' : 'disabled',
+    portfolio,
     participation,
     diagnostics,
   };
@@ -457,17 +459,107 @@ function roundPhase(now: number, start: number, end: number, decisionLeadSeconds
   return 'settled';
 }
 
-async function loadPositions(appConfig: AppConfig, adapter: PolymarketAdapter, tokenLabels: Map<string, 'YES' | 'NO'>, diagnostics: string[]): Promise<PositionSnapshot[]> {
-  if (!appConfig.depositWallet?.trim()) {
-    if (appConfig.executionMode === 'live') diagnostics.push('Position reads require POLYMARKET_DEPOSIT_WALLET.');
-    return [];
+async function loadPortfolio(appConfig: AppConfig, adapter: PolymarketAdapter, tokenLabels: Map<string, 'YES' | 'NO'>, settledPnl: number, diagnostics: string[]): Promise<PortfolioSnapshot> {
+  const updatedAt = new Date().toISOString();
+  const accountAddress = appConfig.depositWallet?.trim() || undefined;
+  const hasOwnerPrivateKey = Boolean(appConfig.ownerPrivateKey?.trim());
+  const hasDepositWallet = Boolean(accountAddress);
+  const portfolioDiagnostics: string[] = [];
+
+  if (!hasDepositWallet) {
+    if (appConfig.executionMode === 'live') diagnostics.push('Portfolio reads require POLYMARKET_DEPOSIT_WALLET.');
+    return emptyPortfolio({
+      status: 'disabled',
+      updatedAt,
+      accountAddress,
+      hasOwnerPrivateKey,
+      hasDepositWallet,
+      settledPnl: roundMoney(settledPnl),
+      diagnostics: ['POLYMARKET_DEPOSIT_WALLET is not configured.'],
+    });
   }
-  try {
-    return await adapter.getCurrentPositions(tokenLabels);
-  } catch (error) {
-    diagnostics.push(`Position load failed: ${error instanceof Error ? error.message : String(error)}`);
-    return [];
+
+  const [positionsResult, balanceResult] = await Promise.allSettled([
+    adapter.getPortfolioPositions(tokenLabels),
+    hasOwnerPrivateKey ? adapter.getCollateralBalanceAllowance() : Promise.resolve(null),
+  ]);
+
+  const positionsLoaded = positionsResult.status === 'fulfilled';
+  const positions = positionsLoaded ? positionsResult.value : [];
+  if (positionsResult.status === 'rejected') {
+    const message = `Portfolio positions load failed: ${errorMessage(positionsResult.reason)}`;
+    portfolioDiagnostics.push(message);
+    diagnostics.push(message);
   }
+
+  let collateralBalance: number | undefined;
+  let collateralAllowance: number | null | undefined;
+  if (!hasOwnerPrivateKey) {
+    portfolioDiagnostics.push('OWNER_PRIVATE_KEY is not configured; collateral balance is unavailable.');
+  } else if (balanceResult.status === 'fulfilled' && balanceResult.value) {
+    collateralBalance = balanceResult.value.balance;
+    collateralAllowance = balanceResult.value.allowance;
+  } else if (balanceResult.status === 'rejected') {
+    const message = `Portfolio balance load failed: ${errorMessage(balanceResult.reason)}`;
+    portfolioDiagnostics.push(message);
+    diagnostics.push(message);
+  }
+
+  const positionValue = roundMoney(sum(positions.map(positionValueUsd)));
+  const positionCost = roundMoney(sum(positions.map(positionCostUsd)));
+  const unrealizedPnl = roundMoney(sum(positions.map(positionPnlUsd)));
+  const roundedSettledPnl = roundMoney(settledPnl);
+  const totalPnl = roundMoney(roundedSettledPnl + unrealizedPnl);
+
+  return {
+    status: portfolioDiagnostics.length ? (positionsLoaded || collateralBalance != null ? 'partial' : 'unavailable') : 'enabled',
+    updatedAt,
+    accountAddress,
+    hasOwnerPrivateKey,
+    hasDepositWallet,
+    collateralBalance,
+    collateralAllowance,
+    positions,
+    positionCount: positions.length,
+    positionValue,
+    positionCost,
+    unrealizedPnl,
+    settledPnl: roundedSettledPnl,
+    totalPnl,
+    roiPct: positionCost > 0 ? roundMoney((totalPnl / positionCost) * 100) : null,
+    diagnostics: portfolioDiagnostics,
+  };
+}
+
+function emptyPortfolio(params: Pick<PortfolioSnapshot, 'status' | 'updatedAt' | 'accountAddress' | 'hasOwnerPrivateKey' | 'hasDepositWallet' | 'settledPnl' | 'diagnostics'>): PortfolioSnapshot {
+  return {
+    ...params,
+    positions: [],
+    positionCount: 0,
+    positionValue: 0,
+    positionCost: 0,
+    unrealizedPnl: 0,
+    totalPnl: params.settledPnl,
+    roiPct: null,
+  };
+}
+
+function positionValueUsd(position: PositionSnapshot): number {
+  if (position.currentValue != null) return position.currentValue;
+  return position.shares * (position.currentPrice ?? position.avgPrice);
+}
+
+function positionCostUsd(position: PositionSnapshot): number {
+  return position.shares * position.avgPrice;
+}
+
+function positionPnlUsd(position: PositionSnapshot): number {
+  if (position.cashPnl != null) return position.cashPnl;
+  return positionValueUsd(position) - positionCostUsd(position);
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 async function reconcileFills(appConfig: AppConfig, adapter: PolymarketAdapter, store: InMemoryStore, round: RoundSnapshot, tokenLabels: Map<string, 'YES' | 'NO'>, diagnostics: string[]): Promise<void> {
