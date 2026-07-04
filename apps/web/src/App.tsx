@@ -18,8 +18,6 @@ import { api, DASHBOARD_REFRESH_MS } from './lib/api';
 import { formatMoney, formatNumber, formatSeconds } from './lib/format';
 import { formatEtTime, outcomeLabel, outcomeTone, shortenTokenId } from './lib/dashboardFormat';
 
-import { ScoreGauge } from './components/ScoreGauge';
-import { PriceStrikeGauge } from './components/PriceStrikeGauge';
 import { RoundTimelinePipeline } from './components/RoundTimelinePipeline';
 import { OrderbookCapacityPanel, OrderbookExecutionSummary, OrderbookTable } from './components/dashboard/OrderbookPanels';
 import { Badge, DataTable, DecisionMetric, PaginationControls, Shell } from './components/dashboard/Ui';
@@ -32,6 +30,7 @@ type DashboardProfileState = DashboardState['profiles'][number];
 type DashboardSnapshot = NonNullable<DashboardProfileState['latestSnapshot']>;
 type VisibleState = {
   runtime: DashboardState['runtime'];
+  profiles: DashboardState['profiles'];
   profileState: DashboardProfileState;
   feed: DashboardProfileState['feed'];
   snapshot: DashboardSnapshot;
@@ -44,6 +43,9 @@ type VisibleState = {
   rules: DashboardState['rules'];
 };
 type RoundExecutionSummary = {
+  key: string;
+  profileId?: string;
+  profileLabel: string;
   roundId: string;
   title: string;
   imageUrl?: string;
@@ -300,43 +302,9 @@ function formatCooldownRemaining(until: string | undefined): string {
   return minutes > 0 ? `${hours}h ${minutes}m left` : `${hours}h left`;
 }
 
-function formatNullableMoney(value: number | null | undefined): string {
-  return value == null ? 'unknown' : formatMoney(value);
-}
-
-function formatRatioPct(value: number | null | undefined): string {
-  return value == null || !Number.isFinite(value) ? 'unknown' : `${formatNumber(value * 100, 1)}%`;
-}
-
 function runtimeBuildLabel(runtime: BotRuntimeStatus): string {
   const sha = runtime.buildSha && runtime.buildSha !== 'unknown' ? runtime.buildSha.slice(0, 7) : runtime.version;
   return `build ${sha}`;
-}
-
-function clamp01(value: number): number {
-  if (!Number.isFinite(value)) return 0;
-  return Math.max(0, Math.min(1, value));
-}
-
-function scoreBreakdown(features: DashboardSnapshot['features']) {
-  const centerCrosses = features.centerCross120s ?? features.cross120s;
-  const centerMinExcursion = features.centerMinBiExcursionBps120s ?? features.minBiExcursionBps120s;
-  const centerBalance = features.centerExcursionBalance120s ?? features.excursionBalance120s;
-  return [
-    { label: 'Center Crosses', value: clamp01(centerCrosses / 4) * 25, max: 25, detail: `${centerCrosses} crosses` },
-    { label: 'Range', value: clamp01(features.rangeBps120s / 3) * 10, max: 10, detail: `${formatNumber(features.rangeBps120s, 2)}bps` },
-    { label: 'Center Two-sided', value: clamp01(centerMinExcursion / 2) * 25, max: 25, detail: `${formatNumber(centerMinExcursion, 2)}bps` },
-    { label: 'Center Balance', value: clamp01(centerBalance) * 15, max: 15, detail: formatNumber(centerBalance, 2) },
-    { label: 'Drift', value: clamp01(1 - features.driftRatio120s / 0.7) * 15, max: 15, detail: formatNumber(features.driftRatio120s, 2) },
-    { label: 'Momentum', value: clamp01(1 - features.momentumRatio30s / 0.8) * 10, max: 10, detail: formatNumber(features.momentumRatio30s, 2) },
-  ];
-}
-
-function scoreTier(score: number): { label: string; price: string; size: string; next: string; tone: 'good' | 'warn' | 'neutral' } {
-  if (score >= 95) return { label: 'A+ score tier', price: '0.460 cap', size: '1.25x size', next: 'top tier active', tone: 'good' };
-  if (score >= 90) return { label: 'A score tier', price: '0.450 cap', size: '1.00x size', next: `${formatNumber(95 - score, 1)} pts to A+`, tone: 'good' };
-  if (score >= 80) return { label: 'B score tier', price: '0.440 cap', size: '1.00x size', next: `${formatNumber(90 - score, 1)} pts to A`, tone: 'warn' };
-  return { label: 'Base score tier', price: '0.420 cap', size: '0.50x size', next: `${formatNumber(Math.max(0, 80 - score), 1)} pts to B`, tone: score >= 70 ? 'warn' : 'neutral' };
 }
 
 function blockerDetail(condition: StrategyCheck['conditions'][number]): string {
@@ -369,6 +337,11 @@ function orderMarketTitle(order: DashboardOrder): string {
   return order.marketTitle || derivedRoundTitle(order.roundId, order.profileId);
 }
 
+function profileLabelFor(profiles: DashboardState['profiles'], profileId: string | undefined): string {
+  if (!profileId) return 'Unknown';
+  return profiles.find((item) => item.profile.id === profileId)?.profile.label || profileId;
+}
+
 function strategySourceLabel(order: DashboardOrder): string {
   return order.strategy || 'UPDOWN_DUAL_ENTRY';
 }
@@ -380,35 +353,68 @@ function orderFailureReason(order: DashboardOrder): string {
   return '-';
 }
 
+function strategyCheckTone(check?: StrategyCheck): 'good' | 'warn' | 'bad' | 'neutral' {
+  if (!check) return 'neutral';
+  if (check.status === 'eligible') return 'good';
+  if (check.status === 'blocked') return 'bad';
+  return 'neutral';
+}
+
+function strategyCheckLabel(check?: StrategyCheck): string {
+  if (!check) return 'pending';
+  return check.status;
+}
+
+function currentRoundExposure(fills: DashboardFill[], roundId: string) {
+  const roundFills = fills.filter((fill) => fill.roundId === roundId);
+  const yesBuy = sumShares(roundFills.filter((fill) => fill.label === 'YES' && fill.side === 'BUY').map((fill) => fill.size));
+  const noBuy = sumShares(roundFills.filter((fill) => fill.label === 'NO' && fill.side === 'BUY').map((fill) => fill.size));
+  const yesSell = sumShares(roundFills.filter((fill) => fill.label === 'YES' && fill.side === 'SELL').map((fill) => fill.size));
+  const noSell = sumShares(roundFills.filter((fill) => fill.label === 'NO' && fill.side === 'SELL').map((fill) => fill.size));
+  const yes = Math.max(0, yesBuy - yesSell);
+  const no = Math.max(0, noBuy - noSell);
+  return {
+    yes,
+    no,
+    fills: roundFills.length,
+    label: fillStateLabel(yes, no),
+    tone: fillStateTone(yes, no),
+  };
+}
+
 function isRoutineHeartbeatLog(log: RuntimeLogRecord): boolean {
   const message = log.message.toLowerCase();
   return log.level === 'info'
     && (message === 'scheduled tick completed.' || message === 'scheduled tick completed');
 }
 
-function buildRoundExecutionSummaries(state: Pick<DashboardState, 'orders' | 'fills' | 'settlements'>): RoundExecutionSummary[] {
+function buildRoundExecutionSummaries(state: Pick<DashboardState, 'orders' | 'fills' | 'settlements' | 'profiles'>): RoundExecutionSummary[] {
   const byRound = new Map<string, {
+    profileId?: string;
     orders: DashboardOrder[];
     fills: DashboardFill[];
     settlements: DashboardState['settlements'];
   }>();
-  const ensure = (roundId: string) => {
-    const existing = byRound.get(roundId);
+  const ensure = (roundId: string, profileId?: string) => {
+    const key = `${profileId || 'unknown'}:${roundId}`;
+    const existing = byRound.get(key);
     if (existing) return existing;
-    const created = { orders: [], fills: [], settlements: [] };
-    byRound.set(roundId, created);
+    const created = { profileId, orders: [], fills: [], settlements: [] };
+    byRound.set(key, created);
     return created;
   };
 
-  state.orders.forEach((order) => ensure(order.roundId).orders.push(order));
-  state.fills.forEach((fill) => ensure(fill.roundId).fills.push(fill));
-  state.settlements.forEach((settlement) => ensure(settlement.roundId).settlements.push(settlement));
+  state.orders.forEach((order) => ensure(order.roundId, order.profileId).orders.push(order));
+  state.fills.forEach((fill) => ensure(fill.roundId, fill.profileId).fills.push(fill));
+  state.settlements.forEach((settlement) => ensure(settlement.roundId, settlement.profileId).settlements.push(settlement));
 
-  return [...byRound.entries()].map(([roundId, record]) => {
+  return [...byRound.entries()].map(([key, record]) => {
     const yesBuyOrders = record.orders.filter((order) => order.label === 'YES' && order.side === 'BUY');
     const noBuyOrders = record.orders.filter((order) => order.label === 'NO' && order.side === 'BUY');
     const unfilledByOrder = record.orders.map((order) => Math.max(0, order.size - orderFilledShares(order, record.fills)));
     const metadataSource = record.orders[0] || record.fills[0] || record.settlements[0];
+    const roundId = metadataSource?.roundId || key.split(':').slice(1).join(':');
+    const profileId = record.profileId || metadataSource?.profileId;
     const settlement = [...record.settlements].sort((a, b) => {
       if (a.status !== b.status) return a.status === 'settled' ? -1 : 1;
       return toSortTime(b.resolvedAt) - toSortTime(a.resolvedAt);
@@ -422,8 +428,11 @@ function buildRoundExecutionSummaries(state: Pick<DashboardState, 'orders' | 'fi
     const startTime = roundStartTime(roundId) || latestTime;
 
     return {
+      key,
+      profileId,
+      profileLabel: profileLabelFor(state.profiles, profileId),
       roundId,
-      title: metadataSource?.marketTitle || derivedRoundTitle(roundId, metadataSource?.profileId),
+      title: metadataSource?.marketTitle || derivedRoundTitle(roundId, profileId),
       imageUrl: metadataSource?.imageUrl,
       latestTime,
       startTime,
@@ -566,6 +575,7 @@ export function App() {
     const filterByProfile = selectedProfileId !== 'all';
     return {
       runtime: state.runtime,
+      profiles: state.profiles,
       profileState,
       feed: profileState.feed,
       snapshot: profileState.latestSnapshot,
@@ -583,6 +593,7 @@ export function App() {
   const filteredLogs = React.useMemo(() => {
     if (!state?.runtimeLogs) return [];
     return state.runtimeLogs.filter((log) => {
+      const matchesProfile = selectedProfileId === 'all' ? true : log.profileId === selectedProfileId;
       const matchesSearch = logSearch
         ? log.message.toLowerCase().includes(logSearch.toLowerCase()) || 
           log.source.toLowerCase().includes(logSearch.toLowerCase())
@@ -590,9 +601,9 @@ export function App() {
       const matchesLevel = logLevel === 'all' ? true : log.level === logLevel;
       const matchesSource = logSource === 'all' ? true : log.source === logSource;
       const matchesSignalMode = hideRoutineLogs ? !isRoutineHeartbeatLog(log) : true;
-      return matchesSearch && matchesLevel && matchesSource && matchesSignalMode;
+      return matchesProfile && matchesSearch && matchesLevel && matchesSource && matchesSignalMode;
     });
-  }, [state?.runtimeLogs, logSearch, logLevel, logSource, hideRoutineLogs]);
+  }, [state?.runtimeLogs, selectedProfileId, logSearch, logLevel, logSource, hideRoutineLogs]);
 
   const roundSummaries = React.useMemo(() => visibleState ? buildRoundExecutionSummaries(visibleState) : [], [visibleState]);
   const dailySummaries = React.useMemo(() => buildDailyExecutionSummaries(roundSummaries), [roundSummaries]);
@@ -613,7 +624,7 @@ export function App() {
 
   React.useEffect(() => {
     logsPagination.setPage(1);
-  }, [logSearch, logLevel, logSource, hideRoutineLogs]);
+  }, [selectedProfileId, logSearch, logLevel, logSource, hideRoutineLogs]);
 
   // Auto-scroll log console to bottom when new logs arrive
   React.useEffect(() => {
@@ -659,6 +670,18 @@ export function App() {
   }
 
   const viewState = visibleState;
+  const isAllProfiles = selectedProfileId === 'all';
+  const scopeLabel = isAllProfiles ? 'All profiles' : viewState.profileState.profile.label;
+  const enabledProfileCount = state.profiles.filter((item) => item.profile.status !== 'disabled').length;
+  const liveProfileCount = state.profiles.filter((item) => item.profile.status === 'live').length;
+  const profileOrderCounts = state.profiles.map((item) => item.stats.orders);
+  const allProfilePositions = state.profiles.flatMap((item) => (
+    item.latestSnapshot?.positions.map((position) => ({
+      ...position,
+      profileId: item.profile.id,
+      profileLabel: item.profile.label,
+    })) || []
+  ));
   const snapshot = viewState.snapshot;
   const portfolio = snapshot.portfolio;
   const entryCheck = viewState.strategyChecks.find((check) => check.strategy === 'UPDOWN_DUAL_ENTRY');
@@ -666,39 +689,29 @@ export function App() {
   const entryConditions = entryCheck?.conditions || [];
   const conditionByLabel = (label: string) => entryConditions.find((condition) => condition.label === label);
   const failedEntryConditions = entryConditions.filter((condition) => !condition.passed);
-  const btcDecisionConditions = [
-    'CHOP score threshold',
-    'center cross_120s threshold',
-    'range_120s sufficient',
-    'center two-sided excursion',
-    'drift ratio capped',
-    'momentum ratio capped',
-  ].map(conditionByLabel).filter((condition): condition is StrategyCheck['conditions'][number] => Boolean(condition));
-  const orderbookDecisionConditions = [
-    'YES book tradable',
-    'NO book tradable',
-  ].map(conditionByLabel).filter((condition): condition is StrategyCheck['conditions'][number] => Boolean(condition));
-  const btcDecisionPassed = btcDecisionConditions.length > 0 && btcDecisionConditions.every((condition) => condition.passed);
-  const orderbookDecisionPassed = orderbookDecisionConditions.length > 0 && orderbookDecisionConditions.every((condition) => condition.passed);
-  const participationConditions = [
-    'Participation data',
-    'Holder count depth',
-    'Top holder shares',
-    'Holder concentration',
-  ].map(conditionByLabel).filter((condition): condition is StrategyCheck['conditions'][number] => Boolean(condition));
-  const participationDecisionPassed = participationConditions.length > 0 && participationConditions.every((condition) => condition.passed);
   const activeOrders = viewState.orders.filter((order) => (
     order.status === 'posted'
     || order.status === 'partially_filled'
     || (state.runtime.executionMode === 'monitor' && order.status === 'local')
   )).length;
   const pnl = viewState.settlements.reduce((sum, item) => sum + item.pnl, 0);
-  const portfolioPnl = portfolio?.totalPnl ?? pnl;
+  const portfolioPnl = isAllProfiles ? pnl : portfolio?.totalPnl ?? pnl;
   const signalLogCount = state.runtimeLogs.filter((log) => !isRoutineHeartbeatLog(log)).length;
   const alertLogCount = state.runtimeLogs.filter((log) => log.level === 'warn' || log.level === 'error').length;
-  const selectedProfile = selectedProfileId === 'all'
+  const selectedProfile = isAllProfiles
     ? null
     : state.profiles.find((item) => item.profile.id === selectedProfileId)?.profile || null;
+  const displayedPositions = isAllProfiles
+    ? allProfilePositions
+    : snapshot.positions.map((position) => ({
+      ...position,
+      profileId: viewState.profileState.profile.id,
+      profileLabel: viewState.profileState.profile.label,
+    }));
+  const displayedPositionValue = displayedPositions.reduce((sum, position) => sum + positionValue(position), 0);
+  const displayedPositionCost = displayedPositions.reduce((sum, position) => sum + positionCost(position), 0);
+  const displayedUnrealizedPnl = displayedPositions.reduce((sum, position) => sum + positionPnl(position), 0);
+  const displayedRoiPct = displayedPositionCost > 0 ? (displayedUnrealizedPnl / displayedPositionCost) * 100 : null;
 
   // Time progress bar calculation
   const secondsToEnd = snapshot.round.secondsToEnd;
@@ -716,9 +729,6 @@ export function App() {
     progressColorClass = 'warning';
   }
 
-  // BTC volatility gauge inputs
-  const btcPrice = snapshot.features.price;
-
   // Round phase detail text logic (prevents negative countdowns once started)
   const roundPhaseDetail = isRoundStarted
     ? `${formatSeconds(secondsToEnd)} remaining`
@@ -732,30 +742,12 @@ export function App() {
   const entryPairEdge = entryPairCost == null ? null : 1 - entryPairCost;
   const entryConfig = state.runtime.entryConfig;
   const entryBypassActive = Boolean(entryConfig?.bypassEntryScoreGating);
-  const fixedLimitActive = Boolean(entryConfig && !entryConfig.dynamicLimitEnabled);
-  const fixedSharesActive = Boolean(entryConfig && !entryConfig.dynamicSharesEnabled);
   const fixedLimitLabel = entryConfig ? entryConfig.dualLimitPrice.toFixed(3) : '-';
   const fixedSharesLabel = entryConfig ? formatShares(entryConfig.orderSharesPerSide) : '-';
-  const pricePolicyLabel = entryConfig
-    ? fixedLimitActive ? `FIXED ${fixedLimitLabel}` : 'SCORE PRICE'
-    : 'UNKNOWN';
-  const sizePolicyLabel = entryConfig
-    ? fixedSharesActive ? `FIXED ${fixedSharesLabel}` : 'SCORE SIZE'
-    : 'UNKNOWN';
-  const entryConfigValue = entryBypassActive ? 'BYPASS ALL' : 'RULE GATED';
   const entryCooldownActive = Boolean(viewState.profileState.entryCooldownUntil && new Date(viewState.profileState.entryCooldownUntil).getTime() > Date.now());
   const entryCooldownRemaining = formatCooldownRemaining(viewState.profileState.entryCooldownUntil);
   const entryCooldownReason = viewState.profileState.entryCooldownReason || 'no single-fill lockout';
   const cooldownGateLabel = entryConfig?.bypassSingleFillCooldown ? 'BYPASSED' : 'ENFORCED';
-  const participation = snapshot.participation;
-  const participationStatus = participation?.status || 'missing';
-  const participationTone = participationStatus === 'enabled'
-    ? (participationDecisionPassed ? 'good' : 'warn')
-    : participationStatus === 'unavailable' ? 'warn' : 'neutral';
-  const participationMaxPnl = participation?.maxPositionPnl;
-  const participationSummary = participationStatus === 'enabled' && participation
-    ? `sample top PnL ${formatNullableMoney(participationMaxPnl)} / sample sum ${formatMoney(participation.totalPositionPnl)}`
-    : `${participationStatus}; not blocking`;
   const decisionWindowCondition = conditionByLabel('Decision window');
   const cooldownCondition = conditionByLabel('Single-fill cooldown');
   const entryWindowPassed = decisionWindowCondition?.passed ?? false;
@@ -763,22 +755,6 @@ export function App() {
     ? failedEntryConditions.filter((condition) => condition.label === 'Single-fill cooldown')
     : failedEntryConditions;
   const diagnosticBlockerCount = Math.max(0, failedEntryConditions.length - effectiveBlockers.length);
-  const topBlockers = effectiveBlockers.slice(0, 4).map((condition) => condition.label).join(', ') || 'none';
-  const scoreInfo = scoreTier(snapshot.features.chopScore);
-  const scoreParts = scoreBreakdown(snapshot.features);
-  const scoreMetricValue = entryBypassActive ? 'BYPASSED' : formatNumber(snapshot.features.chopScore, 1);
-  const scoreMetricDetail = entryBypassActive
-    ? `current score ${formatNumber(snapshot.features.chopScore, 1)} is diagnostic only`
-    : `${scoreInfo.label}; ${scoreInfo.next}`;
-  const priceSizeValue = entryConfig
-    ? `${pricePolicyLabel} / ${sizePolicyLabel}`
-    : `${scoreInfo.price} / ${scoreInfo.size}`;
-  const priceSizeDetail = entryConfig
-    ? fixedLimitActive || fixedSharesActive
-      ? `env policy active; score tier ${scoreInfo.price} / ${scoreInfo.size} is diagnostic`
-      : `score policy active; ${scoreInfo.next}`
-    : entryLimit == null ? 'waiting for strategy cap' : `active limit ${entryLimit.toFixed(3)}, ${scoreInfo.next}`;
-  const priceSizeTone = entryBypassActive || fixedLimitActive || fixedSharesActive ? 'neutral' : scoreInfo.tone;
   const currentEntryIntents = viewState.intents.filter((intent) => (
     intent.roundId === snapshot.round.id
     && intent.strategy === 'UPDOWN_DUAL_ENTRY'
@@ -801,23 +777,41 @@ export function App() {
         : !entryWindowPassed
           ? { label: 'WAITING FOR T-30S', detail: decisionWindowCondition ? blockerDetail(decisionWindowCondition) : `${formatSeconds(secondsToStart)} to start`, tone: 'neutral' as const }
           : { label: 'BLOCKED', detail: entryActionDetail, tone: 'bad' as const };
-  const buyPolicyStatus = entryCheck?.status === 'eligible'
-    ? 'CAN ENTER'
-    : isRoundStarted
-      ? 'REGULAR BUY OFF'
-      : entryWindowPassed
-        ? 'DECISION WINDOW'
-        : 'WAITING';
-  const buyPolicyTone = entryCheck?.status === 'eligible' ? 'good' : entryWindowPassed && !isRoundStarted ? 'warn' : isRoundStarted ? 'bad' : 'neutral';
-  const participationGateValue = participationStatus === 'enabled'
-    ? (participationDecisionPassed ? 'PASS' : 'WEAK')
-    : 'NOT BLOCKING';
-  const participationGateTone = participationStatus === 'enabled'
-    ? (participationDecisionPassed ? 'good' : 'warn')
-    : 'neutral';
+  const scopedDecisionState = isAllProfiles
+    ? {
+      label: 'PROFILE OVERVIEW',
+      detail: `${enabledProfileCount} enabled profiles, ${liveProfileCount} live. Select one profile for current-round entry, hedge, and orderbook detail.`,
+      tone: state.profiles.some((item) => item.entryCooldownUntil && new Date(item.entryCooldownUntil).getTime() > Date.now()) ? 'warn' as const : 'neutral' as const,
+    }
+    : decisionState;
   const cooldownDetail = entryCooldownActive ? `${entryCooldownRemaining}; ${entryCooldownReason}` : entryCooldownReason;
   const executionLabel = state.runtime.executionMode === 'live' ? 'LIVE' : 'MONITOR';
   const feedLabel = `${viewState.feed.source.toUpperCase()} / CLOB ${viewState.feed.clobConnected ? 'ON' : 'OFF'}`;
+  const hedgeCheck = viewState.strategyChecks.find((check) => check.strategy === 'UPDOWN_SINGLE_FILL_HEDGE');
+  const profitExitCheck = viewState.strategyChecks.find((check) => check.strategy === 'UPDOWN_SINGLE_FILL_PROFIT_EXIT');
+  const currentRoundOrders = viewState.orders.filter((order) => order.roundId === snapshot.round.id);
+  const currentRoundOpenOrders = currentRoundOrders.filter((order) => (
+    order.status === 'posted'
+    || order.status === 'partially_filled'
+    || (state.runtime.executionMode === 'monitor' && order.status === 'local')
+  ));
+  const currentExposure = currentRoundExposure(viewState.fills, snapshot.round.id);
+  const roundSettlement = viewState.settlements.find((settlement) => settlement.roundId === snapshot.round.id);
+  const entryPriceDisplay = entryLimit == null ? fixedLimitLabel : entryLimit.toFixed(3);
+  const entrySharesDisplay = previewShares == null ? fixedSharesLabel : formatShares(previewShares);
+  const profileStatusRows = state.profiles.map((item) => {
+    const itemEntryCheck = item.strategyChecks.find((check) => check.strategy === 'UPDOWN_DUAL_ENTRY');
+    const itemHedgeCheck = item.strategyChecks.find((check) => check.strategy === 'UPDOWN_SINGLE_FILL_HEDGE');
+    const itemProfitExitCheck = item.strategyChecks.find((check) => check.strategy === 'UPDOWN_SINGLE_FILL_PROFIT_EXIT');
+    const itemCooldownActive = Boolean(item.entryCooldownUntil && new Date(item.entryCooldownUntil).getTime() > Date.now());
+    return {
+      item,
+      entryCheck: itemEntryCheck,
+      hedgeCheck: itemHedgeCheck,
+      profitExitCheck: itemProfitExitCheck,
+      cooldownActive: itemCooldownActive,
+    };
+  });
 
   return (
     <Shell>
@@ -882,55 +876,36 @@ export function App() {
         ))}
       </section>
 
-      {selectedProfileId === 'all' && (
-        <section className="profileMatrix" aria-label="Profile status matrix">
-          {state.profiles.map((item) => {
-            const profileEntryCheck = item.strategyChecks.find((check) => check.strategy === 'UPDOWN_DUAL_ENTRY');
-            const cooldownActive = Boolean(item.entryCooldownUntil && new Date(item.entryCooldownUntil).getTime() > Date.now());
-            return (
-              <button key={item.profile.id} type="button" className="profileCard" onClick={() => setSelectedProfileId(item.profile.id)}>
-                <div className="profileCardHeader">
-                  <strong>{item.profile.label}</strong>
-                  <Badge tone={item.profile.status === 'live' ? 'warn' : 'neutral'}>{item.profile.status}</Badge>
-                </div>
-                <div className="profileCardMetric">
-                  <span>Round</span>
-                  <em>{item.latestSnapshot?.round.phase || 'pending'}</em>
-                </div>
-                <div className="profileCardMetric">
-                  <span>Entry</span>
-                  <em>{profileEntryCheck?.status || 'pending'}</em>
-                </div>
-                <div className="profileCardMetric">
-                  <span>Cooldown</span>
-                  <em>{cooldownActive ? formatCooldownRemaining(item.entryCooldownUntil) : 'clear'}</em>
-                </div>
-                <div className="profileCardMetric">
-                  <span>PnL</span>
-                  <em>{formatSignedMoney(item.stats.settledPnl)}</em>
-                </div>
-              </button>
-            );
-          })}
-        </section>
-      )}
+      <section className="scopeSummary" aria-label="Current data scope">
+        <div>
+          <span className="sectionKicker">Data Scope</span>
+          <strong>{scopeLabel}</strong>
+        </div>
+        <div className="scopeSummaryStats">
+          <span>{viewState.orders.length} orders</span>
+          <span>{viewState.fills.length} fills</span>
+          <span>{viewState.settlements.length} settlements</span>
+          <span>{filteredLogs.length} logs</span>
+          {isAllProfiles ? <span>{enabledProfileCount} enabled profiles</span> : <span>{viewState.profileState.profile.status}</span>}
+        </div>
+      </section>
 
-      <section className={`terminalCommandBar ${decisionState.tone}`} aria-label="Current terminal state">
+      <section className={`terminalCommandBar ${scopedDecisionState.tone}`} aria-label="Current terminal state">
         <div className="terminalCommandPrimary">
           <div className="terminalCommandIcon">
-            {decisionState.tone === 'good' ? <CheckCircle2 size={20} /> : <AlertTriangle size={20} />}
+            {scopedDecisionState.tone === 'good' ? <CheckCircle2 size={20} /> : <AlertTriangle size={20} />}
           </div>
           <div>
-            <span className="decisionKicker">Current Action</span>
-            <strong>{decisionState.label}</strong>
-            <p>{decisionState.detail}</p>
+            <span className="decisionKicker">{scopeLabel}</span>
+            <strong>{scopedDecisionState.label}</strong>
+            <p>{scopedDecisionState.detail}</p>
           </div>
         </div>
         <div className="terminalCommandStats">
           <div className="terminalStat">
-            <span>Round</span>
-            <strong>{snapshot.round.phase.toUpperCase()}</strong>
-            <em>{roundPhaseDetail}</em>
+            <span>{isAllProfiles ? 'Profiles' : 'Round'}</span>
+            <strong>{isAllProfiles ? `${enabledProfileCount}/${state.profiles.length}` : snapshot.round.phase.toUpperCase()}</strong>
+            <em>{isAllProfiles ? `${liveProfileCount} live / ${state.profiles.length - enabledProfileCount} disabled` : roundPhaseDetail}</em>
           </div>
           <div className="terminalStat">
             <span>Execution</span>
@@ -938,19 +913,19 @@ export function App() {
             <em>{state.runtime.status.toUpperCase()} / {runtimeBuildLabel(state.runtime)}</em>
           </div>
           <div className="terminalStat">
-            <span>Risk Gate</span>
-            <strong>{entryCooldownActive ? 'COOLDOWN' : cooldownGateLabel}</strong>
-            <em>{cooldownDetail}</em>
+            <span>{isAllProfiles ? 'Orders' : 'Risk Gate'}</span>
+            <strong>{isAllProfiles ? String(viewState.orders.length) : entryCooldownActive ? 'COOLDOWN' : cooldownGateLabel}</strong>
+            <em>{isAllProfiles ? `${Math.max(...profileOrderCounts, 0)} max per profile` : cooldownDetail}</em>
           </div>
           <div className="terminalStat">
-            <span>Price / Size</span>
-            <strong>{pricePolicyLabel} / {sizePolicyLabel}</strong>
-            <em>{fixedSharesActive ? `${fixedSharesLabel} shares per side` : scoreInfo.next}</em>
+            <span>Entry Plan</span>
+            <strong>FIXED {entryPriceDisplay}</strong>
+            <em>{fixedSharesLabel} shares per side</em>
           </div>
           <div className="terminalStat">
             <span>Feeds</span>
-            <strong>{feedLabel}</strong>
-            <em>Binance {viewState.feed.binanceConnected ? 'on' : 'off'}</em>
+            <strong>{isAllProfiles ? `${state.profiles.filter((item) => item.feed.clobConnected).length}/${state.profiles.length} CLOB` : feedLabel}</strong>
+            <em>{isAllProfiles ? `${state.profiles.filter((item) => item.feed.binanceConnected).length}/${state.profiles.length} Binance` : `Binance ${viewState.feed.binanceConnected ? 'on' : 'off'}`}</em>
           </div>
 	          <div className={`terminalStat pnl ${portfolioPnl > 0 ? 'good' : portfolioPnl < 0 ? 'bad' : 'neutral'}`}>
 	            <span>Portfolio</span>
@@ -962,431 +937,219 @@ export function App() {
 
       {/* Main Tabbed Area */}
       <main>
-        {activeTab === 'terminal' && (
-          <div className="terminalWorkspace">
-            <section className="terminalPrimaryColumn">
-              <div className="decisionPanel decisionPanelPrimary">
-                <div className="decisionHeader">
-                  <div>
-                    <span className="decisionKicker">Primary Decision Surface</span>
-                    <strong>{entryCheck?.title || 'Up/Down Dual Entry'}</strong>
-                  </div>
-                  <Badge tone={entryStatusTone}>{entryStatusLabel}</Badge>
+        {activeTab === 'terminal' && (isAllProfiles ? (
+          <div className="scopeWorkspace">
+            <section className="panel scopePanel">
+              <div className="sectionHeader">
+                <div>
+                  <span className="sectionKicker">All Profiles</span>
+                  <h2>Runtime Overview</h2>
                 </div>
-                <div className={`decisionSummary ${decisionState.tone}`}>
-                  <div>
-                    <span className="decisionKicker">Current Action</span>
-                    <strong>{decisionState.label}</strong>
-                    <p>{decisionState.detail}</p>
-                    {effectiveBlockers.length > 0 && (
-                      <div className={`blockerChips ${entryBypassActive ? 'muted' : ''}`}>
-                        {effectiveBlockers.slice(0, 3).map((condition) => (
-                          <span key={condition.label}>{condition.label}</span>
-                        ))}
-                      </div>
-                    )}
-                    {entryBypassActive && diagnosticBlockerCount > 0 && (
-                      <div className="bypassNote">{diagnosticBlockerCount} strategy checks are hidden because score gating is bypassed.</div>
-                    )}
-                  </div>
-                  <div className="decisionSummaryMeta">
-                    <span>{entryCheck?.reason || 'Strategy check has not loaded yet'}</span>
-                    <div className="decisionSummaryFlags">
-                      <Badge tone={state.runtime.executionMode === 'live' ? 'warn' : 'neutral'}>
-                        {state.runtime.executionMode === 'live' ? 'live execution' : 'monitor only'}
-                      </Badge>
-                      <Badge tone={entryBypassActive ? 'warn' : 'good'}>
-                        score {entryBypassActive ? 'bypassed' : 'enforced'}
-                      </Badge>
-                      <Badge tone={entryConfig?.bypassSingleFillCooldown ? 'warn' : 'good'}>
-                        cooldown {entryConfig?.bypassSingleFillCooldown ? 'bypassed' : 'enforced'}
-                      </Badge>
-                    </div>
-                  </div>
-                </div>
-                <div className="decisionGrid">
-                  <DecisionMetric
-                    label="BUY Policy"
-                    value={buyPolicyStatus}
-                    detail={decisionWindowCondition?.actual || (isRoundStarted ? 'entries closed after start' : `${formatSeconds(secondsToStart)} before start`)}
-                    tone={buyPolicyTone}
-                  />
-                  <DecisionMetric
-                    label="Cooldown Gate"
-                    value={entryCooldownActive ? 'ACTIVE' : cooldownGateLabel}
-                    detail={entryCooldownActive ? cooldownDetail : entryConfig?.bypassSingleFillCooldown ? 'single-fill cooldown is ignored by config' : 'single-fill cooldown still gates entry'}
-                    tone={entryCooldownActive ? 'warn' : entryConfig?.bypassSingleFillCooldown ? 'warn' : 'good'}
-                  />
-                  <DecisionMetric
-                    label="Entry Price / Size"
-                    value={priceSizeValue}
-                    detail={priceSizeDetail}
-                    tone={priceSizeTone}
-                  />
-                  <DecisionMetric
-                    label="Entry Limit"
-                    value={entryLimit == null ? '-' : entryLimit.toFixed(3)}
-                    detail={entryPairCost == null || entryPairEdge == null ? 'waiting for strategy check' : `pair cost ${entryPairCost.toFixed(3)} / edge ${entryPairEdge.toFixed(3)}`}
-                    tone={entryLimit == null ? 'neutral' : entryPairEdge != null && entryPairEdge >= 0.08 ? 'good' : 'warn'}
-                  />
-                  {!entryBypassActive && (
-                    <>
-                      <DecisionMetric
-                        label="BTC Dynamic Score"
-                        value={scoreMetricValue}
-                        detail={scoreMetricDetail}
-                        tone={btcDecisionPassed ? 'good' : 'bad'}
-                      />
-                      <DecisionMetric
-                        label="Orderbook Role"
-                        value={orderbookDecisionPassed ? 'TRADABLE' : 'NOT TRADABLE'}
-                        detail="live/fresh token books with buy ask only"
-                        tone={orderbookDecisionPassed ? 'good' : 'bad'}
-                      />
-                      <DecisionMetric
-                        label="Participation Gate"
-                        value={participationGateValue}
-                        detail={participationSummary}
-                        tone={participationGateTone}
-                      />
-                    </>
-                  )}
-                  {entryBypassActive && (
-                    <DecisionMetric
-                      label="Bypass Scope"
-                      value={entryConfigValue}
-                      detail="score, strategy blockers, and entry quote gates are diagnostic; cooldown remains active"
-                      tone="warn"
-                    />
-                  )}
-                  <DecisionMetric
-                    label="Post-Start Actions"
-                    value="REGULAR OFF"
-                    detail="no add/sell/rebalance; capped single-fill hedge can run late"
-                    tone="neutral"
-                  />
-                  {!entryBypassActive && (
-                    <DecisionMetric
-                      label="Current Blockers"
-                      value={effectiveBlockers.length ? String(effectiveBlockers.length) : '0'}
-                      detail={topBlockers}
-                      tone={effectiveBlockers.length ? 'warn' : 'good'}
-                    />
-                  )}
-                </div>
-                <details className={`collapsiblePanel ${entryBypassActive ? 'diagnosticOnly' : ''}`}>
-                  <summary>
-                    <span>Score Composition</span>
-                    <strong>{entryBypassActive ? `bypassed · ${formatNumber(snapshot.features.chopScore, 1)}` : `${formatNumber(snapshot.features.chopScore, 1)} / 70`}</strong>
-                  </summary>
-                  <div className="scorePanelBody">
-                    <div className="scoreGaugeColumn">
-                      <ScoreGauge score={snapshot.features.chopScore} threshold={70} />
-                    </div>
-                    <div className="scoreBreakdownColumn">
-                      <div className="scoreBreakdown">
-                        {scoreParts.map((part) => (
-                          <div key={part.label} className="scorePart">
-                            <div className="scorePartTop">
-                              <span>{part.label}</span>
-                              <strong>{formatNumber(part.value, 1)} / {part.max}</strong>
-                            </div>
-                            <div className="scoreTrack">
-                              <div className="scoreFill" style={{ width: `${Math.max(2, Math.min(100, (part.value / part.max) * 100))}%` }}></div>
-                            </div>
-                            <em>{part.detail}</em>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                </details>
+                <Badge tone={state.runtime.executionMode === 'live' ? 'warn' : 'neutral'}>{executionLabel}</Badge>
               </div>
-              
-              {/* BTC Volatility Visualizer */}
-              {btcPrice != null && (
-                <div className="panel marketSignalPanel">
-                  <h2>
-                    BTC 120s Market Signal
-                    <span className="panelSubTitle">range {formatNumber(snapshot.features.rangeBps120s, 2)}bps / balance {formatNumber(snapshot.features.excursionBalance120s, 2)}</span>
-                  </h2>
-                  <div className="marketSignalSummary">
-                    <div>
-                      <span>BTC Price</span>
-                      <strong>{formatMoney(btcPrice)}</strong>
-                    </div>
-                    <div>
-                      <span>Center</span>
-                      <strong>{snapshot.features.centerPrice120s == null ? 'unknown' : formatMoney(snapshot.features.centerPrice120s)}</strong>
-                    </div>
-                    <div>
-                      <span>CHOP</span>
-                      <strong>{formatNumber(snapshot.features.chopScore, 1)}</strong>
-                    </div>
-                    <div>
-                      <span>Samples</span>
-                      <strong>{snapshot.features.samples120s}</strong>
-                    </div>
-                  </div>
-                  <PriceStrikeGauge
-                    btcPrice={btcPrice}
-                    centerPrice={snapshot.features.centerPrice120s}
-                    rangeBps120s={snapshot.features.rangeBps120s}
-                    volatility120s={snapshot.features.volatility120s}
-                    centerMinBiExcursionBps120s={snapshot.features.centerMinBiExcursionBps120s ?? snapshot.features.minBiExcursionBps120s}
-                    centerExcursionBalance120s={snapshot.features.centerExcursionBalance120s ?? snapshot.features.excursionBalance120s}
-                    latestRangePosition120s={snapshot.features.latestRangePosition120s}
-                  />
-                </div>
-              )}
-
-              {/* Active Positions Panel */}
-              <div className="panel">
-                <h2>Active Portfolio Positions</h2>
-                <div className="positionsList">
-                  {snapshot.positions && snapshot.positions.length > 0 ? (
-                    snapshot.positions.map((pos) => {
-                      const quote = snapshot.orderbooks.find((q) => q.tokenId === pos.tokenId);
-                      // Estimate current market price from orderbook midpoint or best bid/ask
-                      const currentPrice = pos.currentPrice ?? quote?.midpoint ?? (
-                        (quote?.bestBid != null && quote?.bestAsk != null) 
-                          ? (quote.bestBid + quote.bestAsk) / 2 
-                          : pos.avgPrice
-                      );
-                      const unrealizedPnL = (currentPrice - pos.avgPrice) * pos.shares;
-                      const value = currentPrice * pos.shares;
-                      const cost = pos.shares * pos.avgPrice;
-                      
-                      return (
-                        <div key={pos.tokenId} className={`positionCard ${pos.label}`}>
-                          <div className="posToken">
-                            <div className="posTokenName">{pos.title || `${outcomeLabel(pos.label)} Token`}</div>
-                            <div className="posTokenSide">{outcomeLabel(pos.label)} Shares</div>
-                          </div>
-                          <div className="posStats">
-                            <span>Shares / Avg Entry</span>
-                            <strong>{formatNumber(pos.shares, 1)} @ {pos.avgPrice.toFixed(3)}</strong>
-                          </div>
-                          <div className="posStats">
-                            <span>Market Value / Cost</span>
-                            <strong>{formatMoney(value)} / {formatMoney(cost)}</strong>
-                          </div>
-                          <div className="posPnL">
-                            <span>Unrealized PnL</span>
-                            <strong className={`posPnLAmount ${unrealizedPnL >= 0 ? 'profit' : 'loss'}`}>
-                              {unrealizedPnL >= 0 ? '+' : ''}{formatMoney(unrealizedPnL)}
-                            </strong>
-                          </div>
-                        </div>
-                      );
-                    })
-                  ) : snapshot.positionReadStatus === 'disabled' ? (
-                    <div className="empty" style={{ minHeight: '100px', background: 'rgba(0, 0, 0, 0.008)', border: '1px dashed var(--border-color)', borderRadius: '10px' }}>
-                      <Info size={20} style={{ color: 'var(--text-muted)' }} />
-                      <p className="emptyText">Position reads disabled until a deposit wallet is configured</p>
-                    </div>
-                  ) : (
-                    <div className="empty" style={{ minHeight: '100px', background: 'rgba(0, 0, 0, 0.008)', border: '1px dashed var(--border-color)', borderRadius: '10px' }}>
-                      <Info size={20} style={{ color: 'var(--text-muted)' }} />
-                      <p className="emptyText">No active token positions held in this round</p>
-                    </div>
-                  )}
-                </div>
+              <div className="scopeMetricGrid">
+                <DecisionMetric label="Enabled" value={`${enabledProfileCount}/${state.profiles.length}`} detail={`${liveProfileCount} live profiles`} tone={liveProfileCount > 0 ? 'warn' : 'neutral'} />
+                <DecisionMetric label="Orders" value={String(viewState.orders.length)} detail={`${viewState.fills.length} fills / ${viewState.settlements.length} settlements`} tone={viewState.orders.length > 0 ? 'good' : 'neutral'} />
+                <DecisionMetric label="Open Positions" value={String(displayedPositions.length)} detail="latest profile snapshots" tone={displayedPositions.length > 0 ? 'warn' : 'neutral'} />
+                <DecisionMetric label="Settled PnL" value={formatSignedMoney(portfolioPnl)} detail="filtered settlements" tone={portfolioPnl > 0 ? 'good' : portfolioPnl < 0 ? 'bad' : 'neutral'} />
               </div>
-
-              {/* Strategy Checks */}
-              <details className="panel collapsiblePanel checksPanel">
-                <summary>
-                  <span>Strategy Eligibility & Entry Checks</span>
-                  <strong>{failedEntryConditions.length ? `${failedEntryConditions.length} blockers` : 'clear'}</strong>
-                </summary>
-                <div className="checks">
-                  {viewState.strategyChecks.map((check) => (
-                    <article key={check.strategy} className={`checkCard ${check.status}`}>
-                      <div className="checkCardHeader">
-                        <h3>{check.title}</h3>
-                        <Badge tone={check.status === 'eligible' ? 'good' : check.status === 'blocked' ? 'bad' : 'neutral'}>
-                          {check.status}
-                        </Badge>
-                      </div>
-                      <p className="checkReason">{check.reason}</p>
-                      <div className="checkConditions">
-                        {check.conditions.map((condition) => (
-                          <div key={condition.label} className="checkConditionRow">
-                            <span className="checkConditionLabel">{condition.label}</span>
-                            <span className={`checkConditionValue ${condition.passed ? 'pass' : 'fail'}`}>
-                              {condition.actual}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    </article>
-                  ))}
-                </div>
-              </details>
             </section>
 
-            {/* Right Column (Side status metrics) */}
-            <aside className="terminalContextRail">
-              
-              {/* Round Progress Countdown */}
-              <div className="panel">
-                <h2>Round Timeline</h2>
-                <RoundTimelinePipeline
-                  phase={snapshot.round.phase}
-                  timelineDetail={timelineDetail}
-                  progressPct={progressPct}
-                  progressColorClass={progressColorClass}
+            <section className="profileGridPanel" aria-label="Profile runtime matrix">
+              {profileStatusRows.map(({ item, entryCheck: itemEntryCheck, hedgeCheck: itemHedgeCheck, profitExitCheck: itemProfitExitCheck, cooldownActive: itemCooldownActive }) => (
+                <button key={item.profile.id} type="button" className="profileRuntimeCard" onClick={() => setSelectedProfileId(item.profile.id)}>
+                  <div className="profileRuntimeHeader">
+                    <div>
+                      <strong>{item.profile.label}</strong>
+                      <span>{item.profile.status} · {item.latestSnapshot?.round.phase || 'pending'}</span>
+                    </div>
+                    <Badge tone={item.profile.status === 'live' ? 'warn' : item.profile.status === 'monitor' ? 'neutral' : 'bad'}>{item.profile.status}</Badge>
+                  </div>
+                  <div className="profileRuntimeStats">
+                    <div><span>Entry</span><strong>{strategyCheckLabel(itemEntryCheck)}</strong></div>
+                    <div><span>Exit</span><strong>{strategyCheckLabel(itemProfitExitCheck)}</strong></div>
+                    <div><span>Hedge</span><strong>{strategyCheckLabel(itemHedgeCheck)}</strong></div>
+                    <div><span>Cooldown</span><strong>{itemCooldownActive ? formatCooldownRemaining(item.entryCooldownUntil) : 'clear'}</strong></div>
+                  </div>
+                  <div className="profileRuntimeFooter">
+                    <span>{item.stats.orders} orders</span>
+                    <span>{item.stats.fills} fills</span>
+                    <strong className={item.stats.settledPnl >= 0 ? 'pass' : 'fail'}>{formatSignedMoney(item.stats.settledPnl)}</strong>
+                  </div>
+                </button>
+              ))}
+            </section>
+          </div>
+        ) : (
+          <div className="opsWorkspace">
+            <section className="opsPrimary">
+              <div className={`opsHero ${decisionState.tone}`}>
+                <div className="opsHeroMain">
+                  <span className="decisionKicker">{viewState.profileState.profile.label} Runtime</span>
+                  <h2>{decisionState.label}</h2>
+                  <p>{decisionState.detail}</p>
+                </div>
+                <div className="opsHeroMeta">
+                  <Badge tone={entryStatusTone}>{entryStatusLabel}</Badge>
+                  <Badge tone={state.runtime.executionMode === 'live' ? 'warn' : 'neutral'}>{executionLabel}</Badge>
+                </div>
+              </div>
+
+              <div className="opsMetricGrid">
+                <DecisionMetric
+                  label="Entry"
+                  value={entryCheck?.status === 'eligible' ? 'READY' : entryCooldownActive ? 'COOLDOWN' : isRoundStarted ? 'CLOSED' : 'WAITING'}
+                  detail={`BUY UP + DOWN @ ${entryPriceDisplay}, ${entrySharesDisplay} shares/side`}
+                  tone={entryCheck?.status === 'eligible' ? 'good' : entryCooldownActive ? 'warn' : isRoundStarted ? 'neutral' : 'warn'}
+                />
+                <DecisionMetric
+                  label="Open Orders"
+                  value={String(currentRoundOpenOrders.length)}
+                  detail={`${currentRoundOrders.length} recorded in this round`}
+                  tone={currentRoundOpenOrders.length ? 'warn' : 'neutral'}
+                />
+                <DecisionMetric
+                  label="Filled Exposure"
+                  value={currentExposure.label.toUpperCase()}
+                  detail={`UP ${formatShares(currentExposure.yes)} / DOWN ${formatShares(currentExposure.no)} / ${currentExposure.fills} fills`}
+                  tone={currentExposure.tone}
+                />
+                <DecisionMetric
+                  label="Profit Exit"
+                  value={strategyCheckLabel(profitExitCheck).toUpperCase()}
+                  detail={profitExitCheck?.reason || 'waiting for a single-fill opportunity'}
+                  tone={strategyCheckTone(profitExitCheck)}
+                />
+                <DecisionMetric
+                  label="Hedge"
+                  value={strategyCheckLabel(hedgeCheck).toUpperCase()}
+                  detail={hedgeCheck?.reason || 'waiting for hedge window'}
+                  tone={strategyCheckTone(hedgeCheck)}
+                />
+                <DecisionMetric
+                  label="Cooldown"
+                  value={entryCooldownActive ? entryCooldownRemaining : 'CLEAR'}
+                  detail={entryCooldownReason}
+                  tone={entryCooldownActive ? 'warn' : 'good'}
                 />
               </div>
 
-              <div className="panel compactContextPanel">
-                <h2>Round</h2>
-                <div className="metrics">
-                  <div className="metricRow">
-                    <span className="metricLabel">Round ID</span>
-                    <span className="metricValue">{snapshot.round.id}</span>
+              <div className="panel opsPanel">
+                <h2>
+                  Current Round
+                  <span className="panelSubTitle">{snapshot.round.id}</span>
+                </h2>
+                <div className="opsRoundGrid">
+                  <div className="opsRoundTimeline">
+                    <RoundTimelinePipeline
+                      phase={snapshot.round.phase}
+                      timelineDetail={timelineDetail}
+                      progressPct={progressPct}
+                      progressColorClass={progressColorClass}
+                    />
                   </div>
-                  <div className="metricRow">
-                    <span className="metricLabel">{strikeLabel}</span>
-                    <span className="metricValue">${formatNumber(snapshot.round.strike, 2)}</span>
-                  </div>
-                  <div className="metricRow">
-                    <span className="metricLabel">Start Time</span>
-                    <span className="metricValue">{formatEtTime(snapshot.round.startAt)}</span>
-                  </div>
-                  <div className="metricRow">
-                    <span className="metricLabel">End Time</span>
-                    <span className="metricValue">{formatEtTime(snapshot.round.endAt)}</span>
+                  <div className="opsRoundFacts">
+                    <div>
+                      <span>{strikeLabel}</span>
+                      <strong>{formatMoney(snapshot.round.strike)}</strong>
+                    </div>
+                    <div>
+                      <span>Start</span>
+                      <strong>{formatEtTime(snapshot.round.startAt)}</strong>
+                    </div>
+                    <div>
+                      <span>End</span>
+                      <strong>{formatEtTime(snapshot.round.endAt)}</strong>
+                    </div>
+                    <div>
+                      <span>Settlement</span>
+                      <strong>{roundSettlement ? `${roundSettlement.status} ${formatSignedMoney(roundSettlement.pnl)}` : 'pending'}</strong>
+                    </div>
                   </div>
                 </div>
               </div>
 
-              <div className="panel compactContextPanel">
-                <h2>Market Participation</h2>
-                <div className="metrics">
-                  <div className="metricRow">
-                    <span className="metricLabel">Data Status</span>
-                    <span className="metricValue"><Badge tone={participationTone}>{participationStatus}</Badge></span>
+              <div className="panel opsPanel">
+                <h2>
+                  Active Positions
+                  <span className="panelSubTitle">{snapshot.positions.length ? `${snapshot.positions.length} positions` : 'none'}</span>
+                </h2>
+                {snapshot.positions.length ? (
+                  <div className="opsPositionGrid">
+                    {snapshot.positions.map((position) => {
+                      const value = positionValue(position);
+                      const pnlValue = positionPnl(position);
+                      return (
+                        <div key={position.tokenId} className="opsPosition">
+                          <div>
+                            <strong>{outcomeLabel(position.label)}</strong>
+                            <span>{shortenTokenId(position.tokenId)}</span>
+                          </div>
+                          <div>
+                            <span>{formatNumber(position.shares, 2)} @ {position.avgPrice.toFixed(3)}</span>
+                            <strong className={pnlValue >= 0 ? 'pass' : 'fail'}>{formatSignedMoney(pnlValue)}</strong>
+                          </div>
+                          <em>{formatMoney(value)} value</em>
+                        </div>
+                      );
+                    })}
                   </div>
-                  <div className="metricRow">
-                    <span className="metricLabel">Sample Top PnL</span>
-                    <span className="metricValue">{formatNullableMoney(participation?.maxPositionPnl)}</span>
-                  </div>
-                  <div className="metricRow">
-                    <span className="metricLabel">Sample PnL Sum</span>
-                    <span className="metricValue">{participation ? formatMoney(participation.totalPositionPnl) : 'unknown'}</span>
-                  </div>
-                  <div className="metricRow">
-                    <span className="metricLabel">Top Holder Shares</span>
-                    <span className="metricValue">{participation ? formatNumber(participation.totalTopHolderShares, 1) : 'unknown'}</span>
-                  </div>
-                  {participation?.sides.map((side) => (
-                    <div key={side.label} className="sideSnapshot">
-                      <span>{outcomeLabel(side.label)}</span>
-                      <strong>{formatNumber(side.topHolderShares, 1)} shares</strong>
-                      <em>{formatRatioPct(side.largestHolderShareRatio)} concentration / {formatMoney(side.positionPnlSum)} sample PnL</em>
-                    </div>
+                ) : (
+                  <div className="opsEmptyState">No active positions for the selected profile.</div>
+                )}
+              </div>
+            </section>
+
+            <aside className="opsRail">
+              <div className="panel opsPanel">
+                <h2>Profiles</h2>
+                <div className="opsProfileList">
+                  {profileStatusRows.map(({ item, entryCheck: itemEntryCheck, hedgeCheck: itemHedgeCheck, profitExitCheck: itemProfitExitCheck, cooldownActive: itemCooldownActive }) => (
+                    <button key={item.profile.id} type="button" className={`opsProfileRow ${selectedProfileId === item.profile.id ? 'active' : ''}`} onClick={() => setSelectedProfileId(item.profile.id)}>
+                      <div>
+                        <strong>{item.profile.label}</strong>
+                        <span>{item.latestSnapshot?.round.phase || 'pending'} · {item.profile.status}</span>
+                      </div>
+                      <div className="opsProfileBadges">
+                        <Badge tone={strategyCheckTone(itemEntryCheck)}>entry {strategyCheckLabel(itemEntryCheck)}</Badge>
+                        <Badge tone={strategyCheckTone(itemProfitExitCheck)}>exit {strategyCheckLabel(itemProfitExitCheck)}</Badge>
+                        <Badge tone={strategyCheckTone(itemHedgeCheck)}>hedge {strategyCheckLabel(itemHedgeCheck)}</Badge>
+                        {itemCooldownActive && <Badge tone="warn">{formatCooldownRemaining(item.entryCooldownUntil)}</Badge>}
+                      </div>
+                    </button>
                   ))}
                 </div>
               </div>
 
-              {/* Analytics Features */}
-              <details className="panel collapsiblePanel compactContextPanel">
-                <summary>
-                  <span>Path Features (120s)</span>
-                  <strong>{formatNumber(snapshot.features.chopScore, 1)} chop</strong>
-                </summary>
-                <div className="metrics">
-                  <div className="metricRow">
-                    <span className="metricLabel">Data Feed Source</span>
-                    <span className="metricValue"><Badge tone="good">{snapshot.features.source}</Badge></span>
-                  </div>
-                  <div className="metricRow">
-                    <span className="metricLabel">Price Samples</span>
-                    <span className="metricValue">{snapshot.features.samples120s}</span>
-                  </div>
-                  <div className="metricRow">
-                    <span className="metricLabel">Strike Crosses</span>
-                    <span className="metricValue">{snapshot.features.cross120s}</span>
-                  </div>
-                  <div className="metricRow">
-                    <span className="metricLabel">Center Price</span>
-                    <span className="metricValue">{snapshot.features.centerPrice120s == null ? 'unknown' : formatMoney(snapshot.features.centerPrice120s)}</span>
-                  </div>
-                  <div className="metricRow">
-                    <span className="metricLabel">Center Crosses</span>
-                    <span className="metricValue">{snapshot.features.centerCross120s ?? snapshot.features.cross120s}</span>
-                  </div>
-                  <div className="metricRow">
-                    <span className="metricLabel">CHOP Score</span>
-                    <span className="metricValue">{formatNumber(snapshot.features.chopScore, 1)}</span>
-                  </div>
-                  <div className="metricRow">
-                    <span className="metricLabel">Range (120s)</span>
-                    <span className="metricValue">{formatNumber(snapshot.features.range120s, 2)} / {formatNumber(snapshot.features.rangeBps120s, 2)}bps</span>
-                  </div>
-                  <div className="metricRow">
-                    <span className="metricLabel">Range (300s)</span>
-                    <span className="metricValue">{formatNumber(snapshot.features.range300s, 2)} / {formatNumber(snapshot.features.rangeBps300s, 2)}bps</span>
-                  </div>
-                  <div className="metricRow">
-                    <span className="metricLabel">Two-Sided Excursion</span>
-                    <span className="metricValue">{formatNumber(snapshot.features.minBiExcursionBps120s, 2)}bps</span>
-                  </div>
-                  <div className="metricRow">
-                    <span className="metricLabel">Center Two-Sided</span>
-                    <span className="metricValue">{formatNumber(snapshot.features.centerMinBiExcursionBps120s ?? snapshot.features.minBiExcursionBps120s, 2)}bps</span>
-                  </div>
-                  <div className="metricRow">
-                    <span className="metricLabel">Latest Range Position</span>
-                    <span className="metricValue">{formatRatioPct(snapshot.features.latestRangePosition120s)}</span>
-                  </div>
-                  <div className="metricRow">
-                    <span className="metricLabel">Excursion Balance</span>
-                    <span className="metricValue">{formatNumber(snapshot.features.excursionBalance120s, 2)}</span>
-                  </div>
-                  <div className="metricRow">
-                    <span className="metricLabel">Volatility (120s)</span>
-                    <span className="metricValue">{formatNumber(snapshot.features.volatility120s, 2)}</span>
-                  </div>
-                  <div className="metricRow">
-                    <span className="metricLabel">Drift (120s)</span>
-                    <span className="metricValue">{formatNumber(snapshot.features.drift120s, 2)}</span>
-                  </div>
-                  <div className="metricRow">
-                    <span className="metricLabel">Momentum (30s)</span>
-                    <span className="metricValue">{formatNumber(snapshot.features.momentum30s, 2)}</span>
-                  </div>
-                  <div className="metricRow">
-                    <span className="metricLabel">Drift / Momentum Ratio</span>
-                    <span className="metricValue">{formatNumber(snapshot.features.driftRatio120s, 2)} / {formatNumber(snapshot.features.momentumRatio30s, 2)}</span>
-                  </div>
-                  <div className="metricRow">
-                    <span className="metricLabel">Range Percentile</span>
-                    <span className="metricValue">{snapshot.features.rangePercentile120s == null ? '-' : formatNumber(snapshot.features.rangePercentile120s * 100, 1) + '%'}</span>
-                  </div>
+              <div className="panel opsPanel">
+                <h2>System</h2>
+                <div className="opsSystemList">
+                  <div><span>Feed</span><strong>{feedLabel}</strong></div>
+                  <div><span>Binance</span><strong>{viewState.feed.binanceConnected ? 'connected' : 'offline'}</strong></div>
+                  <div><span>Runtime</span><strong>{state.runtime.status}</strong></div>
+                  <div><span>Alerts</span><strong>{alertLogCount}</strong></div>
+                  <div><span>Signals</span><strong>{signalLogCount}</strong></div>
+                  <div><span>Portfolio PnL</span><strong>{formatSignedMoney(portfolioPnl)}</strong></div>
                 </div>
-              </details>
+              </div>
 
-              {/* System Diagnostics */}
-              {snapshot.diagnostics && snapshot.diagnostics.length > 0 && (
-                <div className="panel">
-                  <h2>Diagnostics</h2>
-                  <div className="metrics" style={{ gap: '8px' }}>
-                    {snapshot.diagnostics.map((diag, i) => (
-                      <div key={i} className="metricRow" style={{ borderBottom: 'none', padding: '2px 0' }}>
-                        <span className="metricValue" style={{ color: 'var(--color-warning)', fontSize: '12px', fontFamily: 'var(--font-mono)' }}>
-                          • {diag}
-                        </span>
-                      </div>
+              {snapshot.diagnostics.length > 0 && (
+                <details className="panel opsPanel opsDiagnostics">
+                  <summary>
+                    <span>Diagnostics</span>
+                    <strong>{snapshot.diagnostics.length}</strong>
+                  </summary>
+                  <div className="opsDiagnosticList">
+                    {snapshot.diagnostics.map((diag, index) => (
+                      <span key={`${diag}-${index}`}>{diag}</span>
                     ))}
                   </div>
-                </div>
+                </details>
               )}
             </aside>
           </div>
-	        )}
+        ))}
+
 	
 	        {activeTab === 'portfolio' && (
 	          <div className="portfolioWorkspace">
@@ -1410,12 +1173,12 @@ export function App() {
 	                  <div className="portfolioMetricGrid">
 		                    <DecisionMetric label="Collateral Balance" value={portfolio.collateralBalance == null ? 'n/a' : formatMoney(portfolio.collateralBalance)} detail="CLOB collateral" tone={portfolio.collateralBalance == null ? 'neutral' : 'good'} />
 		                    <DecisionMetric label="Allowance" value={portfolio.collateralAllowance == null ? 'n/a' : formatMoney(portfolio.collateralAllowance)} detail="CLOB allowance" tone={portfolio.collateralAllowance == null ? 'neutral' : 'good'} />
-		                    <DecisionMetric label="Position Value" value={formatMoney(portfolio.positionValue)} detail={`${portfolio.positionCount} positions`} tone={portfolio.positionValue > 0 ? 'good' : 'neutral'} />
-		                    <DecisionMetric label="Open Cost" value={formatMoney(portfolio.positionCost)} detail="avg entry basis" tone="neutral" />
-		                    <DecisionMetric label="Unrealized PnL" value={formatSignedMoney(portfolio.unrealizedPnl)} detail="active positions" tone={portfolio.unrealizedPnl > 0 ? 'good' : portfolio.unrealizedPnl < 0 ? 'bad' : 'neutral'} />
+		                    <DecisionMetric label="Position Value" value={formatMoney(displayedPositionValue)} detail={`${displayedPositions.length} scoped positions`} tone={displayedPositionValue > 0 ? 'good' : 'neutral'} />
+		                    <DecisionMetric label="Open Cost" value={formatMoney(displayedPositionCost)} detail="scoped entry basis" tone="neutral" />
+		                    <DecisionMetric label="Unrealized PnL" value={formatSignedMoney(displayedUnrealizedPnl)} detail="scoped positions" tone={displayedUnrealizedPnl > 0 ? 'good' : displayedUnrealizedPnl < 0 ? 'bad' : 'neutral'} />
 		                    <DecisionMetric label="Settled PnL" value={formatSignedMoney(portfolio.settledPnl)} detail={`${viewState.settlements.length} records`} tone={portfolio.settledPnl > 0 ? 'good' : portfolio.settledPnl < 0 ? 'bad' : 'neutral'} />
-		                    <DecisionMetric label="Total PnL" value={formatSignedMoney(portfolio.totalPnl)} detail="settled + unrealized" tone={portfolio.totalPnl > 0 ? 'good' : portfolio.totalPnl < 0 ? 'bad' : 'neutral'} />
-		                    <DecisionMetric label="ROI" value={formatPercentValue(portfolio.roiPct)} detail="PnL / open cost" tone={portfolio.roiPct == null ? 'neutral' : portfolio.roiPct > 0 ? 'good' : portfolio.roiPct < 0 ? 'bad' : 'neutral'} />
+		                    <DecisionMetric label="Total PnL" value={formatSignedMoney(portfolioPnl + displayedUnrealizedPnl)} detail="scoped settled + unrealized" tone={(portfolioPnl + displayedUnrealizedPnl) > 0 ? 'good' : (portfolioPnl + displayedUnrealizedPnl) < 0 ? 'bad' : 'neutral'} />
+		                    <DecisionMetric label="ROI" value={formatPercentValue(displayedRoiPct)} detail="scoped PnL / open cost" tone={displayedRoiPct == null ? 'neutral' : displayedRoiPct > 0 ? 'good' : displayedRoiPct < 0 ? 'bad' : 'neutral'} />
 	                  </div>
 
 	                  {portfolio.diagnostics.length > 0 && (
@@ -1434,20 +1197,21 @@ export function App() {
 	              )}
 	            </section>
 
-	            <section className="panel">
-	              <h2>
-	                Active Positions
-	                <span className="panelSubTitle">{portfolio ? `${portfolio.positionCount} open positions` : 'no account data'}</span>
-	              </h2>
-	              {portfolio && portfolio.positions.length > 0 ? (
-	                <DataTable headers={['Market', 'Outcome', 'Shares', 'Avg', 'Value', 'PnL', 'ROI']}>
-	                  {portfolio.positions.map((position) => {
+		            <section className="panel">
+		              <h2>
+		                Active Positions
+		                <span className="panelSubTitle">{displayedPositions.length ? `${displayedPositions.length} positions in ${scopeLabel}` : 'no scoped positions'}</span>
+		              </h2>
+	              {displayedPositions.length > 0 ? (
+	                <DataTable headers={isAllProfiles ? ['Profile', 'Market', 'Outcome', 'Shares', 'Avg', 'Value', 'PnL', 'ROI'] : ['Market', 'Outcome', 'Shares', 'Avg', 'Value', 'PnL', 'ROI']}>
+	                  {displayedPositions.map((position) => {
 	                    const value = positionValue(position);
 	                    const cost = positionCost(position);
 	                    const pnlValue = positionPnl(position);
 	                    const roi = cost > 0 ? (pnlValue / cost) * 100 : null;
 	                    return (
-	                      <tr key={position.tokenId}>
+	                      <tr key={`${position.profileId}:${position.tokenId}`}>
+	                        {isAllProfiles && <td><Badge tone="neutral">{position.profileLabel}</Badge></td>}
 	                        <td>
 	                          <span className="marketTitle">{position.title || 'Polymarket position'}</span>
 	                          <span className="mutedBlock mono">{shortenTokenId(position.tokenId)}</span>
@@ -1474,22 +1238,58 @@ export function App() {
 
 	        {activeTab === 'orderbooks' && (
 	          <div className="panel">
-	            <h2>Polymarket CLOB Order Books</h2>
-            <OrderbookExecutionSummary quotes={snapshot.orderbooks} yesTokenId={snapshot.round.yesTokenId} noTokenId={snapshot.round.noTokenId} />
-            <OrderbookCapacityPanel depth={snapshot.orderbookDepth} />
-            <OrderbookTable quotes={snapshot.orderbooks} yesTokenId={snapshot.round.yesTokenId} noTokenId={snapshot.round.noTokenId} />
+	            <div className="sectionHeader">
+	              <div>
+	                <span className="sectionKicker">{scopeLabel}</span>
+	                <h2>Polymarket CLOB Order Books</h2>
+	              </div>
+	            </div>
+            {isAllProfiles ? (
+              <div className="profileGridPanel compact">
+                {state.profiles.map((item) => (
+                  <button key={item.profile.id} type="button" className="profileRuntimeCard" onClick={() => setSelectedProfileId(item.profile.id)}>
+                    <div className="profileRuntimeHeader">
+                      <div>
+                        <strong>{item.profile.label}</strong>
+                        <span>{item.latestSnapshot?.round.id || 'waiting for round'}</span>
+                      </div>
+                      <Badge tone={item.feed.clobConnected ? 'good' : 'bad'}>CLOB {item.feed.clobConnected ? 'on' : 'off'}</Badge>
+                    </div>
+                    <div className="profileRuntimeStats">
+                      <div><span>Round</span><strong>{item.latestSnapshot?.round.phase || 'pending'}</strong></div>
+                      <div><span>Orderbooks</span><strong>{item.latestSnapshot?.orderbooks.length || 0}</strong></div>
+                      <div><span>Depth</span><strong>{item.latestSnapshot?.orderbookDepth ? 'loaded' : 'empty'}</strong></div>
+                      <div><span>Updated</span><strong>{item.feed.lastOrderbookAt ? formatEtTime(item.feed.lastOrderbookAt) : 'n/a'}</strong></div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <>
+                <OrderbookExecutionSummary quotes={snapshot.orderbooks} yesTokenId={snapshot.round.yesTokenId} noTokenId={snapshot.round.noTokenId} />
+                <OrderbookCapacityPanel depth={snapshot.orderbookDepth} />
+                <OrderbookTable quotes={snapshot.orderbooks} yesTokenId={snapshot.round.yesTokenId} noTokenId={snapshot.round.noTokenId} />
+              </>
+            )}
           </div>
         )}
 
         {activeTab === 'activity' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
             <div className="panel">
-              <h2>
-                Execution Review
-                <span className="panelSubTitle">
-                  {roundSummaries.length} rounds / {viewState.orders.length} orders
-                </span>
-              </h2>
+              <div className="sectionHeader">
+                <div>
+                  <span className="sectionKicker">{scopeLabel}</span>
+                  <h2>Execution Review</h2>
+                </div>
+                <span className="panelSubTitle">{roundSummaries.length} rounds / {viewState.orders.length} orders</span>
+              </div>
+
+              <div className="listScopeBar">
+                <span>{isAllProfiles ? 'Aggregated across enabled and disabled profiles' : `Filtered to ${scopeLabel}`}</span>
+                <strong>{viewState.fills.length} fills</strong>
+                <strong>{viewState.settlements.length} settlements</strong>
+              </div>
 
               <div className="subTabBar">
                 <button
@@ -1544,8 +1344,10 @@ export function App() {
                           </div>
 
                           <DataTable
-                            headers={['Time (ET)', 'Age', 'Market', 'Round Status', 'Orders', 'Submitted Buy Orders', 'Filled Buy Shares', 'Unfilled', 'Settlement PnL']}
-                            className="executionTable dailyExecutionTable"
+                            headers={isAllProfiles
+                              ? ['Profile', 'Time (ET)', 'Age', 'Market', 'Round Status', 'Orders', 'Submitted Buy Orders', 'Filled Buy Shares', 'Unfilled', 'Settlement PnL']
+                              : ['Time (ET)', 'Age', 'Market', 'Round Status', 'Orders', 'Submitted Buy Orders', 'Filled Buy Shares', 'Unfilled', 'Settlement PnL']}
+                            className={`executionTable dailyExecutionTable ${isAllProfiles ? 'withProfile' : ''}`}
                           >
                             {day.rounds.map((round) => {
                               const hasUnfilled = round.unfilledOrders > 0;
@@ -1553,7 +1355,8 @@ export function App() {
                               const fillLabel = fillStateLabel(net.yes, net.no);
                               const status = roundStatusSummary(round);
                               return (
-                                <tr key={round.roundId}>
+                                <tr key={round.key}>
+                                  {isAllProfiles && <td><Badge tone="neutral">{round.profileLabel}</Badge></td>}
                                   <td className="mono timeCell">{round.timeLabel}</td>
                                   <td className="ageCell"><span>{formatRelativeAge(round.startTime)}</span></td>
                                   <td>
@@ -1619,8 +1422,10 @@ export function App() {
                 roundSummaries.length > 0 ? (
                   <>
                     <DataTable
-                      headers={['Age', 'Market', 'Round ID', 'Round Status', 'Orders', 'Submitted Buy Orders', 'Filled Buy Shares', 'Filled Sell Shares', 'Unfilled', 'Settlement PnL']}
-                      className="executionTable roundExecutionTable"
+                      headers={isAllProfiles
+                        ? ['Profile', 'Age', 'Market', 'Round ID', 'Round Status', 'Orders', 'Submitted Buy Orders', 'Filled Buy Shares', 'Filled Sell Shares', 'Unfilled', 'Settlement PnL']
+                        : ['Age', 'Market', 'Round ID', 'Round Status', 'Orders', 'Submitted Buy Orders', 'Filled Buy Shares', 'Filled Sell Shares', 'Unfilled', 'Settlement PnL']}
+                      className={`executionTable roundExecutionTable ${isAllProfiles ? 'withProfile' : ''}`}
                     >
                       {roundPagination.pageRows.map((round) => {
                         const hasUnfilled = round.unfilledOrders > 0;
@@ -1628,7 +1433,8 @@ export function App() {
                         const fillLabel = fillStateLabel(net.yes, net.no);
                         const status = roundStatusSummary(round);
                         return (
-                          <tr key={round.roundId}>
+                          <tr key={round.key}>
+                            {isAllProfiles && <td><Badge tone="neutral">{round.profileLabel}</Badge></td>}
                             <td className="ageCell"><span>{formatRelativeAge(round.startTime)}</span></td>
                             <td>
                               <div className="marketCell">
@@ -1693,9 +1499,12 @@ export function App() {
               {activitySubTab === 'orders' && (
                 viewState.orders.length > 0 ? (
                   <>
-                    <DataTable headers={['Time (ET)', 'Strategy', 'Market', 'Round ID', 'Outcome', 'Side', 'Price', 'Size', 'Status', 'Reason', 'Polymarket CLOB Order ID']}>
+                    <DataTable headers={isAllProfiles
+                      ? ['Profile', 'Time (ET)', 'Strategy', 'Market', 'Round ID', 'Outcome', 'Side', 'Price', 'Size', 'Status', 'Reason', 'Polymarket CLOB Order ID']
+                      : ['Time (ET)', 'Strategy', 'Market', 'Round ID', 'Outcome', 'Side', 'Price', 'Size', 'Status', 'Reason', 'Polymarket CLOB Order ID']}>
                       {ordersPagination.pageRows.map((order) => (
                         <tr key={order.id}>
+                          {isAllProfiles && <td><Badge tone="neutral">{profileLabelFor(state.profiles, order.profileId)}</Badge></td>}
                           <td className="mono">{formatEtTime(order.createdAt)}</td>
                           <td className="mono" style={{ fontSize: '11px' }}>{strategySourceLabel(order)}</td>
                           <td>

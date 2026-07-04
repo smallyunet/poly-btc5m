@@ -703,11 +703,36 @@ button.primary:hover:not(:disabled) {
   font-size: 15px;
   font-weight: 600;
   color: var(--text-primary);
-  border-bottom: 1px solid var(--border-color);
-  padding-bottom: 12px;
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+
+.panel > h2 {
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 12px;
+}
+
+.sectionHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.sectionHeader > div {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.sectionKicker {
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
 }
 
 .panelSubTitle {
@@ -790,240 +815,12 @@ button.primary:hover:not(:disabled) {
   line-height: 1.3;
 }
 
-/* Pre-round decision status */
-.decisionPanel {
-  background: var(--bg-panel);
-  border: 1px solid var(--border-color);
-  border-radius: 12px;
-  padding: 18px;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.02);
-}
-
-.decisionPanelPrimary {
-  border-color: rgba(37, 99, 235, 0.18);
-  box-shadow: 0 8px 28px rgba(15, 23, 42, 0.045);
-}
-
-.decisionHeader {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 12px;
-  border-bottom: 1px solid var(--border-color);
-  padding-bottom: 12px;
-}
-
-.decisionHeader > div {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-}
-
-.decisionHeader strong {
-  color: var(--text-primary);
-  font-size: 15px;
-  line-height: 1.35;
-}
-
 .decisionKicker {
   color: var(--text-muted);
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0;
   text-transform: uppercase;
-}
-
-.decisionSummary {
-  display: grid;
-  grid-template-columns: minmax(0, 1.7fr) minmax(240px, 0.8fr);
-  gap: 14px;
-  padding: 16px;
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  background: rgba(15, 23, 42, 0.025);
-  min-width: 0;
-}
-
-.decisionSummary.good {
-  border-color: rgba(16, 185, 129, 0.32);
-  background: rgba(16, 185, 129, 0.06);
-}
-
-.decisionSummary.warn {
-  border-color: rgba(217, 119, 6, 0.32);
-  background: rgba(217, 119, 6, 0.06);
-}
-
-.decisionSummary.bad {
-  border-color: rgba(225, 29, 72, 0.32);
-  background: rgba(225, 29, 72, 0.06);
-}
-
-.decisionSummary > div {
-  min-width: 0;
-}
-
-.decisionSummary strong {
-  display: block;
-  margin-top: 3px;
-  font-family: var(--font-mono);
-  font-size: 26px;
-  line-height: 1.15;
-  color: var(--text-primary);
-  overflow-wrap: anywhere;
-}
-
-.decisionSummary.good strong { color: var(--color-success); }
-.decisionSummary.warn strong { color: var(--color-warning); }
-.decisionSummary.bad strong { color: var(--color-danger); }
-
-.decisionSummary p {
-  margin-top: 7px;
-  font-size: 13px;
-  color: var(--text-secondary);
-  line-height: 1.4;
-  overflow-wrap: anywhere;
-}
-
-.blockerChips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 10px;
-}
-
-.blockerChips span {
-  display: inline-flex;
-  min-height: 24px;
-  align-items: center;
-  padding: 2px 8px;
-  border: 1px solid rgba(217, 119, 6, 0.22);
-  border-radius: 999px;
-  background: rgba(217, 119, 6, 0.08);
-  color: #b45309;
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-}
-
-.blockerChips.muted span {
-  border-color: rgba(100, 116, 139, 0.18);
-  background: rgba(100, 116, 139, 0.06);
-  color: var(--text-muted);
-}
-
-.bypassNote {
-  margin-top: 8px;
-  color: var(--text-muted);
-  font-size: 12px;
-  font-family: var(--font-mono);
-}
-
-.decisionSummaryMeta {
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  gap: 10px;
-  padding-left: 14px;
-  border-left: 1px solid var(--border-color);
-}
-
-.decisionSummaryFlags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.collapsiblePanel {
-  min-width: 0;
-}
-
-.collapsiblePanel > summary {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  min-height: 42px;
-  padding: 0;
-  color: var(--text-primary);
-  cursor: pointer;
-  list-style: none;
-}
-
-.collapsiblePanel > summary::-webkit-details-marker {
-  display: none;
-}
-
-.collapsiblePanel > summary::after {
-  content: '+';
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  border: 1px solid var(--border-color);
-  border-radius: 999px;
-  color: var(--text-secondary);
-  font-family: var(--font-mono);
-  flex: 0 0 auto;
-}
-
-.collapsiblePanel[open] > summary {
-  padding-bottom: 12px;
-  border-bottom: 1px solid var(--border-color);
-  margin-bottom: 12px;
-}
-
-.collapsiblePanel[open] > summary::after {
-  content: '-';
-}
-
-.collapsiblePanel > summary span {
-  font-size: 15px;
-  font-weight: 600;
-}
-
-.collapsiblePanel > summary strong {
-  margin-left: auto;
-  color: var(--text-muted);
-  font-family: var(--font-mono);
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.collapsiblePanel.diagnosticOnly {
-  opacity: 0.78;
-}
-
-.collapsiblePanel.diagnosticOnly > summary strong {
-  color: var(--color-warning);
-}
-
-.checksPanel {
-  display: block;
-}
-
-.decisionSummaryMeta span {
-  color: var(--text-secondary);
-  font-size: 12px;
-  line-height: 1.35;
-  overflow-wrap: anywhere;
-}
-
-.decisionSummaryMeta strong {
-  margin: 0;
-  font-size: 12px;
-  color: var(--text-primary);
-}
-
-.decisionGrid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  gap: 10px;
 }
 
 .decisionMetric {
@@ -1066,149 +863,6 @@ button.primary:hover:not(:disabled) {
   font-size: 12px;
   line-height: 1.35;
   overflow-wrap: anywhere;
-}
-
-.scorePanel {
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  padding: 12px;
-  background: rgba(255, 255, 255, 0.46);
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.scorePanelHeader {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-  font-size: 12px;
-  color: var(--text-secondary);
-}
-
-.scorePanelHeader span {
-  font-weight: 700;
-  text-transform: uppercase;
-  font-size: 11px;
-}
-
-.scorePanelHeader strong {
-  font-family: var(--font-mono);
-  color: var(--text-primary);
-}
-
-.scoreBreakdown {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.scorePart {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-}
-
-.scorePartTop {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-  font-size: 11px;
-}
-
-.scorePartTop span {
-  color: var(--text-secondary);
-  font-weight: 600;
-}
-
-.scorePartTop strong {
-  font-family: var(--font-mono);
-  color: var(--text-primary);
-  font-weight: 600;
-}
-
-.scoreTrack {
-  height: 6px;
-  border-radius: 3px;
-  overflow: hidden;
-  background: rgba(15, 23, 42, 0.08);
-}
-
-.scoreFill {
-  height: 100%;
-  border-radius: 3px;
-  background: linear-gradient(90deg, var(--color-primary), var(--color-success));
-}
-
-.scorePart em {
-  color: var(--text-muted);
-  font-style: normal;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  overflow-wrap: anywhere;
-}
-
-.marketSignalPanel {
-  gap: 12px;
-}
-
-.marketSignalSummary {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.marketSignalSummary > div {
-  min-width: 0;
-  padding: 9px 10px;
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  background: rgba(15, 23, 42, 0.018);
-}
-
-.marketSignalSummary span {
-  display: block;
-  color: var(--text-muted);
-  font-size: 10px;
-  font-weight: 800;
-  text-transform: uppercase;
-}
-
-.marketSignalSummary strong {
-  display: block;
-  margin-top: 3px;
-  color: var(--text-primary);
-  font-family: var(--font-mono);
-  font-size: 14px;
-  overflow-wrap: anywhere;
-}
-
-.marketSignalPanel .gaugeCockpitContainer {
-  padding: 12px 14px;
-  gap: 8px;
-}
-
-.marketSignalPanel .gaugeDialSvg {
-  width: 210px;
-}
-
-.marketSignalPanel .gaugeCockpitHeader {
-  display: none;
-}
-
-.marketSignalPanel .gaugeDialFrame {
-  margin-top: 0;
-}
-
-.marketSignalPanel .gaugeDiffValue {
-  font-size: 16px;
-}
-
-.marketSignalPanel .gaugeDiffBps,
-.marketSignalPanel .gaugeHeader {
-  font-size: 11px;
 }
 
 /* Active Positions Panel */
@@ -1465,6 +1119,10 @@ table {
   min-width: 1180px;
 }
 
+.executionTable.withProfile {
+  min-width: 1300px;
+}
+
 .dailyExecutionTable th:nth-child(1),
 .dailyExecutionTable td:nth-child(1) {
   width: 86px;
@@ -1500,6 +1158,37 @@ table {
 
 .roundExecutionTable th:nth-child(3),
 .roundExecutionTable td:nth-child(3) {
+  width: 160px;
+}
+
+.dailyExecutionTable.withProfile th:nth-child(1),
+.dailyExecutionTable.withProfile td:nth-child(1),
+.roundExecutionTable.withProfile th:nth-child(1),
+.roundExecutionTable.withProfile td:nth-child(1) {
+  width: 112px;
+}
+
+.dailyExecutionTable.withProfile th:nth-child(2),
+.dailyExecutionTable.withProfile td:nth-child(2) {
+  width: 86px;
+}
+
+.dailyExecutionTable.withProfile th:nth-child(3),
+.dailyExecutionTable.withProfile td:nth-child(3),
+.roundExecutionTable.withProfile th:nth-child(2),
+.roundExecutionTable.withProfile td:nth-child(2) {
+  width: 92px;
+}
+
+.dailyExecutionTable.withProfile th:nth-child(4),
+.dailyExecutionTable.withProfile td:nth-child(4),
+.roundExecutionTable.withProfile th:nth-child(3),
+.roundExecutionTable.withProfile td:nth-child(3) {
+  width: 25%;
+}
+
+.roundExecutionTable.withProfile th:nth-child(4),
+.roundExecutionTable.withProfile td:nth-child(4) {
   width: 160px;
 }
 
@@ -2324,25 +2013,6 @@ td.mono {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .decisionGrid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .decisionSummary {
-    grid-template-columns: 1fr;
-  }
-
-  .decisionSummaryMeta {
-    padding-left: 0;
-    padding-top: 12px;
-    border-left: 0;
-    border-top: 1px solid var(--border-color);
-  }
-
-  .scoreBreakdown {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
   .span-4, .span-6, .span-8 {
     grid-column: span 12;
   }
@@ -2447,8 +2117,7 @@ td.mono {
     gap: 12px;
   }
 
-  .panel,
-  .decisionPanel {
+  .panel {
     padding: 14px;
     border-radius: 10px;
     gap: 14px;
@@ -2464,24 +2133,8 @@ td.mono {
     line-height: 1.35;
   }
 
-  .decisionHeader {
-    flex-direction: column;
-  }
-
   .terminalCommandPrimary strong {
     font-size: 21px;
-  }
-
-  .decisionSummary strong {
-    font-size: 22px;
-  }
-
-  .decisionGrid {
-    grid-template-columns: 1fr;
-  }
-
-  .scoreBreakdown {
-    grid-template-columns: 1fr;
   }
 
   .orderbookSummary {
@@ -2496,10 +2149,6 @@ td.mono {
   .positionCard {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     align-items: stretch;
-  }
-
-  .marketSignalSummary {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .posToken {
@@ -2757,360 +2406,6 @@ td.mono {
   }
 }
 
-/* ==========================================================================
-   Premium Terminal Visualization Upgrades
-   ========================================================================== */
-
-/* --- Score Gauge (Circular SVG) --- */
-.scorePanelBody {
-  display: grid;
-  grid-template-columns: 140px 1fr;
-  gap: 20px;
-  align-items: center;
-  margin-top: 4px;
-}
-
-@media (max-width: 768px) {
-  .scorePanelBody {
-    grid-template-columns: 1fr;
-    justify-items: center;
-    gap: 16px;
-  }
-}
-
-.scoreGaugeWrapper {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  user-select: none;
-}
-
-.scoreGaugeContainer {
-  position: relative;
-  width: 105px;
-  height: 105px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: filter 0.5s ease;
-}
-
-.scoreGaugeSvg {
-  width: 100%;
-  height: 100%;
-}
-
-.scoreGaugeTrack {
-  fill: none;
-  stroke: rgba(15, 23, 42, 0.06);
-}
-
-.scoreGaugeFill {
-  fill: none;
-  stroke-linecap: round;
-  transition: stroke-dashoffset 0.8s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.scoreGaugeThresholdTick {
-  fill: var(--color-danger);
-  stroke: #ffffff;
-  stroke-width: 0.6px;
-  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.2));
-  z-index: 10;
-}
-
-.scoreGaugeOverlay {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  pointer-events: none;
-}
-
-.scoreGaugeNumber {
-  font-size: 20px;
-  font-weight: 800;
-  font-family: var(--font-mono);
-  color: var(--text-primary);
-  line-height: 1;
-}
-
-.scoreGaugeLabel {
-  font-size: 8px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.4px;
-  margin-top: 3px;
-  transition: color 0.3s ease;
-}
-
-.scoreGaugeLegend {
-  font-size: 11px;
-  font-weight: 500;
-}
-
-.scoreThresholdText {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-family: var(--font-mono);
-  padding: 2px 6px;
-  border-radius: 4px;
-}
-
-.scoreThresholdText.passed {
-  color: var(--color-success);
-  background: var(--color-success-glow);
-}
-
-.scoreThresholdText.blocked {
-  color: var(--color-danger);
-  background: var(--color-danger-glow);
-}
-
-/* --- Price vs. Strike Cockpit Gauge (Semi-Circular SVG) --- */
-.priceStrikeGaugeWrapper {
-  width: 100%;
-}
-
-.gaugeCockpitContainer {
-  background: rgba(0, 0, 0, 0.012);
-  border: 1px solid var(--border-color);
-  border-radius: 10px;
-  padding: 16px 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.gaugeCockpitHeader {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  border-bottom: 1px dashed var(--border-color);
-  padding-bottom: 10px;
-}
-
-.gaugeTelemetryItem {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.gaugeTelemetryItem span {
-  font-size: 9px;
-  font-weight: 700;
-  text-transform: uppercase;
-  color: var(--text-muted);
-  letter-spacing: 0.5px;
-}
-
-.gaugeTelemetryItem strong {
-  font-size: 15px;
-  font-family: var(--font-mono);
-  color: var(--text-primary);
-}
-
-.gaugeTelemetryItem strong.above {
-  color: var(--color-success);
-  text-shadow: 0 0 8px var(--color-success-glow);
-}
-
-.gaugeTelemetryItem strong.below {
-  color: var(--color-danger);
-  text-shadow: 0 0 8px var(--color-danger-glow);
-}
-
-.gaugeStatusBadge {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  background: rgba(15, 23, 42, 0.035);
-  border: 1px solid var(--border-color);
-  padding: 4px 10px;
-  border-radius: 20px;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--text-secondary);
-}
-
-.pulseDot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  display: inline-block;
-}
-
-.pulseDot.above {
-  background: var(--color-success);
-  box-shadow: 0 0 6px var(--color-success);
-  animation: pulse-glow-success 1.5s infinite alternate;
-}
-
-.pulseDot.below {
-  background: var(--color-danger);
-  box-shadow: 0 0 6px var(--color-danger);
-  animation: pulse-glow-danger 1.5s infinite alternate;
-}
-
-@keyframes pulse-glow-success {
-  from { opacity: 0.6; transform: scale(0.9); }
-  to { opacity: 1; transform: scale(1.1); }
-}
-
-@keyframes pulse-glow-danger {
-  from { opacity: 0.6; transform: scale(0.9); }
-  to { opacity: 1; transform: scale(1.1); }
-}
-
-.gaugeDialFrame {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  position: relative;
-  margin-top: 5px;
-}
-
-.gaugeDialSvg {
-  width: 280px;
-  max-width: 100%;
-  height: auto;
-}
-
-.gaugeZoneTrack {
-  fill: none;
-  stroke-linecap: round;
-}
-
-.gaugeZoneTrack.down {
-  stroke: rgba(225, 29, 72, 0.05);
-}
-
-.gaugeZoneTrack.up {
-  stroke: rgba(16, 185, 129, 0.05);
-}
-
-.gaugeActiveFill {
-  fill: none;
-  stroke-linecap: round;
-  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.1));
-}
-
-.gaugeStrikeAnchor {
-  stroke: var(--text-primary);
-  stroke-linecap: round;
-}
-
-.gaugeDialTick {
-  stroke: var(--text-muted);
-  opacity: 0.3;
-}
-
-.gaugeNeedle {
-  stroke-linecap: round;
-}
-
-.gaugeNeedle.above {
-  stroke: var(--color-success);
-}
-
-.gaugeNeedle.below {
-  stroke: var(--color-danger);
-}
-
-.gaugeNeedleTip {
-  stroke: none;
-}
-
-.gaugeNeedleTip.above {
-  fill: var(--color-success);
-}
-
-.gaugeNeedleTip.below {
-  fill: var(--color-danger);
-}
-
-.gaugeHubOuter {
-  fill: var(--text-primary);
-}
-
-.gaugeHubInner {
-  stroke: #ffffff;
-  stroke-width: 0.5px;
-}
-
-.gaugeHubInner.above {
-  fill: var(--color-success);
-}
-
-.gaugeHubInner.below {
-  fill: var(--color-danger);
-}
-
-.gaugeZoneLabels {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  width: 100%;
-  margin-top: -15px;
-  z-index: 2;
-  user-select: none;
-}
-
-.gaugeSideLabel {
-  font-size: 9px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.gaugeSideLabel.DOWN {
-  color: var(--color-danger);
-}
-
-.gaugeSideLabel.UP {
-  color: var(--color-success);
-}
-
-.gaugeSideLabel.LOW {
-  color: var(--text-muted);
-}
-
-.gaugeSideLabel.HIGH {
-  color: var(--color-danger);
-}
-
-.gaugeDigitalReadout {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-}
-
-.gaugeDiffValue {
-  font-size: 16px;
-  font-weight: 800;
-  font-family: var(--font-mono);
-  line-height: 1.2;
-}
-
-.gaugeDiffValue.above {
-  color: var(--color-success);
-}
-
-.gaugeDiffValue.below {
-  color: var(--color-danger);
-}
-
-.gaugeDiffBps {
-  font-size: 11px;
-  font-family: var(--font-mono);
-  color: var(--text-muted);
-  font-weight: 500;
-}
-
 /* --- Round Timeline Step Pipeline --- */
 .timelinePipelineWrapper {
   width: 100%;
@@ -3365,9 +2660,9 @@ td.mono {
   gap: 8px;
   min-height: 34px;
   padding: 0 12px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-color);
   border-radius: 6px;
-  background: var(--surface);
+  background: var(--bg-panel);
   color: var(--text-secondary);
   font-size: 13px;
   font-weight: 700;
@@ -3387,49 +2682,445 @@ td.mono {
   background: var(--color-primary-glow);
 }
 
-.profileMatrix {
+.scopeSummary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.66);
+}
+
+.scopeSummary > div:first-child {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.scopeSummary strong {
+  color: var(--text-primary);
+  font-size: 14px;
+}
+
+.scopeSummaryStats {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.scopeSummaryStats span,
+.listScopeBar strong {
+  min-height: 24px;
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.7);
+  white-space: nowrap;
+}
+
+.listScopeBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.025);
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.listScopeBar span {
+  margin-right: auto;
+}
+
+.listScopeBar strong {
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.scopeWorkspace {
+  display: grid;
+  gap: 14px;
+}
+
+.scopePanel {
+  background: #ffffff;
+  border-radius: 8px;
+}
+
+.scopeMetricGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.profileGridPanel {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
-  margin-bottom: 14px;
 }
 
-.profileCard {
+.profileGridPanel.compact {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.profileRuntimeCard {
+  min-height: auto;
   display: grid;
-  gap: 10px;
-  padding: 12px;
-  border: 1px solid var(--border);
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--border-color);
   border-radius: 8px;
-  background: var(--surface);
+  background: #ffffff;
   color: var(--text-primary);
   text-align: left;
+  box-shadow: none;
 }
 
-.profileCardHeader,
-.profileCardMetric {
+.profileRuntimeCard:hover:not(:disabled) {
+  border-color: var(--border-color-active);
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.045);
+}
+
+.profileRuntimeHeader,
+.profileRuntimeFooter {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
 }
 
-.profileCardMetric span {
+.profileRuntimeHeader > div {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.profileRuntimeHeader strong {
+  color: var(--text-primary);
+  font-size: 14px;
+}
+
+.profileRuntimeHeader span,
+.profileRuntimeFooter span {
   color: var(--text-muted);
+  font-family: var(--font-mono);
   font-size: 11px;
+}
+
+.profileRuntimeStats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.profileRuntimeStats div {
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 7px;
+  background: rgba(248, 250, 252, 0.74);
+}
+
+.profileRuntimeStats span {
+  display: block;
+  color: var(--text-muted);
+  font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
 }
 
-.profileCardMetric em {
+.profileRuntimeStats strong,
+.profileRuntimeFooter strong {
   color: var(--text-primary);
   font-family: var(--font-mono);
   font-size: 12px;
-  font-style: normal;
   font-weight: 700;
+  overflow-wrap: anywhere;
 }
 
 @media (max-width: 900px) {
-  .profileMatrix {
+  .scopeMetricGrid,
+  .profileGridPanel,
+  .profileGridPanel.compact {
     grid-template-columns: 1fr;
+  }
+
+  .scopeSummary {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .scopeSummaryStats {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 560px) {
+  .profileRuntimeStats {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Simplified operations terminal */
+.opsWorkspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) minmax(320px, 0.85fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.opsPrimary,
+.opsRail {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.opsHero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 16px;
+  padding: 18px;
+  border: 1px solid var(--border-color);
+  border-left: 4px solid var(--color-neutral);
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.04);
+}
+
+.opsHero.good { border-left-color: var(--color-success); }
+.opsHero.warn { border-left-color: var(--color-warning); }
+.opsHero.bad { border-left-color: var(--color-danger); }
+
+.opsHeroMain {
+  min-width: 0;
+}
+
+.opsHero h2 {
+  margin-top: 4px;
+  color: var(--text-primary);
+  font-size: 24px;
+  line-height: 1.15;
+  letter-spacing: 0;
+}
+
+.opsHero p {
+  margin-top: 8px;
+  max-width: 900px;
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
+.opsHeroMeta,
+.opsProfileBadges {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.opsMetricGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.opsPanel {
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.opsRoundGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(280px, 0.75fr);
+  gap: 16px;
+  align-items: center;
+}
+
+.opsRoundTimeline {
+  min-width: 0;
+}
+
+.opsRoundFacts,
+.opsSystemList {
+  display: grid;
+  gap: 8px;
+}
+
+.opsRoundFacts div,
+.opsSystemList div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.opsRoundFacts div:last-child,
+.opsSystemList div:last-child {
+  border-bottom: 0;
+}
+
+.opsRoundFacts span,
+.opsSystemList span {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.opsRoundFacts strong,
+.opsSystemList strong {
+  min-width: 0;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.opsPositionGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.opsPosition {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: rgba(248, 250, 252, 0.72);
+}
+
+.opsPosition div {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.opsPosition strong {
+  color: var(--text-primary);
+}
+
+.opsPosition span,
+.opsPosition em {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-style: normal;
+  overflow-wrap: anywhere;
+}
+
+.opsEmptyState {
+  min-height: 96px;
+  display: grid;
+  place-items: center;
+  border: 1px dashed var(--border-color-light);
+  border-radius: 8px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.opsProfileList {
+  display: grid;
+  gap: 8px;
+}
+
+.opsProfileRow {
+  width: 100%;
+  min-height: auto;
+  padding: 12px;
+  display: grid;
+  grid-template-columns: minmax(120px, 0.85fr) minmax(0, 1.15fr);
+  gap: 12px;
+  align-items: center;
+  text-align: left;
+  border-radius: 8px;
+  box-shadow: none;
+}
+
+.opsProfileRow.active {
+  border-color: var(--color-primary);
+  background: rgba(37, 99, 235, 0.05);
+}
+
+.opsProfileRow div:first-child {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.opsProfileRow strong {
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.opsProfileRow span {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.opsDiagnostics summary {
+  cursor: pointer;
+}
+
+.opsDiagnosticList {
+  margin-top: 12px;
+  display: grid;
+  gap: 8px;
+}
+
+.opsDiagnosticList span {
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: rgba(217, 119, 6, 0.08);
+  color: var(--color-warning);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 1100px) {
+  .opsWorkspace,
+  .opsRoundGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .opsMetricGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .opsHero,
+  .opsProfileRow,
+  .opsMetricGrid,
+  .opsPositionGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .opsHeroMeta,
+  .opsProfileBadges {
+    justify-content: flex-start;
   }
 }
