@@ -3,8 +3,6 @@ import {
   AlertTriangle, 
   CheckCircle2, 
   RefreshCw, 
-  Shield, 
-  Timer, 
   BookOpen,
   History,
   Terminal,
@@ -22,7 +20,7 @@ import { ScoreGauge } from './components/ScoreGauge';
 import { PriceStrikeGauge } from './components/PriceStrikeGauge';
 import { RoundTimelinePipeline } from './components/RoundTimelinePipeline';
 import { OrderbookCapacityPanel, OrderbookExecutionSummary, OrderbookTable } from './components/dashboard/OrderbookPanels';
-import { Badge, DataTable, DecisionMetric, Digest, PaginationControls, RuntimeModeStrip, Shell } from './components/dashboard/Ui';
+import { Badge, DataTable, DecisionMetric, PaginationControls, Shell } from './components/dashboard/Ui';
 
 type TabType = 'terminal' | 'orderbooks' | 'activity' | 'strategy' | 'logs';
 type ActivitySubTab = 'daily' | 'rounds' | 'orders';
@@ -716,46 +714,9 @@ export function App() {
   const participationGateTone = participationStatus === 'enabled'
     ? (participationDecisionPassed ? 'good' : 'warn')
     : 'neutral';
-  const runtimeModeItems = [
-    {
-      label: 'Execution',
-      value: state.runtime.executionMode === 'live' ? 'LIVE' : 'MONITOR',
-      detail: `${state.runtime.status.toUpperCase()} / ${runtimeBuildLabel(state.runtime)}`,
-      tone: state.runtime.executionMode === 'live' ? 'warn' as const : 'neutral' as const,
-    },
-    {
-      label: 'Score Gate',
-      value: entryBypassActive ? 'BYPASSED' : 'ENFORCED',
-      detail: entryBypassActive
-        ? `score ${formatNumber(snapshot.features.chopScore, 1)} is diagnostic`
-        : `live floor ${entryConfig?.minLiveChopScore ?? 80}, confirmation ${entryConfig?.entryConfirmTicks ?? 3} ticks`,
-      tone: entryBypassActive ? 'warn' as const : 'good' as const,
-    },
-    {
-      label: 'Cooldown',
-      value: cooldownGateLabel,
-      detail: entryCooldownActive ? `${entryCooldownRemaining} remaining` : entryCooldownReason,
-      tone: entryConfig?.bypassSingleFillCooldown ? 'warn' as const : entryCooldownActive ? 'warn' as const : 'good' as const,
-    },
-    {
-      label: 'Limit',
-      value: pricePolicyLabel,
-      detail: fixedLimitActive ? `fixed dual limit ${fixedLimitLabel}` : 'score selects entry price',
-      tone: fixedLimitActive ? 'neutral' as const : 'good' as const,
-    },
-    {
-      label: 'Size',
-      value: sizePolicyLabel,
-      detail: fixedSharesActive ? `${fixedSharesLabel} shares per side` : 'score selects order size',
-      tone: fixedSharesActive ? 'neutral' as const : 'good' as const,
-    },
-    {
-      label: 'Feeds',
-      value: state.feed.source.toUpperCase(),
-      detail: `Binance ${state.feed.binanceConnected ? 'on' : 'off'} / CLOB ${state.feed.clobConnected ? 'on' : 'off'}`,
-      tone: state.feed.source === 'live' && state.feed.binanceConnected && state.feed.clobConnected ? 'good' as const : 'warn' as const,
-    },
-  ];
+  const cooldownDetail = entryCooldownActive ? `${entryCooldownRemaining}; ${entryCooldownReason}` : entryCooldownReason;
+  const executionLabel = state.runtime.executionMode === 'live' ? 'LIVE' : 'MONITOR';
+  const feedLabel = `${state.feed.source.toUpperCase()} / CLOB ${state.feed.clobConnected ? 'ON' : 'OFF'}`;
 
   return (
     <Shell>
@@ -800,55 +761,56 @@ export function App() {
         </div>
       </section>
 
-      <RuntimeModeStrip items={runtimeModeItems} />
-
-      {/* Focus cards only show the state that still matters after config pruning. */}
-      <section className="focusDigest">
-        <Digest
-          icon={<AlertTriangle size={16} />}
-          label="Current Action"
-          value={decisionState.label}
-          detail={decisionState.detail}
-          tone={decisionState.tone}
-          priority="primary"
-        />
-        <Digest
-          icon={<Timer size={16} />}
-          label="Round Phase"
-          value={snapshot.round.phase.toUpperCase()}
-          detail={roundPhaseDetail}
-          tone={snapshot.round.phase === 'decision' || snapshot.round.phase === 'posting' ? 'warn' : 'neutral'}
-          priority="primary"
-        />
-        <Digest
-          icon={<Timer size={16} />}
-          label="Cooldown"
-          value={entryCooldownActive ? 'ACTIVE' : cooldownGateLabel}
-          detail={entryCooldownActive ? `${entryCooldownRemaining} / ${entryCooldownReason}` : entryCooldownReason}
-          tone={entryCooldownActive ? 'warn' : entryConfig?.bypassSingleFillCooldown ? 'warn' : 'neutral'}
-        />
-        <Digest
-          icon={<Shield size={16} />}
-          label="Active Trades"
-          value={`${activeOrders} Orders`}
-          detail={`${state.fills.length} fills / ${state.orders.length} total`}
-          tone={activeOrders ? 'warn' : 'neutral'}
-        />
-        <Digest
-          icon={<CheckCircle2 size={16} />}
-          label="Net Realized PnL"
-          value={formatMoney(pnl)}
-          detail={`${state.settlements.length} settled rounds`}
-          tone={pnl > 0 ? 'good' : pnl < 0 ? 'bad' : 'neutral'}
-        />
+      <section className={`terminalCommandBar ${decisionState.tone}`} aria-label="Current terminal state">
+        <div className="terminalCommandPrimary">
+          <div className="terminalCommandIcon">
+            {decisionState.tone === 'good' ? <CheckCircle2 size={20} /> : <AlertTriangle size={20} />}
+          </div>
+          <div>
+            <span className="decisionKicker">Current Action</span>
+            <strong>{decisionState.label}</strong>
+            <p>{decisionState.detail}</p>
+          </div>
+        </div>
+        <div className="terminalCommandStats">
+          <div className="terminalStat">
+            <span>Round</span>
+            <strong>{snapshot.round.phase.toUpperCase()}</strong>
+            <em>{roundPhaseDetail}</em>
+          </div>
+          <div className="terminalStat">
+            <span>Execution</span>
+            <strong>{executionLabel}</strong>
+            <em>{state.runtime.status.toUpperCase()} / {runtimeBuildLabel(state.runtime)}</em>
+          </div>
+          <div className="terminalStat">
+            <span>Risk Gate</span>
+            <strong>{entryCooldownActive ? 'COOLDOWN' : cooldownGateLabel}</strong>
+            <em>{cooldownDetail}</em>
+          </div>
+          <div className="terminalStat">
+            <span>Price / Size</span>
+            <strong>{pricePolicyLabel} / {sizePolicyLabel}</strong>
+            <em>{fixedSharesActive ? `${fixedSharesLabel} shares per side` : scoreInfo.next}</em>
+          </div>
+          <div className="terminalStat">
+            <span>Feeds</span>
+            <strong>{feedLabel}</strong>
+            <em>Binance {state.feed.binanceConnected ? 'on' : 'off'}</em>
+          </div>
+          <div className={`terminalStat pnl ${pnl > 0 ? 'good' : pnl < 0 ? 'bad' : 'neutral'}`}>
+            <span>Net PnL</span>
+            <strong>{formatMoney(pnl)}</strong>
+            <em>{activeOrders} open / {state.settlements.length} settled</em>
+          </div>
+        </div>
       </section>
 
       {/* Main Tabbed Area */}
       <main>
         {activeTab === 'terminal' && (
-          <div className="grid">
-            {/* Left Column (Main widgets) */}
-            <div className="span-8" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          <div className="terminalWorkspace">
+            <section className="terminalPrimaryColumn">
               <div className="decisionPanel decisionPanelPrimary">
                 <div className="decisionHeader">
                   <div>
@@ -898,7 +860,7 @@ export function App() {
                   <DecisionMetric
                     label="Cooldown Gate"
                     value={entryCooldownActive ? 'ACTIVE' : cooldownGateLabel}
-                    detail={entryCooldownActive ? `${entryCooldownRemaining} remaining; ${entryCooldownReason}` : entryConfig?.bypassSingleFillCooldown ? 'single-fill cooldown is ignored by config' : 'single-fill cooldown still gates entry'}
+                    detail={entryCooldownActive ? cooldownDetail : entryConfig?.bypassSingleFillCooldown ? 'single-fill cooldown is ignored by config' : 'single-fill cooldown still gates entry'}
                     tone={entryCooldownActive ? 'warn' : entryConfig?.bypassSingleFillCooldown ? 'warn' : 'good'}
                   />
                   <DecisionMetric
@@ -989,8 +951,29 @@ export function App() {
               
               {/* BTC Volatility Visualizer */}
               {btcPrice != null && (
-                <div className="panel">
-                  <h2>BTC 120s Volatility</h2>
+                <div className="panel marketSignalPanel">
+                  <h2>
+                    BTC 120s Market Signal
+                    <span className="panelSubTitle">range {formatNumber(snapshot.features.rangeBps120s, 2)}bps / balance {formatNumber(snapshot.features.excursionBalance120s, 2)}</span>
+                  </h2>
+                  <div className="marketSignalSummary">
+                    <div>
+                      <span>BTC Price</span>
+                      <strong>{formatMoney(btcPrice)}</strong>
+                    </div>
+                    <div>
+                      <span>Center</span>
+                      <strong>{snapshot.features.centerPrice120s == null ? 'unknown' : formatMoney(snapshot.features.centerPrice120s)}</strong>
+                    </div>
+                    <div>
+                      <span>CHOP</span>
+                      <strong>{formatNumber(snapshot.features.chopScore, 1)}</strong>
+                    </div>
+                    <div>
+                      <span>Samples</span>
+                      <strong>{snapshot.features.samples120s}</strong>
+                    </div>
+                  </div>
                   <PriceStrikeGauge
                     btcPrice={btcPrice}
                     centerPrice={snapshot.features.centerPrice120s}
@@ -1087,10 +1070,10 @@ export function App() {
                   ))}
                 </div>
               </details>
-            </div>
+            </section>
 
             {/* Right Column (Side status metrics) */}
-            <div className="span-4" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            <aside className="terminalContextRail">
               
               {/* Round Progress Countdown */}
               <div className="panel">
@@ -1103,21 +1086,12 @@ export function App() {
                 />
               </div>
 
-              {/* Round Details */}
-              <div className="panel">
-                <h2>Round Specifications</h2>
+              <div className="panel compactContextPanel">
+                <h2>Round</h2>
                 <div className="metrics">
                   <div className="metricRow">
                     <span className="metricLabel">Round ID</span>
                     <span className="metricValue">{snapshot.round.id}</span>
-                  </div>
-                  <div className="metricRow">
-                    <span className="metricLabel">Snapshot ID</span>
-                    <span className="metricValue" style={{ fontSize: '11px' }}>{snapshot.id}</span>
-                  </div>
-                  <div className="metricRow">
-                    <span className="metricLabel">Event Slug</span>
-                    <span className="metricValue" style={{ fontSize: '11px' }}>{snapshot.round.eventSlug}</span>
                   </div>
                   <div className="metricRow">
                     <span className="metricLabel">{strikeLabel}</span>
@@ -1134,7 +1108,7 @@ export function App() {
                 </div>
               </div>
 
-              <div className="panel">
+              <div className="panel compactContextPanel">
                 <h2>Market Participation</h2>
                 <div className="metrics">
                   <div className="metricRow">
@@ -1154,31 +1128,21 @@ export function App() {
                     <span className="metricValue">{participation ? formatNumber(participation.totalTopHolderShares, 1) : 'unknown'}</span>
                   </div>
                   {participation?.sides.map((side) => (
-                    <React.Fragment key={side.label}>
-                      <div className="metricRow">
-                        <span className="metricLabel">{outcomeLabel(side.label)} Holders</span>
-                        <span className="metricValue">{side.holderCount} / top {participation.topHoldersPerSide}</span>
-                      </div>
-                      <div className="metricRow">
-                        <span className="metricLabel">{outcomeLabel(side.label)} Top Shares</span>
-                        <span className="metricValue">{formatNumber(side.topHolderShares, 1)}</span>
-                      </div>
-                      <div className="metricRow">
-                        <span className="metricLabel">{outcomeLabel(side.label)} Concentration</span>
-                        <span className="metricValue">{formatRatioPct(side.largestHolderShareRatio)}</span>
-                      </div>
-                      <div className="metricRow">
-                        <span className="metricLabel">{outcomeLabel(side.label)} Sample PnL</span>
-                        <span className="metricValue">{formatMoney(side.positionPnlSum)} / top {formatNullableMoney(side.topPositionPnl)}</span>
-                      </div>
-                    </React.Fragment>
+                    <div key={side.label} className="sideSnapshot">
+                      <span>{outcomeLabel(side.label)}</span>
+                      <strong>{formatNumber(side.topHolderShares, 1)} shares</strong>
+                      <em>{formatRatioPct(side.largestHolderShareRatio)} concentration / {formatMoney(side.positionPnlSum)} sample PnL</em>
+                    </div>
                   ))}
                 </div>
               </div>
 
               {/* Analytics Features */}
-              <div className="panel">
-                <h2>Path Features (120s)</h2>
+              <details className="panel collapsiblePanel compactContextPanel">
+                <summary>
+                  <span>Path Features (120s)</span>
+                  <strong>{formatNumber(snapshot.features.chopScore, 1)} chop</strong>
+                </summary>
                 <div className="metrics">
                   <div className="metricRow">
                     <span className="metricLabel">Data Feed Source</span>
@@ -1249,7 +1213,7 @@ export function App() {
                     <span className="metricValue">{snapshot.features.rangePercentile120s == null ? '-' : formatNumber(snapshot.features.rangePercentile120s * 100, 1) + '%'}</span>
                   </div>
                 </div>
-              </div>
+              </details>
 
               {/* System Diagnostics */}
               {snapshot.diagnostics && snapshot.diagnostics.length > 0 && (
@@ -1266,7 +1230,7 @@ export function App() {
                   </div>
                 </div>
               )}
-            </div>
+            </aside>
           </div>
         )}
 
