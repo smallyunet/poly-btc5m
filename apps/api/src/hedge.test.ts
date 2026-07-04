@@ -375,6 +375,7 @@ function config(): AppConfig {
     maxMomentumRatio30s: 0.55,
     maxEntryQueueImbalance: 5,
     minLiveChopScore: 80,
+    bypassEntryScoreGating: false,
     entryConfirmTicks: 3,
     participationEnabled: true,
     participationCacheMs: 30_000,

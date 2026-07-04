@@ -22,6 +22,7 @@ export type StrategyRiskConfig = {
   maxMomentumRatio30s: number;
   maxEntryQueueImbalance: number;
   minLiveChopScore: number;
+  bypassEntryScoreGating: boolean;
   entryMinSecondsToStart: number;
   minParticipationHoldersPerSide: number;
   minParticipationTopHolderSharesPerSide: number;
@@ -83,16 +84,26 @@ export function evaluateEntry(snapshot: StateSnapshot, config: StrategyRiskConfi
   const participation = participationStats(snapshot, config);
   const cooldownUntilMs = config.entryCooldownUntil ? new Date(config.entryCooldownUntil).getTime() : 0;
   const cooldownActive = Number.isFinite(cooldownUntilMs) && cooldownUntilMs > Date.now();
+  const centerCrosses = snapshot.features.centerCross120s ?? snapshot.features.cross120s;
+  const centerMinBiExcursion = snapshot.features.centerMinBiExcursionBps120s ?? snapshot.features.minBiExcursionBps120s;
+  const scoreGatingPassed = config.bypassEntryScoreGating || snapshot.regime === 'CHOP';
+  const chopScoreThresholdPassed = config.bypassEntryScoreGating || snapshot.features.chopScore >= config.minChopScore;
+  const centerCrossThresholdPassed = config.bypassEntryScoreGating || centerCrosses >= config.minCross120s;
+  const rangeThresholdPassed = config.bypassEntryScoreGating || snapshot.features.rangeBps120s >= config.minRangeBps120s;
+  const twoSidedThresholdPassed = config.bypassEntryScoreGating || centerMinBiExcursion >= config.minBiExcursionBps120s;
+  const driftThresholdPassed = config.bypassEntryScoreGating || snapshot.features.driftRatio120s <= config.maxDriftRatio120s;
+  const momentumThresholdPassed = config.bypassEntryScoreGating || snapshot.features.momentumRatio30s <= config.maxMomentumRatio30s;
+  const liveScoreFloorPassed = config.bypassEntryScoreGating || config.dryRun || snapshot.features.chopScore >= config.minLiveChopScore;
 
   if (cooldownActive) reasons.push('SINGLE_FILL_COOLDOWN');
   if (!inDecisionWindow) reasons.push('NOT_IN_DECISION_WINDOW');
-  if (snapshot.regime !== 'CHOP') reasons.push(`REGIME_${snapshot.regime}`);
+  if (!scoreGatingPassed) reasons.push(`REGIME_${snapshot.regime}`);
   if (!booksTradable) reasons.push('ORDERBOOK_NOT_TRADABLE');
   if (shares < config.minOrderShares) reasons.push('ORDER_SHARES_TOO_SMALL');
   if (limitPrice <= 0 || limitPrice >= 1) reasons.push('INVALID_DUAL_LIMIT_PRICE');
   if (pairCost > config.maxPairCost + 0.000001) reasons.push('PAIR_COST_TOO_HIGH');
   if (queue.ratio != null && queue.ratio > config.maxEntryQueueImbalance) reasons.push('ENTRY_QUEUE_IMBALANCE');
-  if (!config.dryRun && snapshot.features.chopScore < config.minLiveChopScore) reasons.push('ENTRY_SCORE_TOO_LOW_FOR_LIVE');
+  if (!liveScoreFloorPassed) reasons.push('ENTRY_SCORE_TOO_LOW_FOR_LIVE');
   if (participation.blocked) reasons.push('PARTICIPATION_WEAK');
 
   const base = [
@@ -118,14 +129,14 @@ export function evaluateEntry(snapshot: StateSnapshot, config: StrategyRiskConfi
     conditions: [
       condition('Decision window', inDecisionWindow, `${snapshot.round.secondsToStart.toFixed(1)}s to start / min ${config.entryMinSecondsToStart}s`),
       condition('Single-fill cooldown', !cooldownActive, cooldownActive ? cooldownLabel(config.entryCooldownUntil, config.entryCooldownReason) : 'inactive'),
-      condition('Regime is CHOP', snapshot.regime === 'CHOP', snapshot.regime),
-      condition('CHOP score threshold', snapshot.features.chopScore >= config.minChopScore, `${snapshot.features.chopScore.toFixed(1)} / ${config.minChopScore}`),
-      condition('center cross_120s threshold', (snapshot.features.centerCross120s ?? snapshot.features.cross120s) >= config.minCross120s, `${snapshot.features.centerCross120s ?? snapshot.features.cross120s} / ${config.minCross120s}`),
-      condition('range_120s sufficient', snapshot.features.rangeBps120s >= config.minRangeBps120s, `${snapshot.features.rangeBps120s.toFixed(2)}bps / ${config.minRangeBps120s}`),
-      condition('center two-sided excursion', (snapshot.features.centerMinBiExcursionBps120s ?? snapshot.features.minBiExcursionBps120s) >= config.minBiExcursionBps120s, `${(snapshot.features.centerMinBiExcursionBps120s ?? snapshot.features.minBiExcursionBps120s).toFixed(2)}bps / ${config.minBiExcursionBps120s}`),
-      condition('drift ratio capped', snapshot.features.driftRatio120s <= config.maxDriftRatio120s, `${snapshot.features.driftRatio120s.toFixed(2)} / ${config.maxDriftRatio120s}`),
-      condition('momentum ratio capped', snapshot.features.momentumRatio30s <= config.maxMomentumRatio30s, `${snapshot.features.momentumRatio30s.toFixed(2)} / ${config.maxMomentumRatio30s}`),
-      condition('Live score floor', config.dryRun || snapshot.features.chopScore >= config.minLiveChopScore, config.dryRun ? 'monitor mode' : `${snapshot.features.chopScore.toFixed(1)} / ${config.minLiveChopScore}`),
+      condition('Regime is CHOP', scoreGatingPassed, config.bypassEntryScoreGating ? `${snapshot.regime} (score gating bypassed)` : snapshot.regime),
+      condition('CHOP score threshold', chopScoreThresholdPassed, config.bypassEntryScoreGating ? `${snapshot.features.chopScore.toFixed(1)} / ${config.minChopScore} (bypassed)` : `${snapshot.features.chopScore.toFixed(1)} / ${config.minChopScore}`),
+      condition('center cross_120s threshold', centerCrossThresholdPassed, config.bypassEntryScoreGating ? `${centerCrosses} / ${config.minCross120s} (bypassed)` : `${centerCrosses} / ${config.minCross120s}`),
+      condition('range_120s sufficient', rangeThresholdPassed, config.bypassEntryScoreGating ? `${snapshot.features.rangeBps120s.toFixed(2)}bps / ${config.minRangeBps120s} (bypassed)` : `${snapshot.features.rangeBps120s.toFixed(2)}bps / ${config.minRangeBps120s}`),
+      condition('center two-sided excursion', twoSidedThresholdPassed, config.bypassEntryScoreGating ? `${centerMinBiExcursion.toFixed(2)}bps / ${config.minBiExcursionBps120s} (bypassed)` : `${centerMinBiExcursion.toFixed(2)}bps / ${config.minBiExcursionBps120s}`),
+      condition('drift ratio capped', driftThresholdPassed, config.bypassEntryScoreGating ? `${snapshot.features.driftRatio120s.toFixed(2)} / ${config.maxDriftRatio120s} (bypassed)` : `${snapshot.features.driftRatio120s.toFixed(2)} / ${config.maxDriftRatio120s}`),
+      condition('momentum ratio capped', momentumThresholdPassed, config.bypassEntryScoreGating ? `${snapshot.features.momentumRatio30s.toFixed(2)} / ${config.maxMomentumRatio30s} (bypassed)` : `${snapshot.features.momentumRatio30s.toFixed(2)} / ${config.maxMomentumRatio30s}`),
+      condition('Live score floor', liveScoreFloorPassed, config.bypassEntryScoreGating ? `${snapshot.features.chopScore.toFixed(1)} / ${config.minLiveChopScore} (bypassed)` : config.dryRun ? 'monitor mode' : `${snapshot.features.chopScore.toFixed(1)} / ${config.minLiveChopScore}`),
       condition('YES book tradable', buyQuoteReady(yesQuote, config), quoteAgeLabel(yesQuote)),
       condition('NO book tradable', buyQuoteReady(noQuote, config), quoteAgeLabel(noQuote)),
       condition('Entry queue imbalance', queue.ratio == null || queue.ratio <= config.maxEntryQueueImbalance, queueLabel(queue, config.maxEntryQueueImbalance)),

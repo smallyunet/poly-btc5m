@@ -26,6 +26,7 @@ const risk: StrategyRiskConfig = {
   maxMomentumRatio30s: 0.55,
   maxEntryQueueImbalance: 5,
   minLiveChopScore: 80,
+  bypassEntryScoreGating: false,
   minParticipationHoldersPerSide: 3,
   minParticipationTopHolderSharesPerSide: 300,
   minParticipationTopPositionPnl: 40,
@@ -171,6 +172,22 @@ test('blocks edge-score entries in live mode', () => {
   assert.equal(result.rejected.length, 2);
   assert.match(result.rejected[0].rejectionReason || '', /ENTRY_SCORE_TOO_LOW_FOR_LIVE/);
   assert.equal(result.checks[0].conditions.find((item) => item.label === 'Live score floor')?.passed, false);
+});
+
+test('bypasses score gating for live low-score entries when enabled', () => {
+  const snapshot = { ...baseSnapshot({ chopScore: 12 }), regime: 'LOW_ACTIVITY' as const };
+  const result = evaluateEntry(snapshot, { ...risk, dryRun: false, bypassEntryScoreGating: true });
+  assert.equal(result.intents.length, 2);
+  assert.equal(result.rejected.length, 0);
+  assert.equal(result.intents[0].limitPrice, 0.42);
+  assert.equal(result.intents[0].shares, 5);
+  assert.equal(result.checks[0].conditions.find((item) => item.label === 'Regime is CHOP')?.passed, true);
+  assert.match(result.checks[0].conditions.find((item) => item.label === 'Regime is CHOP')?.actual || '', /bypassed/);
+  assert.equal(result.checks[0].conditions.find((item) => item.label === 'CHOP score threshold')?.passed, true);
+  assert.equal(result.checks[0].conditions.find((item) => item.label === 'center cross_120s threshold')?.passed, true);
+  assert.equal(result.checks[0].conditions.find((item) => item.label === 'range_120s sufficient')?.passed, true);
+  assert.equal(result.checks[0].conditions.find((item) => item.label === 'center two-sided excursion')?.passed, true);
+  assert.equal(result.checks[0].conditions.find((item) => item.label === 'Live score floor')?.passed, true);
 });
 
 test('keeps base shares for mid-score entries', () => {

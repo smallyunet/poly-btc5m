@@ -659,6 +659,7 @@ function riskConfig(appConfig: AppConfig, dryRun: boolean, entryCooldownUntil?: 
     maxMomentumRatio30s: appConfig.maxMomentumRatio30s,
     maxEntryQueueImbalance: appConfig.maxEntryQueueImbalance,
     minLiveChopScore: appConfig.minLiveChopScore,
+    bypassEntryScoreGating: appConfig.bypassEntryScoreGating,
     entryMinSecondsToStart: appConfig.entryMinSecondsToStart,
     minParticipationHoldersPerSide: appConfig.minParticipationHoldersPerSide,
     minParticipationTopHolderSharesPerSide: appConfig.minParticipationTopHolderSharesPerSide,
