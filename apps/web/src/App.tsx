@@ -18,13 +18,16 @@ import {
   Users
 } from 'lucide-react';
 
-import type { BotRuntimeStatus, DashboardState, OrderBookQuote, OrderbookDepthSnapshot, RuntimeLogRecord, StrategyCheck } from '../../../packages/shared/src';
+import type { BotRuntimeStatus, DashboardState, RuntimeLogRecord, StrategyCheck } from '../../../packages/shared/src';
 import { api, DASHBOARD_REFRESH_MS } from './lib/api';
 import { formatMoney, formatNumber, formatSeconds, modeLabel } from './lib/format';
+import { formatEtTime, outcomeLabel, outcomeTone, shortenTokenId } from './lib/dashboardFormat';
 
 import { ScoreGauge } from './components/ScoreGauge';
 import { PriceStrikeGauge } from './components/PriceStrikeGauge';
 import { RoundTimelinePipeline } from './components/RoundTimelinePipeline';
+import { OrderbookCapacityPanel, OrderbookExecutionSummary, OrderbookTable } from './components/dashboard/OrderbookPanels';
+import { Badge, DataTable, DecisionMetric, Digest, PaginationControls, Shell } from './components/dashboard/Ui';
 
 type TabType = 'terminal' | 'orderbooks' | 'activity' | 'strategy' | 'logs';
 type ActivitySubTab = 'daily' | 'rounds' | 'orders';
@@ -103,23 +106,6 @@ function syncTabToUrl(tab: TabType): void {
   window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
 }
 
-// Helper to shorten long crypto addresses/token IDs
-function shortenTokenId(id: string): string {
-  if (!id) return '-';
-  if (id.length <= 16) return id;
-  return `${id.slice(0, 8)}...${id.slice(-8)}`;
-}
-
-function outcomeLabel(label: 'YES' | 'NO' | 'UNKNOWN'): string {
-  if (label === 'UNKNOWN') return 'UNKNOWN';
-  return label === 'YES' ? 'UP' : 'DOWN';
-}
-
-function outcomeTone(label: 'YES' | 'NO' | 'UNKNOWN'): 'good' | 'bad' | 'neutral' {
-  if (label === 'UNKNOWN') return 'neutral';
-  return label === 'YES' ? 'good' : 'bad';
-}
-
 function fillStateTone(yesShares: number, noShares: number): 'good' | 'warn' | 'neutral' {
   if (yesShares > 0 && noShares > 0) return 'good';
   if (yesShares > 0 || noShares > 0) return 'warn';
@@ -166,17 +152,6 @@ function roundStatusSummary(round: RoundExecutionSummary): RoundStatusSummary {
     return { label: 'settled', tone: 'neutral', detail: round.settlementPnl == null ? 'settled without local fills' : formatMoney(round.settlementPnl) };
   }
   return { label: 'recorded', tone: 'neutral', detail: `${round.orderCount} orders` };
-}
-
-function formatEtTime(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return 'n/a';
-  return `${date.toLocaleTimeString('en-US', {
-    timeZone: 'America/New_York',
-    hour: 'numeric',
-    minute: '2-digit',
-    second: '2-digit',
-  })} ET`;
 }
 
 function formatRelativeAge(ms: number, nowMs = Date.now()): string {
@@ -1673,296 +1648,4 @@ export function App() {
       </main>
     </Shell>
   );
-}
-
-// Layout helper components
-function Shell({ children }: { children: React.ReactNode }) {
-  return <div className="appShell">{children}</div>;
-}
-
-function Digest({ 
-  icon, 
-  label, 
-  value, 
-  detail, 
-  tone,
-  priority = 'secondary',
-}: { 
-  icon: React.ReactNode; 
-  label: string; 
-  value: string; 
-  detail: string; 
-  tone: 'good' | 'warn' | 'bad' | 'neutral';
-  priority?: 'primary' | 'secondary';
-}) {
-  return (
-    <div className={`digestCard ${tone} ${priority}`}>
-      <div className="digestHeader">
-        {icon}
-        <span>{label}</span>
-        {(tone === 'good' || tone === 'warn' || tone === 'bad') && (
-          <span className={`liveDot ${tone}`} style={{ marginLeft: 'auto' }}></span>
-        )}
-      </div>
-      <strong className="digestValue">{value}</strong>
-      <em className="digestDetail">{detail}</em>
-    </div>
-  );
-}
-
-function DecisionMetric({
-  label,
-  value,
-  detail,
-  tone,
-}: {
-  label: string;
-  value: string;
-  detail: string;
-  tone: 'good' | 'warn' | 'bad' | 'neutral';
-}) {
-  return (
-    <div className={`decisionMetric ${tone}`}>
-      <span>{label}</span>
-      <strong>{value}</strong>
-      <em>{detail}</em>
-    </div>
-  );
-}
-
-function OrderbookExecutionSummary({ quotes, yesTokenId, noTokenId }: { quotes: OrderBookQuote[]; yesTokenId: string; noTokenId: string }) {
-  const yesQuote = quotes.find((quote) => quote.tokenId === yesTokenId);
-  const noQuote = quotes.find((quote) => quote.tokenId === noTokenId);
-  const pairAskCost = yesQuote?.bestAsk != null && noQuote?.bestAsk != null ? yesQuote.bestAsk + noQuote.bestAsk : null;
-  const pairEdge = pairAskCost == null ? null : 1 - pairAskCost;
-  const spreadState = quotes.length === 0 ? 'UNKNOWN' : quotes.every((quote) => quote.spread != null && quote.spread <= 0.02) ? 'TIGHT' : 'WIDE';
-  const yesDepth = yesQuote ? yesQuote.askDepth + yesQuote.bidDepth : 0;
-  const noDepth = noQuote ? noQuote.askDepth + noQuote.bidDepth : 0;
-  const depthRatio = yesDepth > 0 && noDepth > 0 ? Math.max(yesDepth, noDepth) / Math.min(yesDepth, noDepth) : null;
-  const imbalanceLabel = depthRatio == null ? 'UNKNOWN' : depthRatio >= 2 ? 'IMBALANCED' : 'BALANCED';
-  const newestQuoteAt = quotes.length ? Math.max(...quotes.map((quote) => toSortTime(quote.updatedAt)), 0) : 0;
-
-  return (
-    <div className="orderbookSummary">
-      <DecisionMetric
-        label="Pair Ask Cost"
-        value={pairAskCost == null ? '-' : pairAskCost.toFixed(3)}
-        detail={pairEdge == null ? 'waiting for both books' : `edge ${pairEdge.toFixed(3)}`}
-        tone={pairEdge == null ? 'neutral' : pairEdge >= 0.08 ? 'good' : 'warn'}
-      />
-      <DecisionMetric
-        label="Executable Pair"
-        value={pairAskCost == null ? 'MISSING' : pairAskCost <= 0.9 ? 'AVAILABLE' : 'EXPENSIVE'}
-        detail={`UP ${yesQuote?.bestAsk == null ? '-' : yesQuote.bestAsk.toFixed(3)} / DOWN ${noQuote?.bestAsk == null ? '-' : noQuote.bestAsk.toFixed(3)}`}
-        tone={pairAskCost == null ? 'bad' : pairAskCost <= 0.9 ? 'good' : 'warn'}
-      />
-      <DecisionMetric
-        label="Spread State"
-        value={spreadState}
-        detail={quotes.length ? quotes.map((quote) => quote.spread == null ? '-' : quote.spread.toFixed(3)).join(' / ') : 'no quotes'}
-        tone={spreadState === 'TIGHT' ? 'good' : spreadState === 'WIDE' ? 'warn' : 'neutral'}
-      />
-      <DecisionMetric
-        label="Liquidity Balance"
-        value={imbalanceLabel}
-        detail={depthRatio == null ? 'depth unavailable' : `${depthRatio.toFixed(2)}x depth ratio`}
-        tone={imbalanceLabel === 'BALANCED' ? 'good' : imbalanceLabel === 'IMBALANCED' ? 'warn' : 'neutral'}
-      />
-      <DecisionMetric
-        label="Book Freshness"
-        value={quotes.length === 0 ? 'UNKNOWN' : quotes.every((quote) => quote.source === 'ws') ? 'LIVE WS' : 'MIXED'}
-        detail={newestQuoteAt ? formatEtTime(new Date(newestQuoteAt).toISOString()) : 'not updated'}
-        tone={quotes.length > 0 && quotes.every((quote) => quote.source === 'ws') ? 'good' : 'neutral'}
-      />
-    </div>
-  );
-}
-
-function OrderbookCapacityPanel({ depth }: { depth?: OrderbookDepthSnapshot }) {
-  if (!depth) {
-    return (
-      <div className="orderbookCapacityBlock">
-        <p className="emptyText">No orderbook depth capacity snapshot yet</p>
-      </div>
-    );
-  }
-  const activeLevel = nearestDepthLevel(depth);
-
-  return (
-    <div className="orderbookCapacityBlock">
-      <div className="capacityHeader">
-        <div>
-          <h3>Strategy Capacity</h3>
-          <p>
-            Active limit {formatCapacityPrice(depth.activeLimitPrice)} / current size {formatCapacityShares(depth.baseSharesPerSide)} shares per side / {formatEtTime(depth.updatedAt)}
-          </p>
-        </div>
-        <Badge tone={depth.status === 'ready' ? 'good' : 'warn'}>{depth.status.toUpperCase()}</Badge>
-      </div>
-
-      {depth.diagnostics.length > 0 && (
-        <div className="capacityDiagnostics">
-          {depth.diagnostics.map((item) => <span key={item}>{item}</span>)}
-        </div>
-      )}
-
-      <div className="capacityTierGrid">
-        {depth.tiers.map((tier) => (
-          <DecisionMetric
-            key={tier.label}
-            label={tier.label}
-            value={`${formatCapacityShares(tier.maxSharesPerSide)} sh`}
-            detail={`~${formatMoney(tier.maxPairAmountUsd)} pair / ${formatNumber(tier.exactLevelSharePct * 100, 0)}% level cap`}
-            tone={tier.tone}
-          />
-        ))}
-      </div>
-
-      <div className="capacityFocus">
-        <DecisionMetric
-          label="Active Maker Queue"
-          value={formatCapacityShares(activeLevel?.minBidQueueShares ?? 0)}
-          detail={`min shares at-or-above ${formatCapacityPrice(depth.activeLimitPrice)}`}
-          tone={(activeLevel?.minBidQueueShares ?? 0) >= depth.baseSharesPerSide * 10 ? 'good' : 'warn'}
-        />
-        <DecisionMetric
-          label="Same-Level Queue"
-          value={formatCapacityShares(activeLevel?.minBidAtLimitShares ?? 0)}
-          detail="thin side at exact active limit"
-          tone={(activeLevel?.minBidAtLimitShares ?? 0) >= depth.baseSharesPerSide * 5 ? 'good' : 'warn'}
-        />
-        <DecisionMetric
-          label="Immediate Fill"
-          value={formatCapacityShares(activeLevel?.pairedImmediateShares ?? 0)}
-          detail={`marketable shares at ${formatCapacityPrice(depth.activeLimitPrice)}`}
-          tone={(activeLevel?.pairedImmediateShares ?? 0) > 0 ? 'warn' : 'neutral'}
-        />
-      </div>
-
-      <DataTable headers={['Limit', 'Immediate Pair', 'Immediate Cost', 'Maker Queue', 'Same-Level Queue', 'Queue Ratio']}>
-        {depth.levels.map((level) => (
-          <tr key={level.limitPrice} className={Math.abs(level.limitPrice - depth.activeLimitPrice) < 0.000001 ? 'activeDepthRow' : undefined}>
-            <td className="mono">{formatCapacityPrice(level.limitPrice)}</td>
-            <td className="mono">{formatCapacityShares(level.pairedImmediateShares)} sh</td>
-            <td className="mono">{formatMoney(level.pairedImmediateCostUsd)}</td>
-            <td className="mono">{formatCapacityShares(level.minBidQueueShares)} sh</td>
-            <td className="mono">{formatCapacityShares(level.minBidAtLimitShares)} sh</td>
-            <td className="mono">{level.queueRatio == null ? '-' : `${formatNumber(level.queueRatio, 2)}x`}</td>
-          </tr>
-        ))}
-      </DataTable>
-    </div>
-  );
-}
-
-function nearestDepthLevel(depth: OrderbookDepthSnapshot) {
-  return depth.levels.find((level) => Math.abs(level.limitPrice - depth.activeLimitPrice) < 0.000001)
-    || depth.levels.reduce((closest, level) => (
-      Math.abs(level.limitPrice - depth.activeLimitPrice) < Math.abs(closest.limitPrice - depth.activeLimitPrice) ? level : closest
-    ), depth.levels[0]);
-}
-
-function formatCapacityPrice(value: number): string {
-  return `${Math.round(value * 100)}c`;
-}
-
-function formatCapacityShares(value: number): string {
-  if (!Number.isFinite(value)) return '-';
-  if (Math.abs(value) >= 1000) return `${formatNumber(value / 1000, 1)}k`;
-  return formatNumber(value, value >= 100 ? 0 : 1);
-}
-
-function OrderbookTable({ quotes, yesTokenId, noTokenId }: { quotes: OrderBookQuote[]; yesTokenId: string; noTokenId: string }) {
-  // Scale depths relative to max depths found in the quotes list
-  const maxBidDepth = Math.max(...quotes.map((q) => q.bidDepth), 1);
-  const maxAskDepth = Math.max(...quotes.map((q) => q.askDepth), 1);
-
-  return (
-    <DataTable headers={['Outcome', 'Token ID', 'Data Source', 'Best Bid', 'Best Ask', 'Midpoint', 'Spread', 'Bid Liquidity (Depth)', 'Ask Liquidity (Depth)', 'Last Updated (ET)']}>
-      {quotes.map((quote) => {
-        const bidPct = (quote.bidDepth / maxBidDepth) * 80; // max 80% width
-        const askPct = (quote.askDepth / maxAskDepth) * 80;
-        const label = quote.tokenId === yesTokenId ? 'YES' : quote.tokenId === noTokenId ? 'NO' : null;
-        
-        return (
-          <tr key={quote.tokenId}>
-            <td>{label ? <Badge tone={outcomeTone(label)}>{outcomeLabel(label)}</Badge> : '-'}</td>
-            <td className="mono" style={{ fontSize: '11px' }} title={quote.tokenId}>{shortenTokenId(quote.tokenId)}</td>
-            <td><Badge tone={quote.source === 'ws' ? 'good' : 'neutral'}>{quote.source.toUpperCase()}</Badge></td>
-            <td className="mono" style={{ color: 'var(--color-success)', fontWeight: 600 }}>
-              {quote.bestBid == null ? '-' : quote.bestBid.toFixed(3)}
-            </td>
-            <td className="mono" style={{ color: 'var(--color-danger)', fontWeight: 600 }}>
-              {quote.bestAsk == null ? '-' : quote.bestAsk.toFixed(3)}
-            </td>
-            <td className="mono">{quote.midpoint == null ? '-' : quote.midpoint.toFixed(3)}</td>
-            <td className="mono">{quote.spread == null ? '-' : quote.spread.toFixed(3)}</td>
-            
-            {/* Liquidities with background bar gauges */}
-            <td className="depthCell">
-              <div className="depthFill bid" style={{ width: `${bidPct}%` }}></div>
-              <span style={{ position: 'relative', zIndex: 1 }}>{quote.bidDepth.toFixed(2)}</span>
-            </td>
-            <td className="depthCell">
-              <div className="depthFill ask" style={{ width: `${askPct}%` }}></div>
-              <span style={{ position: 'relative', zIndex: 1 }}>{quote.askDepth.toFixed(2)}</span>
-            </td>
-            
-            <td className="mono">{formatEtTime(quote.updatedAt)}</td>
-          </tr>
-        );
-      })}
-    </DataTable>
-  );
-}
-
-function DataTable({ headers, children, className = '' }: { headers: string[]; children: React.ReactNode; className?: string }) {
-  return (
-    <div className="tableWrap">
-      <table className={className}>
-        <thead>
-          <tr>
-            {headers.map((header) => <th key={header}>{header}</th>)}
-          </tr>
-        </thead>
-        <tbody>{children}</tbody>
-      </table>
-    </div>
-  );
-}
-
-function PaginationControls({
-  page,
-  totalPages,
-  totalRows,
-  pageSize,
-  onPageChange,
-}: {
-  page: number;
-  totalPages: number;
-  totalRows: number;
-  pageSize: number;
-  onPageChange: (page: number) => void;
-}) {
-  if (totalRows <= pageSize) return null;
-  const start = (page - 1) * pageSize + 1;
-  const end = Math.min(totalRows, page * pageSize);
-  return (
-    <div className="paginationBar">
-      <span className="paginationSummary">
-        Showing {start}-{end} of {totalRows}
-      </span>
-      <div className="paginationControls">
-        <button type="button" onClick={() => onPageChange(1)} disabled={page === 1}>First</button>
-        <button type="button" onClick={() => onPageChange(page - 1)} disabled={page === 1}>Previous</button>
-        <span className="paginationPage">Page {page} / {totalPages}</span>
-        <button type="button" onClick={() => onPageChange(page + 1)} disabled={page === totalPages}>Next</button>
-        <button type="button" onClick={() => onPageChange(totalPages)} disabled={page === totalPages}>Last</button>
-      </div>
-    </div>
-  );
-}
-
-function Badge({ tone, children }: { tone: 'good' | 'warn' | 'bad' | 'neutral'; children: React.ReactNode }) {
-  return <span className={`badge ${tone}`}>{children}</span>;
 }
