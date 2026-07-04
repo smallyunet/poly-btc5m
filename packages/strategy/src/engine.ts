@@ -73,6 +73,7 @@ export function evaluateEntry(snapshot: StateSnapshot, config: StrategyRiskConfi
   const intents: TradeIntent[] = [];
   const rejected: TradeIntent[] = [];
   const reasons: string[] = [];
+  const entryBypass = config.bypassEntryScoreGating;
   const inDecisionWindow = snapshot.round.secondsToStart <= config.entryOrderTtlSeconds && snapshot.round.secondsToStart >= config.entryMinSecondsToStart;
   const yesQuote = quoteFor(snapshot, snapshot.round.yesTokenId);
   const noQuote = quoteFor(snapshot, snapshot.round.noTokenId);
@@ -85,28 +86,35 @@ export function evaluateEntry(snapshot: StateSnapshot, config: StrategyRiskConfi
   const participation = participationStats(snapshot, config);
   const cooldownUntilMs = config.entryCooldownUntil ? new Date(config.entryCooldownUntil).getTime() : 0;
   const cooldownActive = Number.isFinite(cooldownUntilMs) && cooldownUntilMs > Date.now();
-  const cooldownPassed = config.bypassSingleFillCooldown || !cooldownActive;
+  const cooldownPassed = entryBypass || config.bypassSingleFillCooldown || !cooldownActive;
   const centerCrosses = snapshot.features.centerCross120s ?? snapshot.features.cross120s;
   const centerMinBiExcursion = snapshot.features.centerMinBiExcursionBps120s ?? snapshot.features.minBiExcursionBps120s;
-  const scoreGatingPassed = config.bypassEntryScoreGating || snapshot.regime === 'CHOP';
-  const chopScoreThresholdPassed = config.bypassEntryScoreGating || snapshot.features.chopScore >= config.minChopScore;
-  const centerCrossThresholdPassed = config.bypassEntryScoreGating || centerCrosses >= config.minCross120s;
-  const rangeThresholdPassed = config.bypassEntryScoreGating || snapshot.features.rangeBps120s >= config.minRangeBps120s;
-  const twoSidedThresholdPassed = config.bypassEntryScoreGating || centerMinBiExcursion >= config.minBiExcursionBps120s;
-  const driftThresholdPassed = config.bypassEntryScoreGating || snapshot.features.driftRatio120s <= config.maxDriftRatio120s;
-  const momentumThresholdPassed = config.bypassEntryScoreGating || snapshot.features.momentumRatio30s <= config.maxMomentumRatio30s;
-  const liveScoreFloorPassed = config.bypassEntryScoreGating || config.dryRun || snapshot.features.chopScore >= config.minLiveChopScore;
+  const decisionWindowPassed = entryBypass || inDecisionWindow;
+  const scoreGatingPassed = entryBypass || snapshot.regime === 'CHOP';
+  const chopScoreThresholdPassed = entryBypass || snapshot.features.chopScore >= config.minChopScore;
+  const centerCrossThresholdPassed = entryBypass || centerCrosses >= config.minCross120s;
+  const rangeThresholdPassed = entryBypass || snapshot.features.rangeBps120s >= config.minRangeBps120s;
+  const twoSidedThresholdPassed = entryBypass || centerMinBiExcursion >= config.minBiExcursionBps120s;
+  const driftThresholdPassed = entryBypass || snapshot.features.driftRatio120s <= config.maxDriftRatio120s;
+  const momentumThresholdPassed = entryBypass || snapshot.features.momentumRatio30s <= config.maxMomentumRatio30s;
+  const liveScoreFloorPassed = entryBypass || config.dryRun || snapshot.features.chopScore >= config.minLiveChopScore;
+  const booksTradablePassed = entryBypass || booksTradable;
+  const sharesPassed = entryBypass || shares >= config.minOrderShares;
+  const limitPricePassed = entryBypass || (limitPrice > 0 && limitPrice < 1);
+  const pairCostPassed = entryBypass || pairCost <= config.maxPairCost + 0.000001;
+  const queuePassed = entryBypass || queue.ratio == null || queue.ratio <= config.maxEntryQueueImbalance;
+  const participationPassed = entryBypass || !participation.blocked;
 
   if (!cooldownPassed) reasons.push('SINGLE_FILL_COOLDOWN');
-  if (!inDecisionWindow) reasons.push('NOT_IN_DECISION_WINDOW');
+  if (!decisionWindowPassed) reasons.push('NOT_IN_DECISION_WINDOW');
   if (!scoreGatingPassed) reasons.push(`REGIME_${snapshot.regime}`);
-  if (!booksTradable) reasons.push('ORDERBOOK_NOT_TRADABLE');
-  if (shares < config.minOrderShares) reasons.push('ORDER_SHARES_TOO_SMALL');
-  if (limitPrice <= 0 || limitPrice >= 1) reasons.push('INVALID_DUAL_LIMIT_PRICE');
-  if (pairCost > config.maxPairCost + 0.000001) reasons.push('PAIR_COST_TOO_HIGH');
-  if (queue.ratio != null && queue.ratio > config.maxEntryQueueImbalance) reasons.push('ENTRY_QUEUE_IMBALANCE');
+  if (!booksTradablePassed) reasons.push('ORDERBOOK_NOT_TRADABLE');
+  if (!sharesPassed) reasons.push('ORDER_SHARES_TOO_SMALL');
+  if (!limitPricePassed) reasons.push('INVALID_DUAL_LIMIT_PRICE');
+  if (!pairCostPassed) reasons.push('PAIR_COST_TOO_HIGH');
+  if (!queuePassed) reasons.push('ENTRY_QUEUE_IMBALANCE');
   if (!liveScoreFloorPassed) reasons.push('ENTRY_SCORE_TOO_LOW_FOR_LIVE');
-  if (participation.blocked) reasons.push('PARTICIPATION_WEAK');
+  if (!participationPassed) reasons.push('PARTICIPATION_WEAK');
 
   const base = [
     makeIntent(snapshot, 'YES', snapshot.round.yesTokenId, shares, limitPrice, config),
@@ -129,29 +137,29 @@ export function evaluateEntry(snapshot: StateSnapshot, config: StrategyRiskConfi
     amountUsd: shares * pairCost,
     limitPrice,
     conditions: [
-      condition('Decision window', inDecisionWindow, `${snapshot.round.secondsToStart.toFixed(1)}s to start / min ${config.entryMinSecondsToStart}s`),
-      condition('Single-fill cooldown', cooldownPassed, config.bypassSingleFillCooldown && cooldownActive ? `${cooldownLabel(config.entryCooldownUntil, config.entryCooldownReason)} (bypassed)` : cooldownActive ? cooldownLabel(config.entryCooldownUntil, config.entryCooldownReason) : 'inactive'),
-      condition('Regime is CHOP', scoreGatingPassed, config.bypassEntryScoreGating ? `${snapshot.regime} (score gating bypassed)` : snapshot.regime),
-      condition('CHOP score threshold', chopScoreThresholdPassed, config.bypassEntryScoreGating ? `${snapshot.features.chopScore.toFixed(1)} / ${config.minChopScore} (bypassed)` : `${snapshot.features.chopScore.toFixed(1)} / ${config.minChopScore}`),
-      condition('center cross_120s threshold', centerCrossThresholdPassed, config.bypassEntryScoreGating ? `${centerCrosses} / ${config.minCross120s} (bypassed)` : `${centerCrosses} / ${config.minCross120s}`),
-      condition('range_120s sufficient', rangeThresholdPassed, config.bypassEntryScoreGating ? `${snapshot.features.rangeBps120s.toFixed(2)}bps / ${config.minRangeBps120s} (bypassed)` : `${snapshot.features.rangeBps120s.toFixed(2)}bps / ${config.minRangeBps120s}`),
-      condition('center two-sided excursion', twoSidedThresholdPassed, config.bypassEntryScoreGating ? `${centerMinBiExcursion.toFixed(2)}bps / ${config.minBiExcursionBps120s} (bypassed)` : `${centerMinBiExcursion.toFixed(2)}bps / ${config.minBiExcursionBps120s}`),
-      condition('drift ratio capped', driftThresholdPassed, config.bypassEntryScoreGating ? `${snapshot.features.driftRatio120s.toFixed(2)} / ${config.maxDriftRatio120s} (bypassed)` : `${snapshot.features.driftRatio120s.toFixed(2)} / ${config.maxDriftRatio120s}`),
-      condition('momentum ratio capped', momentumThresholdPassed, config.bypassEntryScoreGating ? `${snapshot.features.momentumRatio30s.toFixed(2)} / ${config.maxMomentumRatio30s} (bypassed)` : `${snapshot.features.momentumRatio30s.toFixed(2)} / ${config.maxMomentumRatio30s}`),
-      condition('Live score floor', liveScoreFloorPassed, config.bypassEntryScoreGating ? `${snapshot.features.chopScore.toFixed(1)} / ${config.minLiveChopScore} (bypassed)` : config.dryRun ? 'monitor mode' : `${snapshot.features.chopScore.toFixed(1)} / ${config.minLiveChopScore}`),
-      condition('YES book tradable', buyQuoteReady(yesQuote, config), quoteAgeLabel(yesQuote)),
-      condition('NO book tradable', buyQuoteReady(noQuote, config), quoteAgeLabel(noQuote)),
-      condition('Entry queue imbalance', queue.ratio == null || queue.ratio <= config.maxEntryQueueImbalance, queueLabel(queue, config.maxEntryQueueImbalance)),
-      condition('Participation data', participation.dataPassed, participation.dataLabel),
-      condition('Holder count depth', participation.holderCountPassed, participation.holderCountLabel),
-      condition('Top holder shares', participation.topHolderSharesPassed, participation.topHolderSharesLabel),
-      condition('Holder concentration', participation.concentrationPassed, participation.concentrationLabel),
-      condition('Top position PnL', participation.topPositionPnlPassed, participation.topPositionPnlLabel),
-      condition('Visible position PnL sum', participation.positionPnlSumPassed, participation.positionPnlSumLabel),
-      condition('Dynamic limit price', limitPrice > 0 && limitPrice < 1, `${limitPrice.toFixed(3)} (${config.dynamicLimitEnabled ? 'score policy' : 'fixed'})`),
-      condition('Pair cost cap', pairCost <= config.maxPairCost + 0.000001, `${pairCost.toFixed(3)} / ${config.maxPairCost.toFixed(3)}, edge ${pairEdge.toFixed(3)}`),
-      condition('Dynamic shares', shares >= config.minOrderShares, `${shares.toFixed(2)} / base ${config.orderSharesPerSide.toFixed(2)} / max ${config.maxOrderSharesPerSide.toFixed(2)} (${config.dynamicSharesEnabled ? 'score policy' : 'fixed'})`),
-      condition('Shares per side', shares >= config.minOrderShares, `${shares.toFixed(2)} / min ${config.minOrderShares}`),
+      condition('Decision window', decisionWindowPassed, entryBypass ? `${snapshot.round.secondsToStart.toFixed(1)}s to start / min ${config.entryMinSecondsToStart}s (bypassed)` : `${snapshot.round.secondsToStart.toFixed(1)}s to start / min ${config.entryMinSecondsToStart}s`),
+      condition('Single-fill cooldown', cooldownPassed, entryBypass && cooldownActive ? `${cooldownLabel(config.entryCooldownUntil, config.entryCooldownReason)} (bypassed)` : config.bypassSingleFillCooldown && cooldownActive ? `${cooldownLabel(config.entryCooldownUntil, config.entryCooldownReason)} (bypassed)` : cooldownActive ? cooldownLabel(config.entryCooldownUntil, config.entryCooldownReason) : 'inactive'),
+      condition('Regime is CHOP', scoreGatingPassed, entryBypass ? `${snapshot.regime} (bypassed)` : snapshot.regime),
+      condition('CHOP score threshold', chopScoreThresholdPassed, entryBypass ? `${snapshot.features.chopScore.toFixed(1)} / ${config.minChopScore} (bypassed)` : `${snapshot.features.chopScore.toFixed(1)} / ${config.minChopScore}`),
+      condition('center cross_120s threshold', centerCrossThresholdPassed, entryBypass ? `${centerCrosses} / ${config.minCross120s} (bypassed)` : `${centerCrosses} / ${config.minCross120s}`),
+      condition('range_120s sufficient', rangeThresholdPassed, entryBypass ? `${snapshot.features.rangeBps120s.toFixed(2)}bps / ${config.minRangeBps120s} (bypassed)` : `${snapshot.features.rangeBps120s.toFixed(2)}bps / ${config.minRangeBps120s}`),
+      condition('center two-sided excursion', twoSidedThresholdPassed, entryBypass ? `${centerMinBiExcursion.toFixed(2)}bps / ${config.minBiExcursionBps120s} (bypassed)` : `${centerMinBiExcursion.toFixed(2)}bps / ${config.minBiExcursionBps120s}`),
+      condition('drift ratio capped', driftThresholdPassed, entryBypass ? `${snapshot.features.driftRatio120s.toFixed(2)} / ${config.maxDriftRatio120s} (bypassed)` : `${snapshot.features.driftRatio120s.toFixed(2)} / ${config.maxDriftRatio120s}`),
+      condition('momentum ratio capped', momentumThresholdPassed, entryBypass ? `${snapshot.features.momentumRatio30s.toFixed(2)} / ${config.maxMomentumRatio30s} (bypassed)` : `${snapshot.features.momentumRatio30s.toFixed(2)} / ${config.maxMomentumRatio30s}`),
+      condition('Live score floor', liveScoreFloorPassed, entryBypass ? `${snapshot.features.chopScore.toFixed(1)} / ${config.minLiveChopScore} (bypassed)` : config.dryRun ? 'monitor mode' : `${snapshot.features.chopScore.toFixed(1)} / ${config.minLiveChopScore}`),
+      condition('YES book tradable', entryBypass || buyQuoteReady(yesQuote, config), entryBypass ? `${quoteAgeLabel(yesQuote)} (bypassed)` : quoteAgeLabel(yesQuote)),
+      condition('NO book tradable', entryBypass || buyQuoteReady(noQuote, config), entryBypass ? `${quoteAgeLabel(noQuote)} (bypassed)` : quoteAgeLabel(noQuote)),
+      condition('Entry queue imbalance', queuePassed, entryBypass ? `${queueLabel(queue, config.maxEntryQueueImbalance)} (bypassed)` : queueLabel(queue, config.maxEntryQueueImbalance)),
+      condition('Participation data', entryBypass || participation.dataPassed, entryBypass ? `${participation.dataLabel} (bypassed)` : participation.dataLabel),
+      condition('Holder count depth', entryBypass || participation.holderCountPassed, entryBypass ? `${participation.holderCountLabel} (bypassed)` : participation.holderCountLabel),
+      condition('Top holder shares', entryBypass || participation.topHolderSharesPassed, entryBypass ? `${participation.topHolderSharesLabel} (bypassed)` : participation.topHolderSharesLabel),
+      condition('Holder concentration', entryBypass || participation.concentrationPassed, entryBypass ? `${participation.concentrationLabel} (bypassed)` : participation.concentrationLabel),
+      condition('Top position PnL', entryBypass || participation.topPositionPnlPassed, entryBypass ? `${participation.topPositionPnlLabel} (bypassed)` : participation.topPositionPnlLabel),
+      condition('Visible position PnL sum', entryBypass || participation.positionPnlSumPassed, entryBypass ? `${participation.positionPnlSumLabel} (bypassed)` : participation.positionPnlSumLabel),
+      condition('Dynamic limit price', limitPricePassed, entryBypass ? `${limitPrice.toFixed(3)} (${config.dynamicLimitEnabled ? 'score policy' : 'fixed'}, bypassed)` : `${limitPrice.toFixed(3)} (${config.dynamicLimitEnabled ? 'score policy' : 'fixed'})`),
+      condition('Pair cost cap', pairCostPassed, entryBypass ? `${pairCost.toFixed(3)} / ${config.maxPairCost.toFixed(3)}, edge ${pairEdge.toFixed(3)} (bypassed)` : `${pairCost.toFixed(3)} / ${config.maxPairCost.toFixed(3)}, edge ${pairEdge.toFixed(3)}`),
+      condition('Dynamic shares', sharesPassed, entryBypass ? `${shares.toFixed(2)} / base ${config.orderSharesPerSide.toFixed(2)} / max ${config.maxOrderSharesPerSide.toFixed(2)} (${config.dynamicSharesEnabled ? 'score policy' : 'fixed'}, bypassed)` : `${shares.toFixed(2)} / base ${config.orderSharesPerSide.toFixed(2)} / max ${config.maxOrderSharesPerSide.toFixed(2)} (${config.dynamicSharesEnabled ? 'score policy' : 'fixed'})`),
+      condition('Shares per side', sharesPassed, entryBypass ? `${shares.toFixed(2)} / min ${config.minOrderShares} (bypassed)` : `${shares.toFixed(2)} / min ${config.minOrderShares}`),
     ],
   }];
 

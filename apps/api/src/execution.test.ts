@@ -223,6 +223,31 @@ test('blocks entry posting when round start is too close', async () => {
   assert.match(diagnostics[0], /ROUND_START_TOO_CLOSE_FOR_ENTRY/);
 });
 
+test('bypasses entry orderbook execution gate when entry bypass is enabled', async () => {
+  const store = new InMemoryStore('live', 2_000, { persistencePath: false });
+  const intents = [intent('YES')];
+  store.recordIntents(intents);
+  let posted = 0;
+  const adapter = adapterStub(() => {
+    posted += 1;
+    return { ok: true, orderId: 'entry-order', price: 0.44, size: 10 };
+  });
+  const snap = snapshot({ startAt: new Date(Date.now() + 20_000).toISOString() });
+  snap.orderbooks = [];
+
+  const diagnostics = await executeLiveIntents({
+    appConfig: appConfig(),
+    adapter,
+    store,
+    snapshot: snap,
+    intents,
+    risk: risk({ bypassEntryScoreGating: true }),
+  });
+
+  assert.deepEqual(diagnostics, []);
+  assert.equal(posted, 1);
+});
+
 function intent(label: 'YES' | 'NO', patch: Partial<TradeIntent> = {}): TradeIntent {
   return {
     id: `intent-${label}`,
@@ -267,9 +292,10 @@ function appConfig(): AppConfig {
   } as AppConfig;
 }
 
-function risk(): StrategyRiskConfig {
+function risk(patch: Partial<StrategyRiskConfig> = {}): StrategyRiskConfig {
   return {
     maxOrderbookAgeSeconds: 5,
+    ...patch,
   } as StrategyRiskConfig;
 }
 

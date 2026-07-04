@@ -205,6 +205,46 @@ test('bypasses score gating for live low-score entries when enabled', () => {
   assert.equal(result.checks[0].conditions.find((item) => item.label === 'Live score floor')?.passed, true);
 });
 
+test('bypasses all entry blockers when entry bypass is enabled', () => {
+  const snapshot = { ...baseSnapshot({ chopScore: 12 }), regime: 'LOW_ACTIVITY' as const };
+  snapshot.round.secondsToStart = 120;
+  snapshot.orderbooks = [
+    quote('yes', 0.44, [{ price: 0.45, size: 1000 }]),
+    quote('no', 0.44, [{ price: 0.45, size: 0 }]),
+  ];
+  snapshot.participation = {
+    status: 'enabled',
+    updatedAt: new Date().toISOString(),
+    topHoldersPerSide: 8,
+    maxPositionPnl: 12,
+    totalTopHolderShares: 140,
+    totalPositionPnl: 22,
+    diagnostics: [],
+    sides: [
+      participationSide('YES', { holderCount: 2, topHolderShares: 80, topPositionPnl: 12, positionPnlSum: 14 }),
+      participationSide('NO', { holderCount: 1, topHolderShares: 60, topPositionPnl: 8, positionPnlSum: 8 }),
+    ],
+  };
+
+  const result = evaluateEntry(snapshot, {
+    ...risk,
+    dryRun: false,
+    bypassEntryScoreGating: true,
+    maxPairCost: 0.5,
+    minOrderShares: 20,
+    entryCooldownUntil: new Date(Date.now() + 4 * 60 * 60_000).toISOString(),
+    entryCooldownReason: 'single fill on round-0',
+  });
+
+  assert.equal(result.intents.length, 2);
+  assert.equal(result.rejected.length, 0);
+  for (const label of ['Decision window', 'Single-fill cooldown', 'Regime is CHOP', 'YES book tradable', 'NO book tradable', 'Entry queue imbalance', 'Holder count depth', 'Pair cost cap', 'Shares per side']) {
+    const item = result.checks[0].conditions.find((condition) => condition.label === label);
+    assert.equal(item?.passed, true, label);
+    assert.match(item?.actual || '', /bypassed/, label);
+  }
+});
+
 test('keeps base shares for mid-score entries', () => {
   const snapshot = { ...baseSnapshot({ ...chopFeatures(), chopScore: 90 }), regime: 'CHOP' as const };
   const result = evaluateEntry(snapshot, risk);

@@ -188,9 +188,12 @@ async function executionGate(params: ExecuteIntentsParams, intent: TradeIntent):
   if (!Number.isFinite(intent.shares) || intent.shares <= 0) return reject('INVALID_SHARES');
   if (roundDownShares(intent.shares) <= 0) return reject('INVALID_ORDER_SIZE');
 
-  const quote = params.snapshot.orderbooks.find((item) => item.tokenId === intent.tokenId);
-  const quoteGate = quoteExecutionGate(quote, intent, params.risk.maxOrderbookAgeSeconds);
-  if (quoteGate) return reject(quoteGate);
+  const bypassEntryQuoteGate = params.risk.bypassEntryScoreGating && ENTRY_STRATEGIES.has(intent.strategy);
+  if (!bypassEntryQuoteGate) {
+    const quote = params.snapshot.orderbooks.find((item) => item.tokenId === intent.tokenId);
+    const quoteGate = quoteExecutionGate(quote, intent, params.risk.maxOrderbookAgeSeconds);
+    if (quoteGate) return reject(quoteGate);
+  }
 
   const dedupeWindowMs = Math.max(intent.ttlSeconds * 1000, 60_000);
   if (ENTRY_STRATEGIES.has(intent.strategy) && params.store.hasNonFailedOrder(executionKey, {
