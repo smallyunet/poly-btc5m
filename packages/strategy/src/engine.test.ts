@@ -205,7 +205,7 @@ test('bypasses score gating for live low-score entries when enabled', () => {
   assert.equal(result.checks[0].conditions.find((item) => item.label === 'Live score floor')?.passed, true);
 });
 
-test('bypasses all entry blockers when entry bypass is enabled', () => {
+test('bypasses entry blockers except single-fill cooldown when entry bypass is enabled', () => {
   const snapshot = { ...baseSnapshot({ chopScore: 12 }), regime: 'LOW_ACTIVITY' as const };
   snapshot.round.secondsToStart = 120;
   snapshot.orderbooks = [
@@ -236,9 +236,12 @@ test('bypasses all entry blockers when entry bypass is enabled', () => {
     entryCooldownReason: 'single fill on round-0',
   });
 
-  assert.equal(result.intents.length, 2);
-  assert.equal(result.rejected.length, 0);
-  for (const label of ['Decision window', 'Single-fill cooldown', 'Regime is CHOP', 'YES book tradable', 'NO book tradable', 'Entry queue imbalance', 'Holder count depth', 'Pair cost cap', 'Shares per side']) {
+  assert.equal(result.intents.length, 0);
+  assert.equal(result.rejected.length, 2);
+  assert.match(result.rejected[0].rejectionReason || '', /SINGLE_FILL_COOLDOWN/);
+  assert.equal(result.checks[0].conditions.find((condition) => condition.label === 'Single-fill cooldown')?.passed, false);
+  assert.doesNotMatch(result.checks[0].conditions.find((condition) => condition.label === 'Single-fill cooldown')?.actual || '', /bypassed/);
+  for (const label of ['Decision window', 'Regime is CHOP', 'YES book tradable', 'NO book tradable', 'Entry queue imbalance', 'Holder count depth', 'Pair cost cap', 'Shares per side']) {
     const item = result.checks[0].conditions.find((condition) => condition.label === label);
     assert.equal(item?.passed, true, label);
     assert.match(item?.actual || '', /bypassed/, label);

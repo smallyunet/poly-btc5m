@@ -676,7 +676,7 @@ export function App() {
     : 'UNKNOWN';
   const entryConfigValue = entryBypassActive ? 'BYPASS ALL' : 'RULE GATED';
   const entryConfigDetail = entryConfig
-    ? `${pricePolicyLabel} / ${sizePolicyLabel} / ${entryConfig.bypassSingleFillCooldown || entryBypassActive ? 'cooldown bypass' : 'cooldown gate'}`
+    ? `${pricePolicyLabel} / ${sizePolicyLabel} / ${entryConfig.bypassSingleFillCooldown ? 'cooldown bypass' : 'cooldown gate'}`
     : 'runtime entry config unavailable';
   const entryCooldownActive = Boolean(state.runtime.entryCooldownUntil && new Date(state.runtime.entryCooldownUntil).getTime() > Date.now());
   const entryCooldownRemaining = formatCooldownRemaining(state.runtime.entryCooldownUntil);
@@ -926,7 +926,7 @@ export function App() {
                   <DecisionMetric
                     label="Entry Bypass"
                     value={entryConfigValue}
-                    detail={entryBypassActive ? 'strategy blockers and entry quote gate are bypassed' : `live score floor ${entryConfig?.minLiveChopScore ?? 80}; confirmation ${entryConfig?.entryConfirmTicks ?? 3} ticks`}
+                    detail={entryBypassActive ? 'strategy blockers and entry quote gate are bypassed; cooldown still gates' : `live score floor ${entryConfig?.minLiveChopScore ?? 80}; confirmation ${entryConfig?.entryConfirmTicks ?? 3} ticks`}
                     tone={entryBypassActive ? 'warn' : 'neutral'}
                   />
                   <DecisionMetric

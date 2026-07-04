@@ -86,7 +86,7 @@ export function evaluateEntry(snapshot: StateSnapshot, config: StrategyRiskConfi
   const participation = participationStats(snapshot, config);
   const cooldownUntilMs = config.entryCooldownUntil ? new Date(config.entryCooldownUntil).getTime() : 0;
   const cooldownActive = Number.isFinite(cooldownUntilMs) && cooldownUntilMs > Date.now();
-  const cooldownPassed = entryBypass || config.bypassSingleFillCooldown || !cooldownActive;
+  const cooldownPassed = config.bypassSingleFillCooldown || !cooldownActive;
   const centerCrosses = snapshot.features.centerCross120s ?? snapshot.features.cross120s;
   const centerMinBiExcursion = snapshot.features.centerMinBiExcursionBps120s ?? snapshot.features.minBiExcursionBps120s;
   const decisionWindowPassed = entryBypass || inDecisionWindow;
@@ -138,7 +138,7 @@ export function evaluateEntry(snapshot: StateSnapshot, config: StrategyRiskConfi
     limitPrice,
     conditions: [
       condition('Decision window', decisionWindowPassed, entryBypass ? `${snapshot.round.secondsToStart.toFixed(1)}s to start / min ${config.entryMinSecondsToStart}s (bypassed)` : `${snapshot.round.secondsToStart.toFixed(1)}s to start / min ${config.entryMinSecondsToStart}s`),
-      condition('Single-fill cooldown', cooldownPassed, entryBypass && cooldownActive ? `${cooldownLabel(config.entryCooldownUntil, config.entryCooldownReason)} (bypassed)` : config.bypassSingleFillCooldown && cooldownActive ? `${cooldownLabel(config.entryCooldownUntil, config.entryCooldownReason)} (bypassed)` : cooldownActive ? cooldownLabel(config.entryCooldownUntil, config.entryCooldownReason) : 'inactive'),
+      condition('Single-fill cooldown', cooldownPassed, config.bypassSingleFillCooldown && cooldownActive ? `${cooldownLabel(config.entryCooldownUntil, config.entryCooldownReason)} (bypassed)` : cooldownActive ? cooldownLabel(config.entryCooldownUntil, config.entryCooldownReason) : 'inactive'),
       condition('Regime is CHOP', scoreGatingPassed, entryBypass ? `${snapshot.regime} (bypassed)` : snapshot.regime),
       condition('CHOP score threshold', chopScoreThresholdPassed, entryBypass ? `${snapshot.features.chopScore.toFixed(1)} / ${config.minChopScore} (bypassed)` : `${snapshot.features.chopScore.toFixed(1)} / ${config.minChopScore}`),
       condition('center cross_120s threshold', centerCrossThresholdPassed, entryBypass ? `${centerCrosses} / ${config.minCross120s} (bypassed)` : `${centerCrosses} / ${config.minCross120s}`),
