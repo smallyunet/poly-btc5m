@@ -698,12 +698,16 @@ Final-round review is still the cooldown trigger. It only reviews rounds that ha
 If the final state is still single-sided, cooldown duration depends on the latest hedge outcome:
 
 ```text
-base single                    => SINGLE_FILL_COOLDOWN_BASE_MS              default 30m
-hedge blocked by price/cost cap => SINGLE_FILL_COOLDOWN_PRICE_CAP_MS         default 60m
-hedge failed by API/cancel/post => SINGLE_FILL_COOLDOWN_EXECUTION_MS         default 2h
-2nd final single inside 2h      => max(current, SINGLE_FILL_COOLDOWN_SECOND_MS) default 2h
-3rd+ final single inside 2h     => max(current, SINGLE_FILL_COOLDOWN_THIRD_MS)  default 4h
+base single                    => profile cooldown base       default BTC 5m 30m / BTC 15m 90m / BTC 1h 6h
+hedge blocked by price/cost cap => profile cooldown price-cap  default BTC 5m 60m / BTC 15m 3h / BTC 1h 12h
+hedge failed by API/cancel/post => profile cooldown execution  default BTC 5m 2h / BTC 15m 6h / BTC 1h 24h
+2nd final single inside window  => max(current, profile cooldown second-repeat)
+3rd+ final single inside window => max(current, profile cooldown third-repeat)
 ```
+
+Profile cooldowns can be overridden with asset+interval keys such as
+`BTC_15M_SINGLE_FILL_COOLDOWN_BASE_MS`, or interval-wide keys such as
+`15M_SINGLE_FILL_COOLDOWN_BASE_MS`.
 
 This turns 4h from a fixed subjective pause into an escalation guard: ordinary singles do not immediately skip about 48 rounds, while repeated singles or execution failures still force a long pause.
 

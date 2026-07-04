@@ -289,14 +289,22 @@ function makeProfile(params: {
       maxPairCost: numberEnv('SINGLE_FILL_HEDGE_MAX_PAIR_COST', 1.1),
     },
     cooldown: {
-      baseMs: parsePositiveInteger(process.env.SINGLE_FILL_COOLDOWN_BASE_MS, 30 * 60_000),
-      priceCapMs: parsePositiveInteger(process.env.SINGLE_FILL_COOLDOWN_PRICE_CAP_MS, 60 * 60_000),
-      executionMs: parsePositiveInteger(process.env.SINGLE_FILL_COOLDOWN_EXECUTION_MS, 2 * 60 * 60_000),
-      repeatWindowMs: parsePositiveInteger(process.env.SINGLE_FILL_COOLDOWN_REPEAT_WINDOW_MS, 2 * 60 * 60_000),
-      secondMs: parsePositiveInteger(process.env.SINGLE_FILL_COOLDOWN_SECOND_MS, 2 * 60 * 60_000),
-      thirdMs: parsePositiveInteger(process.env.SINGLE_FILL_COOLDOWN_THIRD_MS, 4 * 60 * 60_000),
+      baseMs: profileCooldownMs(params, 'BASE', 30 * 60_000),
+      priceCapMs: profileCooldownMs(params, 'PRICE_CAP', 60 * 60_000),
+      executionMs: profileCooldownMs(params, 'EXECUTION', 2 * 60 * 60_000),
+      repeatWindowMs: profileCooldownMs(params, 'REPEAT_WINDOW', 2 * 60 * 60_000),
+      secondMs: profileCooldownMs(params, 'SECOND', 2 * 60 * 60_000),
+      thirdMs: profileCooldownMs(params, 'THIRD', 4 * 60 * 60_000),
     },
   };
+}
+
+function profileCooldownMs(params: { assetSymbol: 'BTC' | 'ETH' | 'SOL'; interval: MarketInterval; durationSeconds: number }, key: string, fiveMinuteDefaultMs: number): number {
+  const intervalKey = params.interval.toUpperCase().replace(/[^A-Z0-9]/g, '_');
+  const assetIntervalKey = `${params.assetSymbol}_${intervalKey}_SINGLE_FILL_COOLDOWN_${key}_MS`;
+  const intervalOnlyKey = `${intervalKey}_SINGLE_FILL_COOLDOWN_${key}_MS`;
+  const defaultMs = Math.round(fiveMinuteDefaultMs * (params.durationSeconds / 300));
+  return parsePositiveInteger(process.env[assetIntervalKey] || process.env[intervalOnlyKey], defaultMs);
 }
 
 function parseProfileStatus(value: string | undefined, fallback: MarketProfile['status']): MarketProfile['status'] {

@@ -702,12 +702,15 @@ no hedge and original side loses => -0.44/share
 如果最终仍是 single，cooldown 根据最新 hedge 结果决定：
 
 ```text
-base single                    => SINGLE_FILL_COOLDOWN_BASE_MS              默认 30m
-hedge blocked by price/cost cap => SINGLE_FILL_COOLDOWN_PRICE_CAP_MS         默认 60m
-hedge failed by API/cancel/post => SINGLE_FILL_COOLDOWN_EXECUTION_MS         默认 2h
-2h 内第 2 次 final single       => max(current, SINGLE_FILL_COOLDOWN_SECOND_MS) 默认 2h
-2h 内第 3 次及以上              => max(current, SINGLE_FILL_COOLDOWN_THIRD_MS)  默认 4h
+base single                    => profile cooldown base       默认 BTC 5m 30m / BTC 15m 90m / BTC 1h 6h
+hedge blocked by price/cost cap => profile cooldown price-cap  默认 BTC 5m 60m / BTC 15m 3h / BTC 1h 12h
+hedge failed by API/cancel/post => profile cooldown execution  默认 BTC 5m 2h / BTC 15m 6h / BTC 1h 24h
+窗口内第 2 次 final single       => max(current, profile cooldown second-repeat)
+窗口内第 3 次及以上              => max(current, profile cooldown third-repeat)
 ```
+
+单个 profile 可以用 `BTC_15M_SINGLE_FILL_COOLDOWN_BASE_MS` 这类 asset+interval
+变量覆盖；整个 interval 可以用 `15M_SINGLE_FILL_COOLDOWN_BASE_MS` 这类变量覆盖。
 
 这个规则把 4h 从固定主观值改成递增故障保护：普通 single 不会直接跳过 48 轮，只有连续 single 或执行层失败才会升到长暂停。
 

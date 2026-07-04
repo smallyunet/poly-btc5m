@@ -136,12 +136,12 @@ MIN_PARTICIPATION_TOP_HOLDER_SHARES_PER_SIDE=300
 MIN_PARTICIPATION_TOP_POSITION_PNL=40
 MIN_PARTICIPATION_POSITION_PNL_SUM=100
 MAX_PARTICIPATION_HOLDER_CONCENTRATION=0.75
-SINGLE_FILL_COOLDOWN_BASE_MS=900000
-SINGLE_FILL_COOLDOWN_PRICE_CAP_MS=1800000
-SINGLE_FILL_COOLDOWN_EXECUTION_MS=3600000
-SINGLE_FILL_COOLDOWN_REPEAT_WINDOW_MS=3600000
-SINGLE_FILL_COOLDOWN_SECOND_MS=3600000
-SINGLE_FILL_COOLDOWN_THIRD_MS=3600000
+BTC_5M_SINGLE_FILL_COOLDOWN_BASE_MS=1800000
+BTC_5M_SINGLE_FILL_COOLDOWN_PRICE_CAP_MS=3600000
+BTC_5M_SINGLE_FILL_COOLDOWN_EXECUTION_MS=7200000
+BTC_5M_SINGLE_FILL_COOLDOWN_REPEAT_WINDOW_MS=7200000
+BTC_5M_SINGLE_FILL_COOLDOWN_SECOND_MS=7200000
+BTC_5M_SINGLE_FILL_COOLDOWN_THIRD_MS=14400000
 SINGLE_FILL_HEDGE_ENABLED=true
 SINGLE_FILL_EARLY_HEDGE_WINDOW_SECONDS=60
 SINGLE_FILL_EARLY_HEDGE_MAX_PAIR_COST=1.02
@@ -181,7 +181,7 @@ Live entry orders are configured as CLOB limit order `price + size`:
 - `SINGLE_FILL_HEDGE_*` controls the 30s-to-15s final risk hedge. It can accept the wider final pair-cost cap to avoid carrying a single-sided exposure into settlement.
 - `SINGLE_FILL_EMERGENCY_HEDGE_*` controls the 15s-to-5s emergency hedge. It can accept a larger locked loss, up to the emergency missing-side price and pair-cost caps, only at the end of the round.
 - `SINGLE_FILL_PROFIT_EXIT_*` controls the single-fill take-profit exit. The capped FAK SELL limit must realize at least `SINGLE_FILL_PROFIT_EXIT_MIN_RATE` profit on the filled side and at least `SINGLE_FILL_PROFIT_EXIT_MIN_PNL_USD`; stale quotes above `SINGLE_FILL_PROFIT_EXIT_MAX_ORDERBOOK_AGE_MS` are rejected.
-- Final single-fill cooldown is adaptive and only applies to rounds with tracked strategy BUY orders. External/manual fills without local strategy orders are ignored. Base final singles pause entries for 15 minutes, price-cap hedge misses pause for 30 minutes, execution/API/cancel/post failures pause for 1 hour, and repeated final singles inside 1 hour stay capped at 1 hour.
+- Final single-fill cooldown is adaptive, profile-scoped, and only applies to rounds with tracked strategy BUY orders. External/manual fills without local strategy orders are ignored. Defaults scale from BTC 5m by interval duration: BTC 5m uses 30m / 60m / 2h / 2h / 2h / 4h for base, price-cap, execution, repeat-window, second-repeat, and third-repeat; BTC 15m uses 3x those values; BTC 1h uses 12x. Override a profile with keys like `BTC_15M_SINGLE_FILL_COOLDOWN_BASE_MS`, or an interval with `15M_SINGLE_FILL_COOLDOWN_BASE_MS`.
 
 ## Docker
 
