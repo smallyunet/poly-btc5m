@@ -10,7 +10,7 @@ import { TelegramNotifier } from './telegramNotifier';
 
 async function main() {
   const config = loadConfig();
-  const store = new InMemoryStore(config.executionMode, config.tickIntervalMs, { persistencePath: config.runtimeStatePath, maxRecords: config.runtimeMaxRecords }, config.activeStrategyProfile);
+  const store = new InMemoryStore(config.executionMode, config.tickIntervalMs, { persistencePath: config.runtimeStatePath, maxRecords: config.runtimeMaxRecords }, config.activeStrategyProfile, entryRuntimeConfig(config));
   const adapter = new PolymarketAdapter({
     clobApiUrl: config.clobApiUrl,
     chainId: config.chainId,
@@ -62,6 +62,26 @@ async function main() {
   app.listen(config.port, () => {
     console.log(`[api] listening on :${config.port}`);
   });
+}
+
+function entryRuntimeConfig(config: ReturnType<typeof loadConfig>) {
+  return {
+    dynamicLimitEnabled: config.dynamicLimitEnabled,
+    dualLimitPrice: config.dualLimitPrice,
+    dynamicSharesEnabled: config.dynamicSharesEnabled,
+    orderSharesPerSide: config.orderSharesPerSide,
+    maxOrderSharesPerSide: config.maxOrderSharesPerSide,
+    minOrderShares: config.minOrderShares,
+    minLiveChopScore: config.minLiveChopScore,
+    bypassEntryScoreGating: config.bypassEntryScoreGating,
+    bypassSingleFillCooldown: config.bypassSingleFillCooldown,
+    entryConfirmTicks: config.entryConfirmTicks,
+    entryMinSecondsToStart: config.entryMinSecondsToStart,
+    maxPairCost: config.maxPairCost,
+    maxOrderbookAgeSeconds: config.maxOrderbookAgeSeconds,
+    maxEntryQueueImbalance: config.maxEntryQueueImbalance,
+    participationEnabled: config.participationEnabled,
+  };
 }
 
 void main().catch((error) => {

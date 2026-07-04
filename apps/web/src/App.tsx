@@ -12,6 +12,7 @@ import {
   History,
   Terminal,
   Cpu,
+  SlidersHorizontal,
   Search,
   Info,
   Users
@@ -661,6 +662,22 @@ export function App() {
   const entryLimit = entryCheck?.limitPrice;
   const entryPairCost = entryLimit == null ? null : entryLimit * 2;
   const entryPairEdge = entryPairCost == null ? null : 1 - entryPairCost;
+  const entryConfig = state.runtime.entryConfig;
+  const entryBypassActive = Boolean(entryConfig?.bypassEntryScoreGating);
+  const fixedLimitActive = Boolean(entryConfig && !entryConfig.dynamicLimitEnabled);
+  const fixedSharesActive = Boolean(entryConfig && !entryConfig.dynamicSharesEnabled);
+  const fixedLimitLabel = entryConfig ? entryConfig.dualLimitPrice.toFixed(3) : '-';
+  const fixedSharesLabel = entryConfig ? formatShares(entryConfig.orderSharesPerSide) : '-';
+  const pricePolicyLabel = entryConfig
+    ? fixedLimitActive ? `FIXED ${fixedLimitLabel}` : 'SCORE PRICE'
+    : 'UNKNOWN';
+  const sizePolicyLabel = entryConfig
+    ? fixedSharesActive ? `FIXED ${fixedSharesLabel}` : 'SCORE SIZE'
+    : 'UNKNOWN';
+  const entryConfigValue = entryBypassActive ? 'BYPASS ALL' : 'RULE GATED';
+  const entryConfigDetail = entryConfig
+    ? `${pricePolicyLabel} / ${sizePolicyLabel} / ${entryConfig.bypassSingleFillCooldown || entryBypassActive ? 'cooldown bypass' : 'cooldown gate'}`
+    : 'runtime entry config unavailable';
   const entryCooldownActive = Boolean(state.runtime.entryCooldownUntil && new Date(state.runtime.entryCooldownUntil).getTime() > Date.now());
   const entryCooldownRemaining = formatCooldownRemaining(state.runtime.entryCooldownUntil);
   const entryCooldownReason = state.runtime.entryCooldownReason || 'no single-fill lockout';
@@ -678,6 +695,19 @@ export function App() {
   const entryWindowPassed = decisionWindowCondition?.passed ?? false;
   const scoreInfo = scoreTier(snapshot.features.chopScore);
   const scoreParts = scoreBreakdown(snapshot.features);
+  const scoreMetricValue = entryBypassActive ? 'BYPASSED' : formatNumber(snapshot.features.chopScore, 1);
+  const scoreMetricDetail = entryBypassActive
+    ? `current score ${formatNumber(snapshot.features.chopScore, 1)} is diagnostic only`
+    : `${scoreInfo.label}; ${scoreInfo.next}`;
+  const priceSizeValue = entryConfig
+    ? `${pricePolicyLabel} / ${sizePolicyLabel}`
+    : `${scoreInfo.price} / ${scoreInfo.size}`;
+  const priceSizeDetail = entryConfig
+    ? fixedLimitActive || fixedSharesActive
+      ? `env policy active; score tier ${scoreInfo.price} / ${scoreInfo.size} is diagnostic`
+      : `score policy active; ${scoreInfo.next}`
+    : entryLimit == null ? 'waiting for strategy cap' : `active limit ${entryLimit.toFixed(3)}, ${scoreInfo.next}`;
+  const priceSizeTone = entryBypassActive || fixedLimitActive || fixedSharesActive ? 'neutral' : scoreInfo.tone;
   const currentEntryIntents = state.intents.filter((intent) => (
     intent.roundId === snapshot.round.id
     && intent.strategy === 'BTC5M_DUAL_45'
@@ -809,6 +839,13 @@ export function App() {
             tone={state.runtime.activeStrategyProfile === 'experiment_next_round' ? 'warn' : 'neutral'}
           />
           <Digest
+            icon={<SlidersHorizontal size={16} />}
+            label="Entry Config"
+            value={entryConfigValue}
+            detail={entryConfigDetail}
+            tone={entryBypassActive ? 'warn' : fixedLimitActive || fixedSharesActive ? 'neutral' : 'good'}
+          />
+          <Digest
             icon={<Radio size={16} />}
             label="Feeds Connection"
             value={state.feed.source.toUpperCase()}
@@ -876,15 +913,21 @@ export function App() {
                   />
                   <DecisionMetric
                     label="BTC Dynamic Score"
-                    value={formatNumber(snapshot.features.chopScore, 1)}
-                    detail={`${scoreInfo.label}; ${scoreInfo.next}`}
-                    tone={btcDecisionPassed ? 'good' : 'bad'}
+                    value={scoreMetricValue}
+                    detail={scoreMetricDetail}
+                    tone={entryBypassActive ? 'neutral' : btcDecisionPassed ? 'good' : 'bad'}
                   />
                   <DecisionMetric
-                    label="Score Price / Size"
-                    value={`${scoreInfo.price} / ${scoreInfo.size}`}
-                    detail={entryLimit == null ? 'waiting for strategy cap' : `active limit ${entryLimit.toFixed(3)}, ${scoreInfo.next}`}
-                    tone={scoreInfo.tone}
+                    label="Entry Price / Size"
+                    value={priceSizeValue}
+                    detail={priceSizeDetail}
+                    tone={priceSizeTone}
+                  />
+                  <DecisionMetric
+                    label="Entry Bypass"
+                    value={entryConfigValue}
+                    detail={entryBypassActive ? 'strategy blockers and entry quote gate are bypassed' : `live score floor ${entryConfig?.minLiveChopScore ?? 80}; confirmation ${entryConfig?.entryConfirmTicks ?? 3} ticks`}
+                    tone={entryBypassActive ? 'warn' : 'neutral'}
                   />
                   <DecisionMetric
                     label="Entry Limit"

@@ -29,9 +29,28 @@ export type BotRuntimeStatus = {
   activeStrategyProfile: StrategyProfile;
   entryCooldownUntil?: string;
   entryCooldownReason?: string;
+  entryConfig?: EntryRuntimeConfig;
   experimentStoppedAt?: string;
   experimentStoppedReason?: string;
   experimentStoppedRoundId?: string;
+};
+
+export type EntryRuntimeConfig = {
+  dynamicLimitEnabled: boolean;
+  dualLimitPrice: number;
+  dynamicSharesEnabled: boolean;
+  orderSharesPerSide: number;
+  maxOrderSharesPerSide: number;
+  minOrderShares: number;
+  minLiveChopScore: number;
+  bypassEntryScoreGating: boolean;
+  bypassSingleFillCooldown: boolean;
+  entryConfirmTicks: number;
+  entryMinSecondsToStart: number;
+  maxPairCost: number;
+  maxOrderbookAgeSeconds: number;
+  maxEntryQueueImbalance: number;
+  participationEnabled: boolean;
 };
 
 export type BtcRoundConfig = {

@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { STRATEGY_RULES } from '../../../packages/strategy/src';
-import type { BotRuntimeStatus, DashboardState, DataFeedStatus, ExecutionMode, FillRecord, OrderRecord, RuntimeLogRecord, SettlementRecord, StateSnapshot, StrategyCheck, StrategyId, StrategyProfile, TradeIntent } from '../../../packages/shared/src';
+import type { BotRuntimeStatus, DashboardState, DataFeedStatus, EntryRuntimeConfig, ExecutionMode, FillRecord, OrderRecord, RuntimeLogRecord, SettlementRecord, StateSnapshot, StrategyCheck, StrategyId, StrategyProfile, TradeIntent } from '../../../packages/shared/src';
 
 type OpenOrderLike = {
   id: string;
@@ -121,7 +121,7 @@ export class InMemoryStore {
   private readonly persistencePath?: string;
   private readonly maxRecords: number;
 
-  constructor(mode: ExecutionMode, private readonly tickIntervalMs: number, options: StoreOptions = {}, activeStrategyProfile: StrategyProfile = 'classic') {
+  constructor(mode: ExecutionMode, private readonly tickIntervalMs: number, options: StoreOptions = {}, activeStrategyProfile: StrategyProfile = 'classic', entryConfig?: EntryRuntimeConfig) {
     this.persistencePath = options.persistencePath === false ? undefined : options.persistencePath;
     this.maxRecords = options.maxRecords ?? 10_000;
     const startedAt = new Date();
@@ -136,6 +136,7 @@ export class InMemoryStore {
       buildTime: optionalEnv('BUILD_TIME'),
       dockerReady: true,
       activeStrategyProfile,
+      entryConfig,
     };
     this.loadPersistedState();
   }
