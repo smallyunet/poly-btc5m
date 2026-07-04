@@ -15,7 +15,22 @@ packages/polymarket   Local Polymarket CLOB adapter
 configs               Non-secret market/round configs
 deploy                Docker/Caddy/Nginx deployment files
 docs                  Strategy notes
+skills                Scenario guides for monitor, live, Docker, deploy, and troubleshooting flows
 ```
+
+## Skills / Scenario Guides
+
+Focused scenario guides live under `skills/`:
+
+- `skills/btc5m-monitor/` - first run and monitor-mode dashboard validation.
+- `skills/btc5m-live/` - live trading setup, safety checklist, and risk knobs.
+- `skills/btc5m-docker/` - local Docker run path.
+- `skills/btc5m-deploy/` - server deployment with Docker Compose and Caddy.
+- `skills/btc5m-troubleshooting/` - feed, round, order, and dashboard diagnosis.
+
+Start with `skills/btc5m-monitor/SKILL.md`. The safe default is always
+`EXECUTION_MODE=monitor`; switch to `live` only after feeds, round discovery,
+orderbooks, wallet config, and dashboard state are verified.
 
 ## Local Development
 
