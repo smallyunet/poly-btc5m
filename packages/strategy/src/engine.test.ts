@@ -248,6 +248,24 @@ test('bypasses entry blockers except single-fill cooldown when entry bypass is e
   }
 });
 
+test('does not bypass missing round token ids with entry score bypass enabled', () => {
+  const snapshot = { ...baseSnapshot({ chopScore: 12 }), regime: 'LOW_ACTIVITY' as const };
+  snapshot.round = {
+    ...snapshot.round,
+    yesTokenId: '',
+    noTokenId: '',
+  };
+  snapshot.orderbooks = [];
+
+  const result = evaluateEntry(snapshot, { ...risk, dryRun: false, bypassEntryScoreGating: true });
+
+  assert.equal(result.intents.length, 0);
+  assert.equal(result.rejected.length, 2);
+  assert.match(result.rejected[0].rejectionReason || '', /ROUND_TOKENS_MISSING/);
+  assert.equal(result.checks[0].conditions.find((condition) => condition.label === 'Round token ids')?.passed, false);
+  assert.doesNotMatch(result.checks[0].conditions.find((condition) => condition.label === 'Round token ids')?.actual || '', /bypassed/);
+});
+
 test('keeps base shares for mid-score entries', () => {
   const snapshot = { ...baseSnapshot({ ...chopFeatures(), chopScore: 90 }), regime: 'CHOP' as const };
   const result = evaluateEntry(snapshot, risk);

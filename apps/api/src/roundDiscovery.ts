@@ -47,9 +47,9 @@ export class RecurringCryptoRoundDiscovery {
     const candidates = upcomingRoundWindow(profile, nextRoundStartSec, 6);
     for (const candidate of candidates) {
       const result = await this.marketFromSlug(candidate.slug);
-      if (!isUsableMarket(result.market, profile)) continue;
+      if (!isUsableMarket(result.market, profile, candidate.slug)) continue;
       return {
-        round: this.marketToRound(profile, result.market, params.latestPrice, params.persistedStrike),
+        round: this.marketToRound(profile, result.market, params.latestPrice, params.persistedStrike, candidate.roundStartSec),
         diagnostics,
       };
     }
@@ -73,9 +73,9 @@ export class RecurringCryptoRoundDiscovery {
     return result;
   }
 
-  private marketToRound(profile: MarketProfile, market: GammaMarket, latestPrice?: number | null, persistedStrike?: (roundId: string) => number | undefined): BtcRoundConfig {
+  private marketToRound(profile: MarketProfile, market: GammaMarket, latestPrice?: number | null, persistedStrike?: (roundId: string) => number | undefined, candidateRoundStartSec?: number): BtcRoundConfig {
     const slug = String(market.slug || '');
-    const roundStartSec = parseRoundStartSec(slug, profile);
+    const roundStartSec = parseRoundStartSec(slug, profile, candidateRoundStartSec);
     const endAt = normalizeDate(market.endDate) || new Date((roundStartSec + profile.roundDurationSeconds) * 1000).toISOString();
     const startAt = new Date(roundStartSec * 1000).toISOString();
     const tokenIds = parseStringArray(market.clobTokenIds);
@@ -109,17 +109,57 @@ function stringValue(value: unknown): string | undefined {
 
 function upcomingRoundWindow(profile: MarketProfile, anchorRoundStartSec: number, futureCount: number): Array<{ slug: string; roundStartSec: number }> {
   const items: Array<{ slug: string; roundStartSec: number }> = [];
+  const seen = new Set<string>();
   for (let offset = 0; offset <= futureCount; offset += 1) {
     const roundStartSec = anchorRoundStartSec + offset * profile.roundDurationSeconds;
-    items.push({ slug: `${profile.seriesSlug}-${roundStartSec}`, roundStartSec });
+    for (const slug of roundSlugCandidates(profile, roundStartSec)) {
+      if (seen.has(slug)) continue;
+      seen.add(slug);
+      items.push({ slug, roundStartSec });
+    }
   }
   return items;
 }
 
-function isUsableMarket(market: GammaMarket | null, profile: MarketProfile): market is GammaMarket {
+function roundSlugCandidates(profile: MarketProfile, roundStartSec: number): string[] {
+  const slugs = [`${profile.seriesSlug}-${roundStartSec}`];
+  const hourlySlug = hourlyHumanSlug(profile, roundStartSec);
+  if (hourlySlug) slugs.push(hourlySlug);
+  return slugs;
+}
+
+function hourlyHumanSlug(profile: MarketProfile, roundStartSec: number): string | null {
+  if (profile.interval !== '1h') return null;
+  const assetName = {
+    btc: 'bitcoin',
+    eth: 'ethereum',
+    sol: 'solana',
+  }[profile.asset];
+  const marketStartMs = (roundStartSec - profile.roundDurationSeconds) * 1000;
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    hour12: true,
+  }).formatToParts(new Date(marketStartMs));
+  const part = (type: string) => parts.find((item) => item.type === type)?.value || '';
+  const month = part('month').toLowerCase();
+  const day = part('day');
+  const year = part('year');
+  const hour = part('hour').toLowerCase();
+  const dayPeriod = part('dayPeriod').toLowerCase();
+  if (!month || !day || !year || !hour || !dayPeriod) return null;
+  return `${assetName}-up-or-down-${month}-${day}-${year}-${hour}${dayPeriod}-et`;
+}
+
+function isUsableMarket(market: GammaMarket | null, profile: MarketProfile, expectedSlug?: string): market is GammaMarket {
   if (!market || market.active === false || market.closed === true) return false;
   const slug = String(market.slug || '');
-  if (!new RegExp(`^${escapeRegExp(profile.seriesSlug)}-\\d+$`).test(slug)) return false;
+  const expected = expectedSlug ? slug === expectedSlug : false;
+  const deterministic = new RegExp(`^${escapeRegExp(profile.seriesSlug)}-\\d+$`).test(slug);
+  if (!expected && !deterministic) return false;
   const tokenIds = parseStringArray(market.clobTokenIds);
   const outcomes = parseStringArray(market.outcomes).map((item) => item.toLowerCase());
   return tokenIds.length >= 2 && outcomes.includes('up') && outcomes.includes('down');
@@ -138,10 +178,13 @@ function fallbackRound(profile: MarketProfile, nextRoundStartSec: number, latest
   };
 }
 
-function parseRoundStartSec(slug: string, profile: MarketProfile): number {
+function parseRoundStartSec(slug: string, profile: MarketProfile, fallback?: number): number {
   const match = slug.match(new RegExp(`${escapeRegExp(profile.seriesSlug)}-(\\d+)$`));
   const parsed = Number(match?.[1]);
-  if (!Number.isFinite(parsed) || parsed <= 0) return Math.floor(Date.now() / 1000 / profile.roundDurationSeconds) * profile.roundDurationSeconds;
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    if (Number.isFinite(fallback) && Number(fallback) > 0) return Math.floor(Number(fallback));
+    return Math.floor(Date.now() / 1000 / profile.roundDurationSeconds) * profile.roundDurationSeconds;
+  }
   return Math.floor(parsed);
 }
 

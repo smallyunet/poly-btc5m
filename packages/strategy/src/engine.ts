@@ -75,6 +75,7 @@ export function evaluateEntry(snapshot: StateSnapshot, config: StrategyRiskConfi
   const reasons: string[] = [];
   const entryBypass = config.bypassEntryScoreGating;
   const inDecisionWindow = snapshot.round.secondsToStart <= config.entryOrderTtlSeconds && snapshot.round.secondsToStart >= config.entryMinSecondsToStart;
+  const roundTokensPassed = Boolean(snapshot.round.yesTokenId && snapshot.round.noTokenId);
   const yesQuote = quoteFor(snapshot, snapshot.round.yesTokenId);
   const noQuote = quoteFor(snapshot, snapshot.round.noTokenId);
   const booksTradable = buyQuoteReady(yesQuote, config) && buyQuoteReady(noQuote, config);
@@ -106,6 +107,7 @@ export function evaluateEntry(snapshot: StateSnapshot, config: StrategyRiskConfi
   const participationPassed = entryBypass || !participation.blocked;
 
   if (!cooldownPassed) reasons.push('SINGLE_FILL_COOLDOWN');
+  if (!roundTokensPassed) reasons.push('ROUND_TOKENS_MISSING');
   if (!decisionWindowPassed) reasons.push('NOT_IN_DECISION_WINDOW');
   if (!scoreGatingPassed) reasons.push(`REGIME_${snapshot.regime}`);
   if (!booksTradablePassed) reasons.push('ORDERBOOK_NOT_TRADABLE');
@@ -142,6 +144,7 @@ export function evaluateEntry(snapshot: StateSnapshot, config: StrategyRiskConfi
     conditions: [
       condition('Decision window', decisionWindowPassed, entryBypass ? `${snapshot.round.secondsToStart.toFixed(1)}s to start / min ${config.entryMinSecondsToStart}s (bypassed)` : `${snapshot.round.secondsToStart.toFixed(1)}s to start / min ${config.entryMinSecondsToStart}s`),
       condition('Single-fill cooldown', cooldownPassed, config.bypassSingleFillCooldown && cooldownActive ? `${cooldownLabel(config.entryCooldownUntil, config.entryCooldownReason)} (bypassed)` : cooldownActive ? cooldownLabel(config.entryCooldownUntil, config.entryCooldownReason) : 'inactive'),
+      condition('Round token ids', roundTokensPassed, roundTokensPassed ? 'YES/NO token ids present' : 'missing YES or NO token id'),
       condition('Regime is CHOP', scoreGatingPassed, entryBypass ? `${snapshot.regime} (bypassed)` : snapshot.regime),
       condition('CHOP score threshold', chopScoreThresholdPassed, entryBypass ? `${snapshot.features.chopScore.toFixed(1)} / ${config.minChopScore} (bypassed)` : `${snapshot.features.chopScore.toFixed(1)} / ${config.minChopScore}`),
       condition('center cross_120s threshold', centerCrossThresholdPassed, entryBypass ? `${centerCrosses} / ${config.minCross120s} (bypassed)` : `${centerCrosses} / ${config.minCross120s}`),
