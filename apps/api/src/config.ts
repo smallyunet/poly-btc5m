@@ -90,7 +90,7 @@ export type AppConfig = {
 };
 
 export function loadConfig(): AppConfig {
-  const orderSharesPerSide = numberEnv('ORDER_SHARES_PER_SIDE', 10);
+  const orderSharesPerSide = numberEnv('ORDER_SHARES_PER_SIDE', 5);
   return {
     port: Number(process.env.PORT || 8788),
     dashboardInternalApiKey: process.env.DASHBOARD_INTERNAL_API_KEY,
@@ -109,12 +109,12 @@ export function loadConfig(): AppConfig {
     binancePriceSampleMs: parsePositiveInteger(process.env.BINANCE_PRICE_SAMPLE_MS, 1_000),
     clobWsUrl: clobWsUrl(process.env.POLYMARKET_CLOB_WS_URL),
     dualLimitPrice: numberEnv('DUAL_LIMIT_PRICE', 0.45),
-    dynamicLimitEnabled: booleanEnv('DYNAMIC_LIMIT_ENABLED', true),
+    dynamicLimitEnabled: booleanEnv('DYNAMIC_LIMIT_ENABLED', false),
     minDynamicLimitPrice: numberEnv('MIN_DYNAMIC_LIMIT_PRICE', 0.42),
     maxDynamicLimitPrice: numberEnv('MAX_DYNAMIC_LIMIT_PRICE', 0.46),
     maxPairCost: numberEnv('MAX_PAIR_COST', 0.92),
     orderSharesPerSide,
-    dynamicSharesEnabled: booleanEnv('DYNAMIC_SHARES_ENABLED', true),
+    dynamicSharesEnabled: booleanEnv('DYNAMIC_SHARES_ENABLED', false),
     maxOrderSharesPerSide: numberEnv('MAX_ORDER_SHARES_PER_SIDE', orderSharesPerSide * 1.25),
     minOrderShares: numberEnv('MIN_ORDER_SHARES', 5),
     maxOrderbookAgeSeconds: numberEnv('MAX_ORDERBOOK_AGE_SECONDS', 5),
@@ -127,8 +127,8 @@ export function loadConfig(): AppConfig {
     maxDriftRatio120s: numberEnv('MAX_DRIFT_RATIO_120S', 0.45),
     maxMomentumRatio30s: numberEnv('MAX_MOMENTUM_RATIO_30S', 0.55),
     maxEntryQueueImbalance: numberEnv('MAX_ENTRY_QUEUE_IMBALANCE', 5),
-    minLiveChopScore: numberEnv('MIN_LIVE_CHOP_SCORE', 80),
-    bypassEntryScoreGating: booleanEnv('BYPASS_ENTRY_SCORE_GATING', false),
+    minLiveChopScore: numberEnv('MIN_LIVE_CHOP_SCORE', 70),
+    bypassEntryScoreGating: booleanEnv('BYPASS_ENTRY_SCORE_GATING', true),
     bypassSingleFillCooldown: booleanEnv('BYPASS_SINGLE_FILL_COOLDOWN', false),
     entryConfirmTicks: parsePositiveInteger(process.env.ENTRY_CONFIRM_TICKS, 3),
     entryMinSecondsToStart: parsePositiveInteger(process.env.ENTRY_MIN_SECONDS_TO_START, 15),
@@ -169,7 +169,7 @@ export function loadConfig(): AppConfig {
     experimentNextRoundDownLimitPrice: numberEnv('EXPERIMENT_NEXT_ROUND_DOWN_LIMIT_PRICE', 0.49),
     experimentNextRoundSharesPerSide: numberEnv('EXPERIMENT_NEXT_ROUND_SHARES_PER_SIDE', orderSharesPerSide),
     experimentStopOnSingle: booleanEnv('EXPERIMENT_STOP_ON_SINGLE', true),
-    telegramNotifyEnabled: booleanEnv('TELEGRAM_NOTIFY_ENABLED', false),
+    telegramNotifyEnabled: booleanEnv('TELEGRAM_NOTIFY_ENABLED', true),
     telegramBotToken: process.env.TELEGRAM_BOT_TOKEN,
     telegramChatId: process.env.TELEGRAM_CHAT_ID || process.env.TELEGRAM_USER_ID,
     telegramRoundSummaryOnOrderOnly: booleanEnv('TELEGRAM_ROUND_SUMMARY_ON_ORDER_ONLY', true),
@@ -189,6 +189,7 @@ function loadMarketConfig(): BtcMarketConfig {
 }
 
 function parseExecutionMode(value: string | undefined): ExecutionMode {
+  if (!value?.trim()) return 'live';
   return value === 'live' ? 'live' : 'monitor';
 }
 

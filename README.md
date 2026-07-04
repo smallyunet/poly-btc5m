@@ -28,9 +28,9 @@ Focused scenario guides live under `skills/`:
 - `skills/btc5m-deploy/` - server deployment with Docker Compose and Caddy.
 - `skills/btc5m-troubleshooting/` - feed, round, order, and dashboard diagnosis.
 
-Start with `skills/btc5m-monitor/SKILL.md`. The safe default is always
-`EXECUTION_MODE=monitor`; switch to `live` only after feeds, round discovery,
-orderbooks, wallet config, and dashboard state are verified.
+Start with `skills/btc5m-monitor/SKILL.md` for dry-run validation. The current
+production default is `EXECUTION_MODE=live`; use `monitor` when feeds, round
+discovery, orderbooks, wallet config, or dashboard state still need validation.
 
 ## Local Development
 
@@ -45,7 +45,7 @@ npm run dev:api
 
 Open the dashboard at http://localhost:8788.
 
-The default mode is `EXECUTION_MODE=monitor`. In monitor mode the worker records local order intents but does not post CLOB orders.
+The production default mode is `EXECUTION_MODE=live`. In monitor mode the worker records local order intents but does not post CLOB orders.
 
 ## Runtime Model
 
@@ -98,13 +98,13 @@ Strategy thresholds:
 
 ```dotenv
 DUAL_LIMIT_PRICE=0.45
-DYNAMIC_LIMIT_ENABLED=true
+DYNAMIC_LIMIT_ENABLED=false
 MIN_DYNAMIC_LIMIT_PRICE=0.42
 MAX_DYNAMIC_LIMIT_PRICE=0.46
 MAX_PAIR_COST=0.92
-ORDER_SHARES_PER_SIDE=10
-DYNAMIC_SHARES_ENABLED=true
-MAX_ORDER_SHARES_PER_SIDE=12.5
+ORDER_SHARES_PER_SIDE=5
+DYNAMIC_SHARES_ENABLED=false
+MAX_ORDER_SHARES_PER_SIDE=6.25
 MIN_ORDER_SHARES=5
 MIN_CROSS_120S=2
 MAX_ABS_DRIFT_120S=40
@@ -115,8 +115,8 @@ MIN_BI_EXCURSION_BPS_120S=1
 MAX_DRIFT_RATIO_120S=0.45
 MAX_MOMENTUM_RATIO_30S=0.55
 MAX_ENTRY_QUEUE_IMBALANCE=5
-MIN_LIVE_CHOP_SCORE=80
-BYPASS_ENTRY_SCORE_GATING=false
+MIN_LIVE_CHOP_SCORE=70
+BYPASS_ENTRY_SCORE_GATING=true
 BYPASS_SINGLE_FILL_COOLDOWN=false
 ENTRY_CONFIRM_TICKS=3
 PARTICIPATION_ENABLED=true
@@ -164,7 +164,7 @@ Live entry orders are configured as CLOB limit order `price + size`:
 - `SINGLE_FILL_HEDGE_*` controls the 30s-to-15s final risk hedge. It can accept the wider final pair-cost cap to avoid carrying a single-sided exposure into settlement.
 - `SINGLE_FILL_EMERGENCY_HEDGE_*` controls the 15s-to-5s emergency hedge. It can accept a larger locked loss, up to the emergency missing-side price and pair-cost caps, only at the end of the round.
 - `SINGLE_FILL_PROFIT_EXIT_*` controls the single-fill take-profit exit. The filled side must have a fresh live bid at or above `SINGLE_FILL_PROFIT_EXIT_MIN_PRICE`, the capped FAK SELL limit must realize at least `SINGLE_FILL_PROFIT_EXIT_MIN_PNL_USD`, and stale quotes above `SINGLE_FILL_PROFIT_EXIT_MAX_ORDERBOOK_AGE_MS` are rejected.
-- Final single-fill cooldown is adaptive and only applies to rounds with tracked strategy BUY orders. External/manual fills without local strategy orders are ignored. Base final singles pause entries for 30 minutes, price-cap hedge misses pause for 1 hour, execution/API/cancel/post failures pause for 2 hours, and repeated final singles inside 2 hours escalate to 2 hours then 4 hours.
+- Final single-fill cooldown is adaptive and only applies to rounds with tracked strategy BUY orders. External/manual fills without local strategy orders are ignored. Base final singles pause entries for 15 minutes, price-cap hedge misses pause for 30 minutes, execution/API/cancel/post failures pause for 1 hour, and repeated final singles inside 1 hour stay capped at 1 hour.
 
 ## Docker
 
