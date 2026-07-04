@@ -490,7 +490,8 @@ export class InMemoryStore {
       dirty ||= this.pendingSingleFillReviewRoundIds.size !== before;
     }
 
-    if (this.getActiveEntryCooldown(nowMs)) return null;
+    const activeCooldown = this.getActiveEntryCooldown(nowMs);
+    const cooldownCandidates: SingleFillCooldownRecord[] = [];
 
     for (const roundId of this.pendingSingleFillReviewRoundIds) {
       if (this.singleFillCooldownRoundIds.has(roundId)) continue;
@@ -504,12 +505,13 @@ export class InMemoryStore {
         continue;
       }
 
-      const cooldownDecision = this.singleFillCooldownDecision(roundId, policy, nowMs);
+      const cooldownStartMs = finalSingleFillReviewMs(roundId) ?? nowMs;
+      const cooldownDecision = this.singleFillCooldownDecision(roundId, policy, cooldownStartMs);
       const record: SingleFillCooldownRecord = {
         roundId,
-        triggeredAt: new Date(nowMs).toISOString(),
-        finalizedAt: new Date(nowMs).toISOString(),
-        expiresAt: new Date(nowMs + cooldownDecision.cooldownMs).toISOString(),
+        triggeredAt: new Date(cooldownStartMs).toISOString(),
+        finalizedAt: new Date(cooldownStartMs).toISOString(),
+        expiresAt: new Date(cooldownStartMs + cooldownDecision.cooldownMs).toISOString(),
         yesShares: exposure.yesShares,
         noShares: exposure.noShares,
         category: cooldownDecision.category,
@@ -520,14 +522,28 @@ export class InMemoryStore {
         { roundId, triggeredAt: record.triggeredAt, category: cooldownDecision.category },
         ...this.singleFillCooldownEvents.filter((event) => nowMs - toTime(event.triggeredAt) <= policy.repeatWindowMs),
       ].slice(0, 100);
-      this.singleFillCooldown = record;
+      cooldownCandidates.push(record);
+    }
+
+    if (cooldownCandidates.length > 0) {
+      const activeCandidates = cooldownCandidates.filter((record) => toTime(record.expiresAt) > nowMs);
+      const selectableCooldowns = [activeCooldown, ...activeCandidates].filter((record): record is SingleFillCooldownRecord => Boolean(record));
+      if (!selectableCooldowns.length) {
+        if (dirty) this.persistState();
+        return null;
+      }
+      const nextCooldown = maxCooldown(selectableCooldowns);
+      const changedActiveCooldown = !activeCooldown
+        || activeCooldown.roundId !== nextCooldown.roundId
+        || activeCooldown.expiresAt !== nextCooldown.expiresAt;
+      this.singleFillCooldown = nextCooldown;
       this.runtime = {
         ...this.runtime,
-        entryCooldownUntil: record.expiresAt,
-        entryCooldownReason: `single fill on ${roundId} (${cooldownDecision.category})`,
+        entryCooldownUntil: nextCooldown.expiresAt,
+        entryCooldownReason: `single fill on ${nextCooldown.roundId}${nextCooldown.category ? ` (${nextCooldown.category})` : ''}`,
       };
       this.persistState();
-      return record;
+      return changedActiveCooldown ? nextCooldown : null;
     }
 
     if (dirty) this.persistState();
@@ -696,7 +712,7 @@ export class InMemoryStore {
     };
   }
 
-  private singleFillCooldownDecision(roundId: string, policy: SingleFillCooldownPolicy, nowMs: number): { cooldownMs: number; category: string; hedgeReason?: string; recentCount: number } {
+  private singleFillCooldownDecision(roundId: string, policy: SingleFillCooldownPolicy, referenceMs: number): { cooldownMs: number; category: string; hedgeReason?: string; recentCount: number } {
     const hedgeOutcome = this.singleFillHedgeOutcomes.get(roundId);
     const category = cooldownCategory(hedgeOutcome);
     const baseMs = category === 'price-cap'
@@ -704,7 +720,10 @@ export class InMemoryStore {
       : category === 'execution'
         ? policy.executionMs
         : policy.baseMs;
-    const recentCount = this.singleFillCooldownEvents.filter((event) => nowMs - toTime(event.triggeredAt) <= policy.repeatWindowMs).length + 1;
+    const recentCount = this.singleFillCooldownEvents.filter((event) => {
+      const eventMs = toTime(event.triggeredAt);
+      return eventMs <= referenceMs && referenceMs - eventMs <= policy.repeatWindowMs;
+    }).length + 1;
     const repeatMs = recentCount >= 3 ? policy.thirdMs : recentCount >= 2 ? policy.secondMs : 0;
     return {
       cooldownMs: Math.max(baseMs, repeatMs),
@@ -870,6 +889,11 @@ function cooldownCategory(outcome: SingleFillHedgeOutcome | undefined): string {
   return 'execution';
 }
 
+function maxCooldown(records: SingleFillCooldownRecord[]): SingleFillCooldownRecord {
+  if (!records.length) throw new Error('maxCooldown requires at least one cooldown record');
+  return records.reduce((max, record) => (toTime(record.expiresAt) > toTime(max.expiresAt) ? record : max));
+}
+
 function matchingOrderFills(order: OrderRecord, fills: FillRecord[]): FillRecord[] {
   const exact = order.clobOrderId
     ? fills.filter((fill) => fill.clobOrderId === order.clobOrderId && fillStrategy(fill) === orderStrategy(order))
@@ -920,6 +944,11 @@ function isRoundEnded(roundId: string, nowMs: number, graceMs: number): boolean 
   const startMs = roundStartMs(roundId);
   if (startMs == null) return false;
   return nowMs >= startMs + 5 * 60_000 + graceMs;
+}
+
+function finalSingleFillReviewMs(roundId: string): number | null {
+  const startMs = roundStartMs(roundId);
+  return startMs == null ? null : startMs + 5 * 60_000 + FINAL_SINGLE_FILL_GRACE_MS;
 }
 
 function roundStartMs(roundId: string): number | null {

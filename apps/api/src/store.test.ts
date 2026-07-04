@@ -98,7 +98,7 @@ test('uses shorter cooldown for price-capped single-fill hedge misses', () => {
 
   assert.equal(cooldown?.category, 'price-cap');
   assert.equal(cooldown?.hedgeReason, 'HEDGE_ASK_ABOVE_CAP');
-  assert.equal(new Date(cooldown?.expiresAt || 0).getTime(), nowMs + 60 * 60_000);
+  assert.equal(new Date(cooldown?.expiresAt || 0).getTime(), finalReviewMs(roundId) + 60 * 60_000);
 });
 
 test('escalates cooldown for repeated final single fills inside the repeat window', () => {
@@ -119,7 +119,29 @@ test('escalates cooldown for repeated final single fills inside the repeat windo
 
   assert.equal(cooldown?.roundId, secondRoundId);
   assert.equal(cooldown?.recentSingleFillCount, 2);
-  assert.equal(new Date(cooldown?.expiresAt || 0).getTime(), nowMs + 2 * 60 * 60_000);
+  assert.equal(new Date(cooldown?.expiresAt || 0).getTime(), finalReviewMs(secondRoundId) + 2 * 60 * 60_000);
+});
+
+test('does not queue stale pending cooldown after an active cooldown expires', () => {
+  const nowMs = Date.now();
+  const activeRoundId = roundIdFromStart(nowMs - 7 * 60_000);
+  const staleRoundId = roundIdFromStart(nowMs - 66 * 60_000);
+  const store = new InMemoryStore('live', 2_000, { persistencePath: false });
+
+  store.recordOrder(order(activeRoundId, 'YES'));
+  store.recordFills([fill(activeRoundId, 'YES')]);
+  store.maybeStartSingleFillCooldown([fill(activeRoundId, 'YES')], policy(), nowMs - 2 * 60_000);
+  const activeCooldown = store.maybeStartSingleFillCooldown([], policy(), nowMs);
+  assert.equal(activeCooldown?.roundId, activeRoundId);
+
+  store.recordOrder(order(staleRoundId, 'NO'));
+  store.recordFills([fill(staleRoundId, 'NO')]);
+  assert.equal(store.maybeStartSingleFillCooldown([fill(staleRoundId, 'NO')], policy(), nowMs), null);
+  assert.equal(store.getActiveEntryCooldown(nowMs)?.roundId, activeRoundId);
+
+  const afterActiveExpiresMs = finalReviewMs(activeRoundId) + policy().baseMs + 1;
+  assert.equal(store.getActiveEntryCooldown(afterActiveExpiresMs), null);
+  assert.equal(store.maybeStartSingleFillCooldown([], policy(), afterActiveExpiresMs), null);
 });
 
 test('does not scan historical fills without a pending final review', () => {
@@ -232,6 +254,10 @@ test('clears legacy cooldown records that were not created from final review', (
 
 function roundIdFromStart(startMs: number): string {
   return `btc-updown-5m-${Math.floor(startMs / 1000)}`;
+}
+
+function finalReviewMs(roundId: string): number {
+  return Number(roundId.match(/btc-updown-5m-(\d+)$/)?.[1]) * 1000 + 6 * 60_000;
 }
 
 function policy() {
