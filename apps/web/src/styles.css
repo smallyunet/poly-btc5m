@@ -158,6 +158,64 @@ button.primary:hover:not(:disabled) {
   gap: 10px;
 }
 
+.runtimeModeStrip {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.58);
+  box-shadow: 0 4px 18px rgba(15, 23, 42, 0.025);
+}
+
+.runtimeModeItem {
+  min-width: 0;
+  padding: 9px 11px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.72);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  border-left-width: 3px;
+}
+
+.runtimeModeItem.good { border-left-color: var(--color-success); }
+.runtimeModeItem.warn { border-left-color: var(--color-warning); }
+.runtimeModeItem.bad { border-left-color: var(--color-danger); }
+.runtimeModeItem.neutral { border-left-color: var(--color-neutral); }
+
+.runtimeModeItem span {
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.runtimeModeItem strong {
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.runtimeModeItem.good strong { color: var(--color-success); }
+.runtimeModeItem.warn strong { color: var(--color-warning); }
+.runtimeModeItem.bad strong { color: var(--color-danger); }
+
+.runtimeModeItem em {
+  color: var(--text-secondary);
+  font-style: normal;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .refreshStatus {
   min-height: 38px;
   padding: 0 12px;
@@ -479,6 +537,11 @@ button.primary:hover:not(:disabled) {
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.02);
 }
 
+.decisionPanelPrimary {
+  border-color: rgba(37, 99, 235, 0.18);
+  box-shadow: 0 8px 28px rgba(15, 23, 42, 0.045);
+}
+
 .decisionHeader {
   display: flex;
   justify-content: space-between;
@@ -511,9 +574,9 @@ button.primary:hover:not(:disabled) {
 
 .decisionSummary {
   display: grid;
-  grid-template-columns: minmax(0, 1.6fr) minmax(220px, 0.8fr);
+  grid-template-columns: minmax(0, 1.7fr) minmax(240px, 0.8fr);
   gap: 14px;
-  padding: 14px;
+  padding: 16px;
   border: 1px solid var(--border-color);
   border-radius: 8px;
   background: rgba(15, 23, 42, 0.025);
@@ -543,7 +606,7 @@ button.primary:hover:not(:disabled) {
   display: block;
   margin-top: 3px;
   font-family: var(--font-mono);
-  font-size: 20px;
+  font-size: 26px;
   line-height: 1.15;
   color: var(--text-primary);
   overflow-wrap: anywhere;
@@ -582,6 +645,12 @@ button.primary:hover:not(:disabled) {
   text-transform: uppercase;
 }
 
+.blockerChips.muted span {
+  border-color: rgba(100, 116, 139, 0.18);
+  background: rgba(100, 116, 139, 0.06);
+  color: var(--text-muted);
+}
+
 .decisionSummaryMeta {
   display: flex;
   flex-direction: column;
@@ -589,6 +658,12 @@ button.primary:hover:not(:disabled) {
   gap: 10px;
   padding-left: 14px;
   border-left: 1px solid var(--border-color);
+}
+
+.decisionSummaryFlags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .collapsiblePanel {
@@ -646,6 +721,14 @@ button.primary:hover:not(:disabled) {
   font-family: var(--font-mono);
   font-size: 12px;
   font-weight: 600;
+}
+
+.collapsiblePanel.diagnosticOnly {
+  opacity: 0.78;
+}
+
+.collapsiblePanel.diagnosticOnly > summary strong {
+  color: var(--color-warning);
 }
 
 .checksPanel {
@@ -1876,6 +1959,10 @@ td.mono {
     width: 100%;
   }
 
+  .runtimeModeStrip {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
   .digest {
     grid-template-columns: 1fr;
   }
@@ -1958,6 +2045,14 @@ td.mono {
     text-overflow: ellipsis;
   }
 
+  .runtimeModeStrip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .runtimeModeItem em {
+    white-space: normal;
+  }
+
   .digest {
     grid-template-columns: 1fr;
     gap: 10px;
@@ -1999,6 +2094,10 @@ td.mono {
 
   .decisionHeader {
     flex-direction: column;
+  }
+
+  .decisionSummary strong {
+    font-size: 22px;
   }
 
   .decisionGrid {

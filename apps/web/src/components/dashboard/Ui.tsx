@@ -2,8 +2,29 @@ import React from 'react';
 
 import type { Tone } from '../../lib/dashboardFormat';
 
+export type RuntimeModeItem = {
+  label: string;
+  value: string;
+  detail: string;
+  tone: Tone;
+};
+
 export function Shell({ children }: { children: React.ReactNode }) {
   return <div className="appShell">{children}</div>;
+}
+
+export function RuntimeModeStrip({ items }: { items: RuntimeModeItem[] }) {
+  return (
+    <section className="runtimeModeStrip" aria-label="Runtime configuration">
+      {items.map((item) => (
+        <div key={item.label} className={`runtimeModeItem ${item.tone}`} title={item.detail}>
+          <span>{item.label}</span>
+          <strong>{item.value}</strong>
+          <em>{item.detail}</em>
+        </div>
+      ))}
+    </section>
+  );
 }
 
 export function Digest({

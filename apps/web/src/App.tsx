@@ -27,7 +27,7 @@ import { ScoreGauge } from './components/ScoreGauge';
 import { PriceStrikeGauge } from './components/PriceStrikeGauge';
 import { RoundTimelinePipeline } from './components/RoundTimelinePipeline';
 import { OrderbookCapacityPanel, OrderbookExecutionSummary, OrderbookTable } from './components/dashboard/OrderbookPanels';
-import { Badge, DataTable, DecisionMetric, Digest, PaginationControls, Shell } from './components/dashboard/Ui';
+import { Badge, DataTable, DecisionMetric, Digest, PaginationControls, RuntimeModeStrip, Shell } from './components/dashboard/Ui';
 
 type TabType = 'terminal' | 'orderbooks' | 'activity' | 'strategy' | 'logs';
 type ActivitySubTab = 'daily' | 'rounds' | 'orders';
@@ -656,6 +656,7 @@ export function App() {
   const entryCooldownActive = Boolean(state.runtime.entryCooldownUntil && new Date(state.runtime.entryCooldownUntil).getTime() > Date.now());
   const entryCooldownRemaining = formatCooldownRemaining(state.runtime.entryCooldownUntil);
   const entryCooldownReason = state.runtime.entryCooldownReason || 'no single-fill lockout';
+  const cooldownGateLabel = entryConfig?.bypassSingleFillCooldown ? 'BYPASSED' : 'ENFORCED';
   const participation = snapshot.participation;
   const participationStatus = participation?.status || 'missing';
   const participationTone = participationStatus === 'enabled'
@@ -716,6 +717,46 @@ export function App() {
   const participationGateTone = participationStatus === 'enabled'
     ? (participationDecisionPassed ? 'good' : 'warn')
     : 'neutral';
+  const runtimeModeItems = [
+    {
+      label: 'Execution',
+      value: state.runtime.executionMode === 'live' ? 'LIVE' : 'MONITOR',
+      detail: `${state.runtime.status.toUpperCase()} / ${runtimeBuildLabel(state.runtime)}`,
+      tone: state.runtime.executionMode === 'live' ? 'warn' as const : 'neutral' as const,
+    },
+    {
+      label: 'Score Gate',
+      value: entryBypassActive ? 'BYPASSED' : 'ENFORCED',
+      detail: entryBypassActive
+        ? `score ${formatNumber(snapshot.features.chopScore, 1)} is diagnostic`
+        : `live floor ${entryConfig?.minLiveChopScore ?? 80}, confirmation ${entryConfig?.entryConfirmTicks ?? 3} ticks`,
+      tone: entryBypassActive ? 'warn' as const : 'good' as const,
+    },
+    {
+      label: 'Cooldown',
+      value: cooldownGateLabel,
+      detail: entryCooldownActive ? `${entryCooldownRemaining} remaining` : entryCooldownReason,
+      tone: entryConfig?.bypassSingleFillCooldown ? 'warn' as const : entryCooldownActive ? 'warn' as const : 'good' as const,
+    },
+    {
+      label: 'Limit',
+      value: pricePolicyLabel,
+      detail: fixedLimitActive ? `fixed dual limit ${fixedLimitLabel}` : 'score selects entry price',
+      tone: fixedLimitActive ? 'neutral' as const : 'good' as const,
+    },
+    {
+      label: 'Size',
+      value: sizePolicyLabel,
+      detail: fixedSharesActive ? `${fixedSharesLabel} shares per side` : 'score selects order size',
+      tone: fixedSharesActive ? 'neutral' as const : 'good' as const,
+    },
+    {
+      label: 'Feeds',
+      value: state.feed.source.toUpperCase(),
+      detail: `Binance ${state.feed.binanceConnected ? 'on' : 'off'} / CLOB ${state.feed.clobConnected ? 'on' : 'off'}`,
+      tone: state.feed.source === 'live' && state.feed.binanceConnected && state.feed.clobConnected ? 'good' as const : 'warn' as const,
+    },
+  ];
 
   return (
     <Shell>
@@ -760,6 +801,8 @@ export function App() {
         </div>
       </section>
 
+      <RuntimeModeStrip items={runtimeModeItems} />
+
       {/* Top Status Cards / Digest */}
       <section className="digest">
         <div className="digestGroup action">
@@ -773,11 +816,11 @@ export function App() {
             priority="primary"
           />
           <Digest
-            icon={<TrendingUp size={16} />}
-            label="Market Regime"
-            value={snapshot.regime}
-            detail={`Score ${formatNumber(snapshot.features.chopScore, 1)} / ${entryEligibleLabel}`}
-            tone={snapshot.regime === 'CHOP' ? 'good' : snapshot.regime === 'TREND' ? 'bad' : 'neutral'}
+            icon={<AlertTriangle size={16} />}
+            label="Current Action"
+            value={decisionState.label}
+            detail={decisionState.detail}
+            tone={decisionState.tone}
             priority="primary"
           />
           <Digest
@@ -807,18 +850,18 @@ export function App() {
             tone={state.runtime.executionMode === 'live' ? 'warn' : 'neutral'}
           />
           <Digest
-            icon={<Cpu size={16} />}
-            label="Strategy Profile"
-            value={state.runtime.activeStrategyProfile}
-            detail={state.runtime.experimentStoppedAt ? `${state.runtime.experimentStoppedReason || 'stopped'} / ${state.runtime.experimentStoppedRoundId || 'unknown round'}` : 'running selected profile'}
-            tone={state.runtime.activeStrategyProfile === 'experiment_next_round' ? 'warn' : 'neutral'}
-          />
-          <Digest
             icon={<SlidersHorizontal size={16} />}
             label="Entry Config"
             value={entryConfigValue}
             detail={entryConfigDetail}
             tone={entryBypassActive ? 'warn' : fixedLimitActive || fixedSharesActive ? 'neutral' : 'good'}
+          />
+          <Digest
+            icon={<TrendingUp size={16} />}
+            label="Market Regime"
+            value={snapshot.regime}
+            detail={`Score ${formatNumber(snapshot.features.chopScore, 1)} / ${entryEligibleLabel}`}
+            tone={entryBypassActive ? 'neutral' : snapshot.regime === 'CHOP' ? 'good' : snapshot.regime === 'TREND' ? 'bad' : 'neutral'}
           />
           <Digest
             icon={<Radio size={16} />}
@@ -853,10 +896,10 @@ export function App() {
           <div className="grid">
             {/* Left Column (Main widgets) */}
             <div className="span-8" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              <div className="decisionPanel">
+              <div className="decisionPanel decisionPanelPrimary">
                 <div className="decisionHeader">
                   <div>
-                    <span className="decisionKicker">Next Round Pre-Start Decision</span>
+                    <span className="decisionKicker">Primary Decision Surface</span>
                     <strong>{entryCheck?.title || 'BTC 5m Dynamic Dual Pre-Round'}</strong>
                   </div>
                   <Badge tone={entryStatusTone}>{entryStatusLabel}</Badge>
@@ -867,7 +910,7 @@ export function App() {
                     <strong>{decisionState.label}</strong>
                     <p>{decisionState.detail}</p>
                     {failedEntryConditions.length > 0 && (
-                      <div className="blockerChips">
+                      <div className={`blockerChips ${entryBypassActive ? 'muted' : ''}`}>
                         {failedEntryConditions.slice(0, 3).map((condition) => (
                           <span key={condition.label}>{condition.label}</span>
                         ))}
@@ -876,7 +919,17 @@ export function App() {
                   </div>
                   <div className="decisionSummaryMeta">
                     <span>{entryCheck?.reason || 'Strategy check has not loaded yet'}</span>
-                    <strong>{state.runtime.executionMode === 'live' ? 'LIVE EXECUTION' : 'MONITOR ONLY'}</strong>
+                    <div className="decisionSummaryFlags">
+                      <Badge tone={state.runtime.executionMode === 'live' ? 'warn' : 'neutral'}>
+                        {state.runtime.executionMode === 'live' ? 'live execution' : 'monitor only'}
+                      </Badge>
+                      <Badge tone={entryBypassActive ? 'warn' : 'good'}>
+                        score {entryBypassActive ? 'bypassed' : 'enforced'}
+                      </Badge>
+                      <Badge tone={entryConfig?.bypassSingleFillCooldown ? 'warn' : 'good'}>
+                        cooldown {entryConfig?.bypassSingleFillCooldown ? 'bypassed' : 'enforced'}
+                      </Badge>
+                    </div>
                   </div>
                 </div>
                 <div className="decisionGrid">
@@ -931,14 +984,14 @@ export function App() {
                   <DecisionMetric
                     label="Current Blockers"
                     value={failedEntryConditions.length ? String(failedEntryConditions.length) : '0'}
-                    detail={topBlockers}
-                    tone={failedEntryConditions.length ? 'warn' : 'good'}
+                    detail={entryBypassActive && failedEntryConditions.length ? `diagnostic only: ${topBlockers}` : topBlockers}
+                    tone={entryBypassActive ? 'neutral' : failedEntryConditions.length ? 'warn' : 'good'}
                   />
                 </div>
-                <details className="collapsiblePanel">
+                <details className={`collapsiblePanel ${entryBypassActive ? 'diagnosticOnly' : ''}`}>
                   <summary>
                     <span>Score Composition</span>
-                    <strong>{formatNumber(snapshot.features.chopScore, 1)} / 70</strong>
+                    <strong>{entryBypassActive ? `bypassed · ${formatNumber(snapshot.features.chopScore, 1)}` : `${formatNumber(snapshot.features.chopScore, 1)} / 70`}</strong>
                   </summary>
                   <div className="scorePanelBody">
                     <div className="scoreGaugeColumn">
