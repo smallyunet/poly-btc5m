@@ -88,7 +88,7 @@ test('posts live entry orders as GTC limits', async () => {
 
 test('blocks duplicate experimental side after a non-failed order already exists', async () => {
   const store = new InMemoryStore('live', 2_000, { persistencePath: false }, 'experiment_next_round');
-  const existing = intent('NO', { strategy: 'BTC5M_NEXT_ROUND_50_49_STOP_ON_SINGLE' });
+  const existing = intent('NO', { strategy: 'UPDOWN_NEXT_ROUND_50_49_STOP_ON_SINGLE' });
   store.recordOrder({
     id: 'filled-experiment-down',
     intentId: existing.id,
@@ -126,7 +126,7 @@ test('blocks duplicate experimental side after a non-failed order already exists
 
 test('allows experimental side again when prior order is before current run start', async () => {
   const store = new InMemoryStore('live', 2_000, { persistencePath: false }, 'experiment_next_round');
-  const existing = intent('NO', { strategy: 'BTC5M_NEXT_ROUND_50_49_STOP_ON_SINGLE' });
+  const existing = intent('NO', { strategy: 'UPDOWN_NEXT_ROUND_50_49_STOP_ON_SINGLE' });
   store.recordOrder({
     id: 'old-filled-experiment-down',
     intentId: existing.id,
@@ -251,7 +251,7 @@ test('bypasses entry orderbook execution gate when entry bypass is enabled', asy
 function intent(label: 'YES' | 'NO', patch: Partial<TradeIntent> = {}): TradeIntent {
   return {
     id: `intent-${label}`,
-    strategy: 'BTC5M_DUAL_45',
+    strategy: 'UPDOWN_DUAL_ENTRY',
     roundId: 'btc-updown-5m-1782432000',
     tokenId: `${label.toLowerCase()}-token`,
     label,

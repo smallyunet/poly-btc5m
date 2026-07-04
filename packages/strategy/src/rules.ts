@@ -2,16 +2,16 @@ import type { StrategyRule } from '../../shared/src';
 
 export const STRATEGY_RULES: StrategyRule[] = [
   {
-    id: 'BTC5M_DUAL_45',
-    title: 'BTC 5m Dynamic Dual Pre-Round',
+    id: 'UPDOWN_DUAL_ENTRY',
+    title: 'Up/Down Dual Entry',
     allocationPct: 1,
-    summary: 'Pre-commit YES and NO liquidity with score-based limit pricing and conservative score-based sizing when the next round looks choppy.',
+    summary: 'Pre-commit YES and NO liquidity with fixed profile limit pricing and fixed profile sizing before the next round starts.',
     entryRules: [
       'Round must be inside the T-30s decision window before start.',
-      'Regime must be CHOP: BTC path score, center crosses, range, center two-sided excursion, drift ratio, and momentum ratio filters all pass.',
+      'Score and volatility gates may be bypassed; execution gates such as cooldown, tradable books, duplicate orders, and balance checks still apply.',
       'YES and NO books must be live, fresh, and buyable for the configured limit to be valid.',
       'Extreme imbalance in YES vs NO bid queue at the entry limit is blocked; mild imbalance is only diagnostic.',
-      'Shares are score-tiered: low CHOP scores reduce size, mid scores use base size, and very high scores get only a small size increase.',
+      'Shares come from the active market profile.',
       'No duplicate local or Polymarket open order may exist for the same round/token.',
       'Live entry orders are posted as GTC limit orders; post-start risk is handled by the profit-exit and hedge rules.',
     ],
@@ -25,10 +25,10 @@ export const STRATEGY_RULES: StrategyRule[] = [
     ],
   },
   {
-    id: 'BTC5M_SINGLE_FILL_HEDGE',
-    title: 'BTC 5m Single-Fill Stop-Loss Hedge',
+    id: 'UPDOWN_SINGLE_FILL_HEDGE',
+    title: 'Up/Down Single-Fill Stop-Loss Hedge',
     allocationPct: 0,
-    summary: 'In the last minute of an active round, cancel stale missing-side entry orders and buy the missing side only if the active early/final pair-cost cap allows it.',
+    summary: 'Near the end of an active round, cancel stale missing-side entry orders and buy the missing side only if the active profile hedge caps allow it.',
     entryRules: [
       'Round must already be running and inside SINGLE_FILL_EARLY_HEDGE_WINDOW_SECONDS, but not inside SINGLE_FILL_HEDGE_MIN_SECONDS_TO_END.',
       'Exactly one side must have more BUY fills than the other side by at least the minimum order size.',
@@ -43,8 +43,8 @@ export const STRATEGY_RULES: StrategyRule[] = [
     ],
   },
   {
-    id: 'BTC5M_NEXT_ROUND_50_49_STOP_ON_SINGLE',
-    title: 'BTC 5m Experimental Next-Round 50/49',
+    id: 'UPDOWN_NEXT_ROUND_50_49_STOP_ON_SINGLE',
+    title: 'Up/Down Experimental Next-Round 50/49',
     allocationPct: 0,
     summary: 'Experimental profile that continuously posts fixed next-round UP/DOWN entry limits and stops after a final single-sided fill.',
     entryRules: [
@@ -62,8 +62,8 @@ export const STRATEGY_RULES: StrategyRule[] = [
     ],
   },
   {
-    id: 'BTC5M_SINGLE_FILL_PROFIT_EXIT',
-    title: 'BTC 5m Single-Fill Profit Exit',
+    id: 'UPDOWN_SINGLE_FILL_PROFIT_EXIT',
+    title: 'Up/Down Single-Fill Profit Exit',
     allocationPct: 0,
     summary: 'When a single filled side can be sold for a configured profit, cancel the stale missing-side buy order and exit the filled side using a capped FAK sell limit.',
     entryRules: [

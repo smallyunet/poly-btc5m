@@ -1,5 +1,5 @@
 import WebSocket from 'ws';
-import type { BtcFeatureSnapshot, BtcRoundConfig, DataFeedStatus, OrderBookQuote, PriceTick } from '../../../packages/shared/src';
+import type { BtcFeatureSnapshot, BtcRoundConfig, DataFeedStatus, MarketProfile, OrderBookQuote, PriceTick } from '../../../packages/shared/src';
 import { quoteFromBook } from '../../../packages/polymarket/src';
 import type { AppConfig } from './config';
 import type { InMemoryStore } from './store';
@@ -25,7 +25,9 @@ export class MarketDataService {
   }
 
   syncClobRound(round: BtcRoundConfig, extraTokenIds: string[] = []): void {
-    const tokenIds = dedupe([round.yesTokenId, round.noTokenId, ...extraTokenIds].filter(Boolean));
+    const requestedTokenIds = [round.yesTokenId, round.noTokenId, ...extraTokenIds].filter(Boolean);
+    const existingTokenIds = this.clobTokenKey.split('|').filter(Boolean);
+    const tokenIds = dedupe([...existingTokenIds, ...requestedTokenIds]);
     const nextKey = tokenIds.join('|');
     if (tokenIds.length < 2) {
       if (!this.clobTokenKey) return;
@@ -48,7 +50,7 @@ export class MarketDataService {
     return dedupe(tokenIds.filter(Boolean)).map((tokenId) => this.orderbooks.get(tokenId)).filter((item): item is OrderBookQuote => Boolean(item));
   }
 
-  features(round: BtcRoundConfig): BtcFeatureSnapshot {
+  features(round: BtcRoundConfig, _profile?: MarketProfile): BtcFeatureSnapshot {
     const now = Date.now();
     const ticks = this.binanceConnected ? this.priceTicks.filter((tick) => now - new Date(tick.receivedAt).getTime() <= 120_000) : [];
     const ticks300s = this.binanceConnected ? this.priceTicks.filter((tick) => now - new Date(tick.receivedAt).getTime() <= 300_000) : [];
@@ -143,7 +145,7 @@ export class MarketDataService {
     };
   }
 
-  status(): DataFeedStatus {
+  status(_profile?: MarketProfile): DataFeedStatus {
     const latestPrice = this.priceTicks.at(-1);
     const latestBook = [...this.orderbooks.values()].sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())[0];
     return {
@@ -156,7 +158,7 @@ export class MarketDataService {
     };
   }
 
-  latestPrice(): number | null {
+  latestPrice(_profile?: MarketProfile): number | null {
     return this.priceTicks.at(-1)?.price ?? null;
   }
 

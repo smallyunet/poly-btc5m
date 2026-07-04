@@ -383,6 +383,9 @@ function baseSnapshot(features: Partial<StateSnapshot['features']>): StateSnapsh
   const now = new Date().toISOString();
   return {
     id: 'snapshot',
+    profileId: 'btc-5m',
+    asset: 'btc',
+    interval: '5m',
     capturedAt: now,
     round: {
       id: 'round-1',
@@ -501,6 +504,9 @@ function position(label: 'YES' | 'NO'): StateSnapshot['positions'][number] {
 function order(label: 'YES' | 'NO', createdAt: string): OrderRecord {
   return {
     id: `order-${label}`,
+    profileId: 'btc-5m',
+    asset: 'btc',
+    interval: '5m',
     intentId: `intent-${label}`,
     roundId: 'round-1',
     eventSlug: 'round-1',

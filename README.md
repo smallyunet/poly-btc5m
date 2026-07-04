@@ -1,8 +1,8 @@
 # poly-btc5m
 
-Deployable Polymarket BTC 5-minute strategy worker and operator dashboard.
+Deployable Polymarket recurring crypto Up/Down strategy worker and operator dashboard.
 
-The strategy is based on `docs/binance_btc_pre_round_strategy.md`: it does not predict BTC direction. It classifies the next 5-minute round as `CHOP`, `TREND`, or `LOW_ACTIVITY`, and only in `CHOP` does it prepare paired YES/NO limit orders using the score-based dynamic limit policy.
+The current production path runs BTC recurring Up/Down markets. It supports BTC 5m, 15m, and 1h profiles with isolated state, orders, fills, settlements, cooldowns, and dashboard views. ETH/SOL profiles are reserved in code but disabled by default.
 
 ## Structure
 
@@ -10,7 +10,7 @@ The strategy is based on `docs/binance_btc_pre_round_strategy.md`: it does not p
 apps/api              Express API, worker loop, Binance/CLOB data service
 apps/web              React dashboard served by the API in production
 packages/shared       Shared schemas and dashboard/runtime types
-packages/strategy     Pure BTC 5m regime and order-intent engine
+packages/strategy     Profile-neutral Up/Down entry and risk engine
 packages/polymarket   Local Polymarket CLOB adapter
 configs               Non-secret market/round configs
 deploy                Docker/Caddy/Nginx deployment files
@@ -49,14 +49,13 @@ The production default mode is `EXECUTION_MODE=live`. In monitor mode the worker
 
 ## Runtime Model
 
-The worker runs every `BOT_TICK_MS` and produces one `DashboardState` snapshot:
+The worker runs every `BOT_TICK_MS` and produces a multi-profile `DashboardState`:
 
-- Discovers the next BTC 5m round from deterministic `btc-updown-5m-<roundStartSec>` slugs and Gamma `/markets/slug/:slug`.
+- Discovers the next BTC 5m/15m/1h rounds from deterministic `btc-updown-<interval>-<roundStartSec>` slugs and Gamma `/markets/slug/:slug`.
 - Maintains recent BTC price samples only from Binance public BTCUSDT aggTrade websocket over `wss://stream.binance.com:9443/ws/btcusdt@aggTrade`.
 - Maintains YES/NO CLOB orderbooks only from the Polymarket CLOB market websocket.
-- Computes BTC path features including `cross120s`, realized range bps, two-sided excursion bps, drift/momentum ratios, range percentile, and a `chopScore`.
-- Classifies the round regime.
-- Generates paired score-based entry intents during the pre-round decision window when the regime is `CHOP`.
+- Computes BTC path features including `cross120s`, realized range bps, two-sided excursion bps, drift/momentum ratios, range percentile, and a `chopScore` for diagnostics.
+- Generates paired fixed-price entry intents during each enabled profile's pre-round decision window. With `BYPASS_ENTRY_SCORE_GATING=true`, entry no longer depends on CHOP classification.
 - Optionally performs a capped three-stage BUY hedge when one side filled and the other side did not.
 - Reconciles recent fills and estimates settlement/PnL after a round has ended.
 
@@ -70,6 +69,16 @@ Required for real trading:
 EXECUTION_MODE=live
 POLYMARKET_DEPOSIT_WALLET=0x...
 OWNER_PRIVATE_KEY=...
+```
+
+Profile status controls:
+
+```dotenv
+# BTC 5m follows EXECUTION_MODE by default. Keep 15m/1h in monitor until shadow
+# data proves the paired-fill/single-fill profile is acceptable.
+BTC_5M_PROFILE_STATUS=live
+BTC_15M_PROFILE_STATUS=monitor
+BTC_1H_PROFILE_STATUS=monitor
 ```
 
 Recommended live feed settings:
@@ -86,9 +95,9 @@ RUNTIME_MAX_RECORDS=1000
 ```
 
 BTC price has no HTTP/manual/simulated fallback. The worker subscribes to the Binance `btcusdt@aggTrade` stream and only accepts `btcusdt` updates. It samples the latest trade into the strategy path every `BINANCE_PRICE_SAMPLE_MS` milliseconds by default, so the CHOP thresholds keep a stable seconds-level meaning instead of scaling with raw trade count. If Binance is not connected or no `btcusdt` trade has arrived, the regime remains `UNKNOWN` and entry orders are blocked.
-Orderbook price also has no REST fallback. The worker discovers the next 5-minute BTC Up/Down market from Gamma, maps `Up` to the local `YES` side and `Down` to the local `NO` side, then subscribes to both token IDs over the CLOB market websocket. If discovery fails, the CLOB websocket is not connected, or books are missing/stale, entry orders are blocked.
+Orderbook price also has no REST fallback. For each enabled BTC profile, the worker discovers the next recurring Up/Down market from Gamma, maps `Up` to the local `YES` side and `Down` to the local `NO` side, then subscribes to both token IDs over the CLOB market websocket. If discovery fails, the CLOB websocket is not connected, or books are missing/stale, entry orders are blocked.
 
-The round strike is the BTC price at the beginning of the 5-minute Polymarket range. Before the next round starts, the dashboard shows the latest Binance BTC price as an estimate. Once the round starts, the first available sampled Binance BTC price is persisted as that round's opening strike.
+The round strike is the BTC price at the beginning of the profile's Polymarket range. Before the next round starts, the dashboard shows the latest Binance BTC price as an estimate. Once the round starts, the first available sampled Binance BTC price is persisted as that round's opening strike.
 
 The current dynamic BTC path thresholds are intentionally kept unchanged after the Binance switch because the runtime feeds the strategy with sampled Binance prices, not every raw trade. `rangeBps`, two-sided excursion, drift ratio, and momentum ratio are price-path measures and remain comparable. `cross120s` also remains comparable because the 1s sampling prevents high-frequency trade noise from multiplying strike crosses.
 
@@ -144,9 +153,17 @@ SINGLE_FILL_HEDGE_MIN_SECONDS_TO_END=5
 SINGLE_FILL_HEDGE_MAX_PRICE=0.65
 SINGLE_FILL_HEDGE_PRICE_OFFSET=0.01
 SINGLE_FILL_HEDGE_MAX_PAIR_COST=1.10
+SINGLE_FILL_PROFIT_EXIT_ENABLED=true
+SINGLE_FILL_PROFIT_EXIT_MIN_RATE=0.05
+SINGLE_FILL_PROFIT_EXIT_MIN_PRICE=0.50
+SINGLE_FILL_PROFIT_EXIT_MIN_PNL_USD=0.30
+SINGLE_FILL_PROFIT_EXIT_PRICE_OFFSET=0.01
+SINGLE_FILL_PROFIT_EXIT_MAX_ORDERBOOK_AGE_MS=1000
+SINGLE_FILL_PROFIT_EXIT_MIN_SECONDS_TO_END=20
+SINGLE_FILL_PROFIT_EXIT_MAX_SECONDS_TO_END=240
 ```
 
-The worker targets the next BTC 5m round for entry. It posts paired BUY limit orders before round start as GTC orders because short GTD expirations can be rejected by CLOB. After start, it normally only reconciles fills and records settlement estimates unless an explicit single-fill risk path triggers: a profit exit can cancel the missing-side BUY and sell the filled side with a capped FAK SELL limit when the filled side is already profitable; the three-stage hedge can cancel stale missing-side BUY orders and submit a capped aggressive FAK BUY LIMIT for the missing side. It never sends uncapped market orders.
+The worker targets the next round for each enabled profile. It posts paired BUY limit orders before round start as GTC orders because short GTD expirations can be rejected by CLOB. After start, it normally only reconciles fills and records settlement estimates unless an explicit single-fill risk path triggers: a profit exit can cancel the missing-side BUY and sell the filled side with a capped FAK SELL limit when the filled side is already profitable; the three-stage hedge can cancel stale missing-side BUY orders and submit a capped aggressive FAK BUY LIMIT for the missing side. It never sends uncapped market orders.
 
 Live entry orders are configured as CLOB limit order `price + size`:
 
@@ -163,7 +180,7 @@ Live entry orders are configured as CLOB limit order `price + size`:
 - `SINGLE_FILL_EARLY_HEDGE_*` controls the 60s-to-30s opportunity hedge. It only runs when the combined pair cost is near breakeven.
 - `SINGLE_FILL_HEDGE_*` controls the 30s-to-15s final risk hedge. It can accept the wider final pair-cost cap to avoid carrying a single-sided exposure into settlement.
 - `SINGLE_FILL_EMERGENCY_HEDGE_*` controls the 15s-to-5s emergency hedge. It can accept a larger locked loss, up to the emergency missing-side price and pair-cost caps, only at the end of the round.
-- `SINGLE_FILL_PROFIT_EXIT_*` controls the single-fill take-profit exit. The filled side must have a fresh live bid at or above `SINGLE_FILL_PROFIT_EXIT_MIN_PRICE`, the capped FAK SELL limit must realize at least `SINGLE_FILL_PROFIT_EXIT_MIN_PNL_USD`, and stale quotes above `SINGLE_FILL_PROFIT_EXIT_MAX_ORDERBOOK_AGE_MS` are rejected.
+- `SINGLE_FILL_PROFIT_EXIT_*` controls the single-fill take-profit exit. The capped FAK SELL limit must realize at least `SINGLE_FILL_PROFIT_EXIT_MIN_RATE` profit on the filled side and at least `SINGLE_FILL_PROFIT_EXIT_MIN_PNL_USD`; stale quotes above `SINGLE_FILL_PROFIT_EXIT_MAX_ORDERBOOK_AGE_MS` are rejected.
 - Final single-fill cooldown is adaptive and only applies to rounds with tracked strategy BUY orders. External/manual fills without local strategy orders are ignored. Base final singles pause entries for 15 minutes, price-cap hedge misses pause for 30 minutes, execution/API/cancel/post failures pause for 1 hour, and repeated final singles inside 1 hour stay capped at 1 hour.
 
 ## Docker

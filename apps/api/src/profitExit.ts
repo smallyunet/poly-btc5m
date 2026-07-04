@@ -1,4 +1,4 @@
-import type { OrderBookQuote, OrderRecord, StrategyCheck, TradeIntent } from '../../../packages/shared/src';
+import type { MarketAsset, MarketInterval, MarketProfileId, OrderBookQuote, OrderRecord, StrategyCheck, TradeIntent } from '../../../packages/shared/src';
 import type { FillTarget, PolymarketAdapter } from '../../../packages/polymarket/src';
 import type { AppConfig } from './config';
 import type { InMemoryStore, SingleFillProfitExitCandidate } from './store';
@@ -15,9 +15,9 @@ type ExecuteProfitExitParams = {
   orderbooks: OrderBookQuote[];
 };
 
-const PROFIT_EXIT_STRATEGY = 'BTC5M_SINGLE_FILL_PROFIT_EXIT';
-const CLASSIC_ENTRY_STRATEGY = 'BTC5M_DUAL_45';
-const HEDGE_STRATEGY = 'BTC5M_SINGLE_FILL_HEDGE';
+const PROFIT_EXIT_STRATEGY = 'UPDOWN_SINGLE_FILL_PROFIT_EXIT';
+const CLASSIC_ENTRY_STRATEGY = 'UPDOWN_DUAL_ENTRY';
+const HEDGE_STRATEGY = 'UPDOWN_SINGLE_FILL_HEDGE';
 const FAILED_EXIT_COOLDOWN_MS = 60_000;
 const FAK_NO_MATCH_RETRY_LIMIT = 2;
 const FAK_NO_MATCH_RETRY_DELAY_MS = 750;
@@ -66,14 +66,18 @@ export function planSingleFillProfitExit(params: {
   if (quoteGate) return { ok: false, reason: quoteGate };
   const bestBid = quote?.bestBid;
   if (bestBid == null) return { ok: false, reason: 'BEST_BID_MISSING' };
-  if (bestBid < params.appConfig.singleFillProfitExitMinPrice) return { ok: false, reason: 'EXIT_BID_BELOW_MIN' };
 
   const limitPrice = roundPrice(Math.max(params.appConfig.singleFillProfitExitMinPrice, bestBid - params.appConfig.singleFillProfitExitPriceOffset));
+  const profitRate = exit.avgBuyPrice > 0 ? (limitPrice - exit.avgBuyPrice) / exit.avgBuyPrice : 0;
+  if (profitRate < params.appConfig.singleFillProfitExitMinRate) return { ok: false, reason: 'EXIT_PROFIT_RATE_BELOW_MIN' };
   const expectedPnlUsd = (limitPrice - exit.avgBuyPrice) * exit.netShares;
   if (expectedPnlUsd < params.appConfig.singleFillProfitExitMinPnlUsd) return { ok: false, reason: 'EXIT_PNL_BELOW_MIN' };
 
   const intent: TradeIntent = {
     id: makeId('profit-exit-intent'),
+    profileId: params.candidate.profileId,
+    asset: assetFromProfileId(params.candidate.profileId),
+    interval: intervalFromProfileId(params.candidate.profileId),
     strategy: PROFIT_EXIT_STRATEGY,
     roundId: params.candidate.roundId,
     tokenId,
@@ -121,8 +125,11 @@ export function buildSingleFillProfitExitCheck(params: {
     : blocked.length ? 'blocked' : 'not-applicable';
 
   return {
+    profileId: params.candidate.profileId,
+    asset: assetFromProfileId(params.candidate.profileId),
+    interval: intervalFromProfileId(params.candidate.profileId),
     strategy: PROFIT_EXIT_STRATEGY,
-    title: 'BTC 5m Single-Fill Profit Exit',
+    title: 'Up/Down Single-Fill Profit Exit',
     status,
     summary: 'When only one side has filled and its live bid is profitable, cancel the missing-side buy order and sell the filled side with a capped FAK limit.',
     reason: plan.ok ? `Profit exit eligible for ${plan.exitLabel} @ ${plan.intent.limitPrice.toFixed(3)}.` : `Single-fill profit exit is not triggerable: ${plan.reason}.`,
@@ -144,9 +151,9 @@ export function buildSingleFillProfitExitCheck(params: {
 }
 
 async function executeOneProfitExit(params: ExecuteProfitExitParams, candidate: SingleFillProfitExitCandidate): Promise<string | null> {
-  const entryOrders = params.store.roundOrders(candidate.roundId, CLASSIC_ENTRY_STRATEGY);
+  const entryOrders = params.store.roundOrders(candidate.profileId, candidate.roundId, CLASSIC_ENTRY_STRATEGY);
   await reconcileCandidateFills(params, entryOrders);
-  const plan = planSingleFillProfitExit({ candidate, orders: profitExitExposureOrders(params.store.roundOrders(candidate.roundId)), orderbooks: params.orderbooks, appConfig: params.appConfig });
+  const plan = planSingleFillProfitExit({ candidate, orders: profitExitExposureOrders(params.store.roundOrders(candidate.profileId, candidate.roundId)), orderbooks: params.orderbooks, appConfig: params.appConfig });
   if (!plan.ok) {
     if (!benignProfitExitReason(plan.reason)) {
       params.store.recordRuntimeLog({ level: 'warn', source: 'execution', message: `Single-fill profit exit skipped for ${candidate.roundId}: ${plan.reason}.` });
@@ -154,15 +161,15 @@ async function executeOneProfitExit(params: ExecuteProfitExitParams, candidate: 
     return null;
   }
 
-  const executionKey = [plan.intent.roundId, plan.intent.strategy, plan.intent.tokenId, plan.intent.side].join(':');
+  const executionKey = [plan.intent.profileId, plan.intent.roundId, plan.intent.strategy, plan.intent.tokenId, plan.intent.side].filter(Boolean).join(':');
   if (params.store.hasRecentOrder(executionKey, plan.intent.ttlSeconds * 1000)) return null;
   if (params.store.hasRecentFailedOrder(executionKey, FAILED_EXIT_COOLDOWN_MS)) return null;
 
-  const cancelResult = await cancelMissingSideBuyOrders(params, candidate.roundId, plan.missingLabel);
+  const cancelResult = await cancelMissingSideBuyOrders(params, candidate.profileId, candidate.roundId, plan.missingLabel);
   if (!cancelResult.ok) return `Single-fill profit exit blocked for ${plan.exitLabel}: ${cancelResult.reason}.`;
 
   await reconcileCandidateFills(params, entryOrders);
-  const finalPlan = planSingleFillProfitExit({ candidate, orders: profitExitExposureOrders(params.store.roundOrders(candidate.roundId)), orderbooks: params.orderbooks, appConfig: params.appConfig });
+  const finalPlan = planSingleFillProfitExit({ candidate, orders: profitExitExposureOrders(params.store.roundOrders(candidate.profileId, candidate.roundId)), orderbooks: params.orderbooks, appConfig: params.appConfig });
   if (!finalPlan.ok) return null;
   params.store.recordIntents([finalPlan.intent]);
 
@@ -237,10 +244,10 @@ async function postProfitExitWithFakNoMatchRetry(
 
     retryReasons.push(posted.error || 'FAK_NO_MATCH');
     await delay(FAK_NO_MATCH_RETRY_DELAY_MS);
-    await reconcileCandidateFills(params, params.store.roundOrders(candidate.roundId, CLASSIC_ENTRY_STRATEGY));
+    await reconcileCandidateFills(params, params.store.roundOrders(candidate.profileId, candidate.roundId, CLASSIC_ENTRY_STRATEGY));
     const nextPlan = planSingleFillProfitExit({
       candidate,
-      orders: profitExitExposureOrders(params.store.roundOrders(candidate.roundId)),
+      orders: profitExitExposureOrders(params.store.roundOrders(candidate.profileId, candidate.roundId)),
       orderbooks: params.orderbooks,
       appConfig: params.appConfig,
     });
@@ -259,6 +266,9 @@ async function postProfitExitWithFakNoMatchRetry(
 
 async function reconcileCandidateFills(params: ExecuteProfitExitParams, orders: OrderRecord[]): Promise<void> {
   const targets: FillTarget[] = orders.map((order) => ({
+    profileId: order.profileId,
+    asset: order.asset,
+    interval: order.interval,
     roundId: order.roundId,
     eventSlug: order.eventSlug,
     marketTitle: order.marketTitle,
@@ -275,8 +285,8 @@ async function reconcileCandidateFills(params: ExecuteProfitExitParams, orders: 
   }
 }
 
-async function cancelMissingSideBuyOrders(params: ExecuteProfitExitParams, roundId: string, label: 'YES' | 'NO'): Promise<{ ok: true } | { ok: false; reason: string }> {
-  const orders = params.store.roundOrders(roundId, CLASSIC_ENTRY_STRATEGY).filter((order) => (
+async function cancelMissingSideBuyOrders(params: ExecuteProfitExitParams, profileId: SingleFillProfitExitCandidate['profileId'], roundId: string, label: 'YES' | 'NO'): Promise<{ ok: true } | { ok: false; reason: string }> {
+  const orders = params.store.roundOrders(profileId, roundId, CLASSIC_ENTRY_STRATEGY).filter((order) => (
     order.label === label
     && order.side === 'BUY'
     && (order.status === 'posted' || order.status === 'partially_filled')
@@ -340,6 +350,9 @@ function sellQuoteGate(quote: OrderBookQuote | undefined, maxAgeMs: number, nowM
 function localExitOrder(candidate: SingleFillProfitExitCandidate, intent: TradeIntent, executionKey: string): OrderRecord {
   return {
     id: `profit-exit-local-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+    profileId: candidate.profileId,
+    asset: intent.asset,
+    interval: intent.interval,
     intentId: intent.id,
     strategy: intent.strategy,
     strategyProfile: 'classic',
@@ -361,6 +374,14 @@ function localExitOrder(candidate: SingleFillProfitExitCandidate, intent: TradeI
 
 function condition(label: string, passed: boolean, actual: string) {
   return { label, passed, actual };
+}
+
+function assetFromProfileId(profileId: MarketProfileId): MarketAsset {
+  return profileId.split('-')[0] as MarketAsset;
+}
+
+function intervalFromProfileId(profileId: MarketProfileId): MarketInterval {
+  return profileId.split('-').slice(1).join('-') as MarketInterval;
 }
 
 function quoteAgeLabel(quote: OrderBookQuote | undefined): string {

@@ -30,7 +30,15 @@ export function createServer(appConfig: AppConfig, store: InMemoryStore, manualT
       next(error);
     }
   });
-  app.get('/api/snapshots/latest', (_req, res) => res.json(store.dashboardState().latestSnapshot));
+  app.get('/api/profiles', (_req, res) => res.json(store.dashboardState().profiles.map((item) => item.profile)));
+  app.get('/api/profiles/:profileId/state', (req, res) => {
+    const profile = store.dashboardState().profiles.find((item) => item.profile.id === req.params.profileId);
+    if (!profile) return res.status(404).json({ ok: false, error: 'Profile not found' });
+    return res.json(profile);
+  });
+  app.get('/api/profiles/:profileId/orders', (req, res) => res.json(store.dashboardState().orders.filter((order) => order.profileId === req.params.profileId)));
+  app.get('/api/profiles/:profileId/fills', (req, res) => res.json(store.dashboardState().fills.filter((fill) => fill.profileId === req.params.profileId)));
+  app.get('/api/profiles/:profileId/settlements', (req, res) => res.json(store.dashboardState().settlements.filter((settlement) => settlement.profileId === req.params.profileId)));
   app.get('/api/intents', (_req, res) => res.json(store.dashboardState().intents));
   app.get('/api/orders', (_req, res) => res.json(store.dashboardState().orders));
   app.get('/api/fills', (_req, res) => res.json(store.dashboardState().fills));

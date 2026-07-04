@@ -25,26 +25,26 @@ test('plans a capped sell exit for profitable single-fill exposure', () => {
   assert.equal(plan.ok, true);
   if (!plan.ok) return;
   assert.equal(plan.intent.side, 'SELL');
-  assert.equal(plan.intent.strategy, 'BTC5M_SINGLE_FILL_PROFIT_EXIT');
+  assert.equal(plan.intent.strategy, 'UPDOWN_SINGLE_FILL_PROFIT_EXIT');
   assert.equal(plan.intent.label, 'YES');
   assert.equal(plan.intent.limitPrice, 0.5);
   assert.equal(plan.intent.shares, 10);
   assert.equal(plan.expectedPnlUsd, 0.4999999999999999);
 });
 
-test('blocks profit exit when the live bid is below the configured floor', () => {
+test('blocks profit exit when the live bid is below the configured profit rate', () => {
   const plan = planSingleFillProfitExit({
     candidate: candidate(),
     orders: [
       order('YES', 'BUY', { filledSize: 10, avgFillPrice: 0.45, status: 'filled' }),
       order('NO', 'BUY', { filledSize: 0, status: 'posted', clobOrderId: 'no-open' }),
     ],
-    orderbooks: [quote('yes-token', 0.49)],
-    appConfig: config(),
+    orderbooks: [quote('yes-token', 0.46)],
+    appConfig: { ...config(), singleFillProfitExitMinPrice: 0 },
     nowMs,
   });
 
-  assert.deepEqual(plan, { ok: false, reason: 'EXIT_BID_BELOW_MIN' });
+  assert.deepEqual(plan, { ok: false, reason: 'EXIT_PROFIT_RATE_BELOW_MIN' });
 });
 
 test('blocks profit exit after the filled side has already been sold', () => {
@@ -52,7 +52,7 @@ test('blocks profit exit after the filled side has already been sold', () => {
     candidate: candidate(),
     orders: [
       order('YES', 'BUY', { filledSize: 10, avgFillPrice: 0.45, status: 'filled' }),
-      order('YES', 'SELL', { filledSize: 10, avgFillPrice: 0.51, status: 'filled', strategy: 'BTC5M_SINGLE_FILL_PROFIT_EXIT' }),
+      order('YES', 'SELL', { filledSize: 10, avgFillPrice: 0.51, status: 'filled', strategy: 'UPDOWN_SINGLE_FILL_PROFIT_EXIT' }),
       order('NO', 'BUY', { filledSize: 0, status: 'posted', clobOrderId: 'no-open' }),
     ],
     orderbooks: [quote('yes-token', 0.6)],
@@ -122,7 +122,7 @@ test('does not execute another profit exit after a prior exit sell fill', async 
   };
   const store = new InMemoryStore('live', 2_000, { persistencePath: false });
   store.recordOrder(order('YES', 'BUY', { filledSize: 10, avgFillPrice: 0.45, status: 'filled' }));
-  store.recordOrder(order('YES', 'SELL', { filledSize: 10, avgFillPrice: 0.51, status: 'filled', strategy: 'BTC5M_SINGLE_FILL_PROFIT_EXIT' }));
+  store.recordOrder(order('YES', 'SELL', { filledSize: 10, avgFillPrice: 0.51, status: 'filled', strategy: 'UPDOWN_SINGLE_FILL_PROFIT_EXIT' }));
   store.recordOrder(order('NO', 'BUY', { filledSize: 0, status: 'posted', clobOrderId: 'no-open' }));
   let balanceReads = 0;
   const adapter = {
@@ -153,6 +153,7 @@ test('does not execute another profit exit after a prior exit sell fill', async 
 function config(): AppConfig {
   return {
     singleFillProfitExitEnabled: true,
+    singleFillProfitExitMinRate: 0.05,
     singleFillProfitExitMinPrice: 0.5,
     singleFillProfitExitMinPnlUsd: 0.3,
     singleFillProfitExitPriceOffset: 0.01,
@@ -165,6 +166,7 @@ function config(): AppConfig {
 
 function candidate(): SingleFillProfitExitCandidate {
   return {
+    profileId: 'btc-5m',
     roundId: 'btc-updown-5m-1782432000',
     eventSlug: 'btc-updown-5m-1782432000',
     startAt: '2026-06-26T00:00:00.000Z',
@@ -178,6 +180,9 @@ function candidate(): SingleFillProfitExitCandidate {
 function order(label: 'YES' | 'NO', side: 'BUY' | 'SELL', patch: Partial<OrderRecord>): OrderRecord {
   return {
     id: `order-${label}-${side}`,
+    profileId: 'btc-5m',
+    asset: 'btc',
+    interval: '5m',
     intentId: `intent-${label}-${side}`,
     roundId: 'btc-updown-5m-1782432000',
     eventSlug: 'btc-updown-5m-1782432000',

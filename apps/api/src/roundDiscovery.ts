@@ -1,4 +1,4 @@
-import type { BtcRoundConfig } from '../../../packages/shared/src';
+import type { BtcRoundConfig, MarketProfile } from '../../../packages/shared/src';
 import type { AppConfig } from './config';
 
 type GammaMarket = Record<string, unknown> & {
@@ -28,36 +28,35 @@ type CachedMarket = {
   fetchedAt: number;
 };
 
-const ASSET = 'btc';
-const INTERVAL = '5m';
-const ROUND_DURATION_SECONDS = 300;
 const DISCOVERY_CACHE_MS = 10_000;
 
-export class Btc5mRoundDiscovery {
+export class RecurringCryptoRoundDiscovery {
   private readonly marketCache = new Map<string, CachedMarket>();
 
   constructor(private readonly config: AppConfig) {}
 
   async discover(params: {
+    profile?: MarketProfile;
     latestPrice?: number | null;
     persistedStrike?: (roundId: string) => number | undefined;
   } = {}): Promise<DiscoveryResult> {
     const diagnostics: string[] = [];
+    const profile = params.profile || this.config.marketProfiles[0];
     const nowSec = Math.floor(Date.now() / 1000);
-    const nextRoundStartSec = Math.floor(nowSec / ROUND_DURATION_SECONDS) * ROUND_DURATION_SECONDS + ROUND_DURATION_SECONDS;
-    const candidates = upcomingRoundWindow(nextRoundStartSec, 6);
+    const nextRoundStartSec = Math.floor(nowSec / profile.roundDurationSeconds) * profile.roundDurationSeconds + profile.roundDurationSeconds;
+    const candidates = upcomingRoundWindow(profile, nextRoundStartSec, 6);
     for (const candidate of candidates) {
       const result = await this.marketFromSlug(candidate.slug);
-      if (!isUsableMarket(result.market)) continue;
+      if (!isUsableMarket(result.market, profile)) continue;
       return {
-        round: this.marketToRound(result.market, params.latestPrice, params.persistedStrike),
+        round: this.marketToRound(profile, result.market, params.latestPrice, params.persistedStrike),
         diagnostics,
       };
     }
 
-    diagnostics.push(`No usable BTC 5m Gamma market found in ${candidates.length} deterministic slug candidates.`);
+    diagnostics.push(`No usable ${profile.label} Gamma market found in ${candidates.length} deterministic slug candidates.`);
     return {
-      round: fallbackRound(nextRoundStartSec, this.config, params.latestPrice ?? undefined),
+      round: fallbackRound(profile, nextRoundStartSec, params.latestPrice ?? undefined),
       diagnostics,
     };
   }
@@ -74,10 +73,10 @@ export class Btc5mRoundDiscovery {
     return result;
   }
 
-  private marketToRound(market: GammaMarket, latestPrice?: number | null, persistedStrike?: (roundId: string) => number | undefined): BtcRoundConfig {
+  private marketToRound(profile: MarketProfile, market: GammaMarket, latestPrice?: number | null, persistedStrike?: (roundId: string) => number | undefined): BtcRoundConfig {
     const slug = String(market.slug || '');
-    const roundStartSec = parseRoundStartSec(slug);
-    const endAt = normalizeDate(market.endDate) || new Date((roundStartSec + ROUND_DURATION_SECONDS) * 1000).toISOString();
+    const roundStartSec = parseRoundStartSec(slug, profile);
+    const endAt = normalizeDate(market.endDate) || new Date((roundStartSec + profile.roundDurationSeconds) * 1000).toISOString();
     const startAt = new Date(roundStartSec * 1000).toISOString();
     const tokenIds = parseStringArray(market.clobTokenIds);
     const outcomes = parseStringArray(market.outcomes).map((item) => item.toLowerCase());
@@ -90,7 +89,7 @@ export class Btc5mRoundDiscovery {
     return {
       eventSlug: slug,
       conditionId: stringValue(market.conditionId),
-      title: String(market.question || `${this.config.marketConfig.title} ${new Date(roundStartSec * 1000).toISOString()}`),
+      title: String(market.question || `${profile.title} ${new Date(roundStartSec * 1000).toISOString()}`),
       startAt,
       endAt,
       strike,
@@ -108,42 +107,46 @@ function stringValue(value: unknown): string | undefined {
   return trimmed || undefined;
 }
 
-function upcomingRoundWindow(anchorRoundStartSec: number, futureCount: number): Array<{ slug: string; roundStartSec: number }> {
+function upcomingRoundWindow(profile: MarketProfile, anchorRoundStartSec: number, futureCount: number): Array<{ slug: string; roundStartSec: number }> {
   const items: Array<{ slug: string; roundStartSec: number }> = [];
   for (let offset = 0; offset <= futureCount; offset += 1) {
-    const roundStartSec = anchorRoundStartSec + offset * ROUND_DURATION_SECONDS;
-    items.push({ slug: `${ASSET}-updown-${INTERVAL}-${roundStartSec}`, roundStartSec });
+    const roundStartSec = anchorRoundStartSec + offset * profile.roundDurationSeconds;
+    items.push({ slug: `${profile.seriesSlug}-${roundStartSec}`, roundStartSec });
   }
   return items;
 }
 
-function isUsableMarket(market: GammaMarket | null): market is GammaMarket {
+function isUsableMarket(market: GammaMarket | null, profile: MarketProfile): market is GammaMarket {
   if (!market || market.active === false || market.closed === true) return false;
   const slug = String(market.slug || '');
-  if (!/^btc-updown-5m-\d+$/.test(slug)) return false;
+  if (!new RegExp(`^${escapeRegExp(profile.seriesSlug)}-\\d+$`).test(slug)) return false;
   const tokenIds = parseStringArray(market.clobTokenIds);
   const outcomes = parseStringArray(market.outcomes).map((item) => item.toLowerCase());
   return tokenIds.length >= 2 && outcomes.includes('up') && outcomes.includes('down');
 }
 
-function fallbackRound(nextRoundStartSec: number, config: AppConfig, latestPrice?: number): BtcRoundConfig {
-  const slug = `${config.marketConfig.seriesSlug}-${nextRoundStartSec}`;
+function fallbackRound(profile: MarketProfile, nextRoundStartSec: number, latestPrice?: number): BtcRoundConfig {
+  const slug = `${profile.seriesSlug}-${nextRoundStartSec}`;
   return {
     eventSlug: slug,
-    title: `${config.marketConfig.title} ${new Date(nextRoundStartSec * 1000).toISOString()}`,
+    title: `${profile.title} ${new Date(nextRoundStartSec * 1000).toISOString()}`,
     startAt: new Date(nextRoundStartSec * 1000).toISOString(),
-    endAt: new Date((nextRoundStartSec + ROUND_DURATION_SECONDS) * 1000).toISOString(),
-    strike: finitePositive(latestPrice) || config.marketConfig.strike || 1,
+    endAt: new Date((nextRoundStartSec + profile.roundDurationSeconds) * 1000).toISOString(),
+    strike: finitePositive(latestPrice) || 1,
     yesTokenId: '',
     noTokenId: '',
   };
 }
 
-function parseRoundStartSec(slug: string): number {
-  const match = slug.match(/btc-updown-5m-(\d+)$/);
+function parseRoundStartSec(slug: string, profile: MarketProfile): number {
+  const match = slug.match(new RegExp(`${escapeRegExp(profile.seriesSlug)}-(\\d+)$`));
   const parsed = Number(match?.[1]);
-  if (!Number.isFinite(parsed) || parsed <= 0) return Math.floor(Date.now() / 1000 / ROUND_DURATION_SECONDS) * ROUND_DURATION_SECONDS;
+  if (!Number.isFinite(parsed) || parsed <= 0) return Math.floor(Date.now() / 1000 / profile.roundDurationSeconds) * profile.roundDurationSeconds;
   return Math.floor(parsed);
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function parseStringArray(value: unknown): string[] {

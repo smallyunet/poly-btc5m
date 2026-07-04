@@ -32,3 +32,12 @@ nano .env
 ```
 
 Keep `EXECUTION_MODE=monitor` until Binance price feed, CLOB token IDs, balances, and signed-order posting have been verified.
+
+For multi-profile rollout, keep longer intervals in monitor until shadow data is reviewed:
+
+```dotenv
+BTC_5M_PROFILE_STATUS=live
+BTC_15M_PROFILE_STATUS=monitor
+BTC_1H_PROFILE_STATUS=monitor
+SINGLE_FILL_PROFIT_EXIT_MIN_RATE=0.05
+```

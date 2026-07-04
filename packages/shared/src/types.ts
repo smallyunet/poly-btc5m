@@ -8,12 +8,72 @@ export type Regime = 'CHOP' | 'TREND' | 'LOW_ACTIVITY' | 'UNKNOWN';
 
 export type StrategyProfile = 'classic' | 'experiment_next_round';
 
+export type MarketAsset = 'btc' | 'eth' | 'sol';
+
+export type MarketInterval = '5m' | '15m' | '1h';
+
+export type MarketProfileId = `${MarketAsset}-${MarketInterval}`;
+
+export type MarketProfileStatus = 'disabled' | 'monitor' | 'live';
+
+export type MarketProfile = {
+  id: MarketProfileId;
+  asset: MarketAsset;
+  assetSymbol: 'BTC' | 'ETH' | 'SOL';
+  interval: MarketInterval;
+  label: string;
+  status: MarketProfileStatus;
+  seriesSlug: string;
+  title: string;
+  roundDurationSeconds: number;
+  decisionLeadSeconds: number;
+  avoidExpirySeconds: number;
+  priceFeedSymbol: string;
+  entry: {
+    enabled: boolean;
+    limitPrice: number;
+    sharesPerSide: number;
+    minSecondsToStart: number;
+    confirmTicks: number;
+  };
+  profitExit: {
+    enabled: boolean;
+    minProfitRate: number;
+    minPnlUsd: number;
+    priceOffset: number;
+    maxOrderbookAgeMs: number;
+    minSecondsToEnd: number;
+    maxSecondsToEnd: number;
+  };
+  hedge: {
+    enabled: boolean;
+    earlyWindowSeconds: number;
+    earlyMaxPairCost: number;
+    emergencyWindowSeconds: number;
+    emergencyMaxPrice: number;
+    emergencyMaxPairCost: number;
+    finalWindowSeconds: number;
+    minSecondsToEnd: number;
+    maxPrice: number;
+    priceOffset: number;
+    maxPairCost: number;
+  };
+  cooldown: {
+    baseMs: number;
+    priceCapMs: number;
+    executionMs: number;
+    repeatWindowMs: number;
+    secondMs: number;
+    thirdMs: number;
+  };
+};
+
 export type StrategyId =
-  | 'BTC5M_DUAL_45'
-  | 'BTC5M_NEXT_ROUND_50_49_STOP_ON_SINGLE'
-  | 'BTC5M_SINGLE_FILL_HEDGE'
-  | 'BTC5M_SINGLE_FILL_PROFIT_EXIT'
-  | 'BTC5M_SINGLE_EXIT';
+  | 'UPDOWN_DUAL_ENTRY'
+  | 'UPDOWN_NEXT_ROUND_50_49_STOP_ON_SINGLE'
+  | 'UPDOWN_SINGLE_FILL_HEDGE'
+  | 'UPDOWN_SINGLE_FILL_PROFIT_EXIT'
+  | 'UPDOWN_SINGLE_EXIT';
 
 export type BotRuntimeStatus = {
   status: 'running' | 'degraded';
@@ -27,8 +87,6 @@ export type BotRuntimeStatus = {
   buildTime?: string;
   dockerReady: boolean;
   activeStrategyProfile: StrategyProfile;
-  entryCooldownUntil?: string;
-  entryCooldownReason?: string;
   entryConfig?: EntryRuntimeConfig;
   experimentStoppedAt?: string;
   experimentStoppedReason?: string;
@@ -243,6 +301,9 @@ export type MarketParticipationSnapshot = {
 
 export type StateSnapshot = {
   id: string;
+  profileId: MarketProfileId;
+  asset: MarketAsset;
+  interval: MarketInterval;
   capturedAt: string;
   round: RoundSnapshot;
   features: BtcFeatureSnapshot;
@@ -258,6 +319,9 @@ export type StateSnapshot = {
 
 export type TradeIntent = {
   id: string;
+  profileId: MarketProfileId;
+  asset: MarketAsset;
+  interval: MarketInterval;
   strategy: StrategyId;
   roundId: string;
   tokenId: string;
@@ -280,6 +344,9 @@ export type StrategyCondition = {
 };
 
 export type StrategyCheck = {
+  profileId: MarketProfileId;
+  asset: MarketAsset;
+  interval: MarketInterval;
   strategy: StrategyId;
   title: string;
   status: 'eligible' | 'blocked' | 'not-applicable';
@@ -302,6 +369,9 @@ export type StrategyRule = {
 
 export type OrderRecord = {
   id: string;
+  profileId: MarketProfileId;
+  asset: MarketAsset;
+  interval: MarketInterval;
   intentId: string;
   strategy?: StrategyId;
   strategyProfile?: StrategyProfile;
@@ -327,6 +397,9 @@ export type OrderRecord = {
 
 export type FillRecord = {
   id: string;
+  profileId: MarketProfileId;
+  asset: MarketAsset;
+  interval: MarketInterval;
   strategy?: StrategyId;
   strategyProfile?: StrategyProfile;
   roundId: string;
@@ -345,6 +418,9 @@ export type FillRecord = {
 
 export type SettlementRecord = {
   id: string;
+  profileId: MarketProfileId;
+  asset: MarketAsset;
+  interval: MarketInterval;
   roundId: string;
   eventSlug: string;
   marketTitle?: string;
@@ -361,6 +437,9 @@ export type SettlementRecord = {
 
 export type RuntimeLogRecord = {
   id: string;
+  profileId?: MarketProfileId;
+  asset?: MarketAsset;
+  interval?: MarketInterval;
   level: 'info' | 'warn' | 'error';
   source: 'worker' | 'api' | 'execution' | 'market-data' | 'operator' | 'telegram';
   message: string;
@@ -379,13 +458,26 @@ export type DataFeedStatus = {
 
 export type DashboardState = {
   runtime: BotRuntimeStatus;
-  feed: DataFeedStatus;
-  latestSnapshot: StateSnapshot;
+  profiles: ProfileDashboardState[];
   intents: TradeIntent[];
   orders: OrderRecord[];
   fills: FillRecord[];
   settlements: SettlementRecord[];
   runtimeLogs: RuntimeLogRecord[];
   rules: StrategyRule[];
+};
+
+export type ProfileDashboardState = {
+  profile: MarketProfile;
+  feed: DataFeedStatus;
+  latestSnapshot?: StateSnapshot;
   strategyChecks: StrategyCheck[];
+  entryCooldownUntil?: string;
+  entryCooldownReason?: string;
+  stats: {
+    orders: number;
+    fills: number;
+    settlements: number;
+    settledPnl: number;
+  };
 };

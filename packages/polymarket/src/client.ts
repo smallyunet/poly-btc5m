@@ -1,5 +1,5 @@
 import { Wallet } from '@ethersproject/wallet';
-import type { FillRecord, OrderBookLevel, OrderBookQuote, OrderRecord, PositionSnapshot, TradeIntent } from '../../shared/src';
+import type { FillRecord, MarketAsset, MarketInterval, MarketProfileId, OrderBookLevel, OrderBookQuote, OrderRecord, PositionSnapshot, TradeIntent } from '../../shared/src';
 
 const POLYMARKET_DATA_API_URL = 'https://data-api.polymarket.com';
 
@@ -36,7 +36,7 @@ export type CollateralBalanceAllowance = {
   allowance: number | null;
 };
 
-export type FillTarget = Pick<OrderRecord, 'roundId' | 'eventSlug' | 'marketTitle' | 'imageUrl' | 'tokenId' | 'label' | 'clobOrderId'>;
+export type FillTarget = Pick<OrderRecord, 'profileId' | 'asset' | 'interval' | 'roundId' | 'eventSlug' | 'marketTitle' | 'imageUrl' | 'tokenId' | 'label' | 'clobOrderId'>;
 
 type ClobModule = {
   ClobClient: new (params: Record<string, unknown>) => any;
@@ -131,7 +131,7 @@ export class PolymarketAdapter {
     };
   }
 
-  async getRecentFills(params: { roundId: string; eventSlug: string; tokenLabels: Map<string, 'YES' | 'NO'>; tokenId?: string; marketTitle?: string; imageUrl?: string }): Promise<FillRecord[]> {
+  async getRecentFills(params: { profileId: MarketProfileId; asset: MarketAsset; interval: MarketInterval; roundId: string; eventSlug: string; tokenLabels: Map<string, 'YES' | 'NO'>; tokenId?: string; marketTitle?: string; imageUrl?: string }): Promise<FillRecord[]> {
     const client = await this.authenticatedClient();
     const trades = await client.getTrades(params.tokenId ? { asset_id: params.tokenId } : undefined, true);
     if (!Array.isArray(trades)) return [];
@@ -149,6 +149,9 @@ export class PolymarketAdapter {
             const clobOrderId = typeof makerOrder.order_id === 'string' ? makerOrder.order_id : undefined;
             return {
               id: String(`${trade.id || trade.transaction_hash || trade.match_time || Date.now()}:${clobOrderId || index}:${size}`),
+              profileId: params.profileId,
+              asset: params.asset,
+              interval: params.interval,
               roundId: params.roundId,
               eventSlug: params.eventSlug,
               marketTitle: params.marketTitle,
@@ -173,6 +176,9 @@ export class PolymarketAdapter {
       if (!label || price == null || size == null || size <= 0) return [];
       return [{
           id: String(trade.id || `${tokenId}-${trade.match_time || Date.now()}`),
+          profileId: params.profileId,
+          asset: params.asset,
+          interval: params.interval,
           roundId: params.roundId,
           eventSlug: params.eventSlug,
           marketTitle: params.marketTitle,
@@ -214,6 +220,9 @@ export class PolymarketAdapter {
             if (price == null || size == null || size <= 0) return null;
             return {
               id: String(`${trade.id || trade.transaction_hash || trade.match_time || Date.now()}:${clobOrderId || index}:${size}`),
+              profileId: target.profileId,
+              asset: target.asset,
+              interval: target.interval,
               roundId: target.roundId,
               eventSlug: target.eventSlug,
               marketTitle: target.marketTitle,
@@ -240,6 +249,9 @@ export class PolymarketAdapter {
       if (price == null || size == null || size <= 0) return [];
       return [{
           id: String(trade.id || `${tokenId}-${trade.match_time || Date.now()}`),
+          profileId: target.profileId,
+          asset: target.asset,
+          interval: target.interval,
           roundId: target.roundId,
           eventSlug: target.eventSlug,
           marketTitle: target.marketTitle,

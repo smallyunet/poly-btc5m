@@ -2,15 +2,15 @@ import { PolymarketAdapter } from '../../../packages/polymarket/src';
 import { loadConfig } from './config';
 import { MarketDataService } from './marketData';
 import { ParticipationService } from './participation';
-import { Btc5mRoundDiscovery } from './roundDiscovery';
-import { runBotTick } from './runtime';
+import { RecurringCryptoRoundDiscovery } from './roundDiscovery';
+import { runAllProfilesTick } from './runtime';
 import { createServer } from './server';
 import { InMemoryStore } from './store';
 import { TelegramNotifier } from './telegramNotifier';
 
 async function main() {
   const config = loadConfig();
-  const store = new InMemoryStore(config.executionMode, config.tickIntervalMs, { persistencePath: config.runtimeStatePath, maxRecords: config.runtimeMaxRecords }, config.activeStrategyProfile, entryRuntimeConfig(config));
+  const store = new InMemoryStore(config.executionMode, config.tickIntervalMs, { persistencePath: config.runtimeStatePath, maxRecords: config.runtimeMaxRecords }, config.activeStrategyProfile, entryRuntimeConfig(config), config.marketProfiles);
   const adapter = new PolymarketAdapter({
     clobApiUrl: config.clobApiUrl,
     chainId: config.chainId,
@@ -18,7 +18,7 @@ async function main() {
     depositWallet: config.depositWallet,
   });
   const data = new MarketDataService(config, store);
-  const discovery = new Btc5mRoundDiscovery(config);
+  const discovery = new RecurringCryptoRoundDiscovery(config);
   const participation = new ParticipationService(config);
   const telegramNotifier = new TelegramNotifier({ appConfig: config, store, adapter });
   data.start();
@@ -31,7 +31,8 @@ async function main() {
     }
     tickRunning = true;
     try {
-      const snapshot = await runBotTick(config, store, data, adapter, discovery, participation);
+      const snapshots = await runAllProfilesTick(config, store, data, adapter, discovery, participation);
+      const snapshot = snapshots[0];
       store.markRunningIfDegraded();
       store.recordRuntimeLog({
         level: snapshot.diagnostics.some((item) => /failed|stale|blocked|error/i.test(item)) ? 'warn' : 'info',
@@ -45,7 +46,7 @@ async function main() {
         const message = error instanceof Error ? error.message : String(error);
         store.recordRuntimeLog({ level: 'warn', source: 'telegram', message: `Telegram notifier skipped after ${source} tick: ${message}` });
       }
-      console.log('[api] tick', JSON.stringify({ source, capturedAt: snapshot.capturedAt, round: snapshot.round.id, phase: snapshot.round.phase, regime: snapshot.regime }));
+      console.log('[api] tick', JSON.stringify({ source, profiles: snapshots.map((item) => ({ profileId: item.profileId, capturedAt: item.capturedAt, round: item.round.id, phase: item.round.phase, regime: item.regime })) }));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       store.markDegraded();

@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import path from 'node:path';
 
-import { btcMarketConfigSchema, type BtcMarketConfig, type ExecutionMode, type StrategyProfile } from '../../../packages/shared/src';
+import { btcMarketConfigSchema, type BtcMarketConfig, type ExecutionMode, type MarketInterval, type MarketProfile, type MarketProfileId, type StrategyProfile } from '../../../packages/shared/src';
 
 export type AppConfig = {
   port: number;
@@ -71,6 +71,7 @@ export type AppConfig = {
   singleFillHedgePriceOffset: number;
   singleFillHedgeMaxPairCost: number;
   singleFillProfitExitEnabled: boolean;
+  singleFillProfitExitMinRate: number;
   singleFillProfitExitMinPrice: number;
   singleFillProfitExitMinPnlUsd: number;
   singleFillProfitExitPriceOffset: number;
@@ -87,6 +88,7 @@ export type AppConfig = {
   telegramRoundSummaryOnOrderOnly: boolean;
   telegramIdleSummaryIntervalMs: number;
   marketConfig: BtcMarketConfig;
+  marketProfiles: MarketProfile[];
 };
 
 export function loadConfig(): AppConfig {
@@ -159,6 +161,7 @@ export function loadConfig(): AppConfig {
     singleFillHedgePriceOffset: numberEnv('SINGLE_FILL_HEDGE_PRICE_OFFSET', 0.01),
     singleFillHedgeMaxPairCost: numberEnv('SINGLE_FILL_HEDGE_MAX_PAIR_COST', 1.1),
     singleFillProfitExitEnabled: booleanEnv('SINGLE_FILL_PROFIT_EXIT_ENABLED', true),
+    singleFillProfitExitMinRate: numberEnv('SINGLE_FILL_PROFIT_EXIT_MIN_RATE', 0.05),
     singleFillProfitExitMinPrice: numberEnv('SINGLE_FILL_PROFIT_EXIT_MIN_PRICE', 0.5),
     singleFillProfitExitMinPnlUsd: numberEnv('SINGLE_FILL_PROFIT_EXIT_MIN_PNL_USD', 0.3),
     singleFillProfitExitPriceOffset: numberEnv('SINGLE_FILL_PROFIT_EXIT_PRICE_OFFSET', 0.01),
@@ -175,17 +178,131 @@ export function loadConfig(): AppConfig {
     telegramRoundSummaryOnOrderOnly: booleanEnv('TELEGRAM_ROUND_SUMMARY_ON_ORDER_ONLY', true),
     telegramIdleSummaryIntervalMs: parsePositiveInteger(process.env.TELEGRAM_IDLE_SUMMARY_INTERVAL_MS, 4 * 60 * 60_000),
     marketConfig: loadMarketConfig(),
+    marketProfiles: loadMarketProfiles(orderSharesPerSide),
   };
 }
 
 function loadMarketConfig(): BtcMarketConfig {
   return btcMarketConfigSchema.parse({
     seriesSlug: process.env.MARKET_SERIES_SLUG || 'btc-updown-5m',
-    title: process.env.MARKET_TITLE || 'Polymarket BTC 5m',
+    title: process.env.MARKET_TITLE || 'Polymarket Up/Down',
     roundDurationSeconds: 300,
     decisionLeadSeconds: 30,
     avoidExpirySeconds: 30,
   });
+}
+
+function loadMarketProfiles(orderSharesPerSide: number): MarketProfile[] {
+  const baseLimitPrice = numberEnv('DUAL_LIMIT_PRICE', 0.45);
+  const baseMinSecondsToStart = parsePositiveInteger(process.env.ENTRY_MIN_SECONDS_TO_START, 15);
+  const baseConfirmTicks = parsePositiveInteger(process.env.ENTRY_CONFIRM_TICKS, 3);
+  const btcStatuses: Record<MarketInterval, MarketProfile['status']> = {
+    '5m': parseProfileStatus(process.env.BTC_5M_PROFILE_STATUS, process.env.EXECUTION_MODE === 'live' ? 'live' : 'monitor'),
+    '15m': parseProfileStatus(process.env.BTC_15M_PROFILE_STATUS, 'monitor'),
+    '1h': parseProfileStatus(process.env.BTC_1H_PROFILE_STATUS, 'monitor'),
+  };
+  const profiles: MarketProfile[] = [
+    makeProfile({ id: 'btc-5m', assetSymbol: 'BTC', interval: '5m', status: btcStatuses['5m'], durationSeconds: 300, decisionLeadSeconds: 30, orderSharesPerSide, limitPrice: baseLimitPrice, minSecondsToStart: baseMinSecondsToStart, confirmTicks: baseConfirmTicks, hedgeWindows: [60, 30, 15], priceFeedSymbol: 'btcusdt' }),
+    makeProfile({ id: 'btc-15m', assetSymbol: 'BTC', interval: '15m', status: btcStatuses['15m'], durationSeconds: 900, decisionLeadSeconds: 90, orderSharesPerSide, limitPrice: baseLimitPrice, minSecondsToStart: baseMinSecondsToStart, confirmTicks: baseConfirmTicks, hedgeWindows: [180, 90, 30], priceFeedSymbol: 'btcusdt' }),
+    makeProfile({ id: 'btc-1h', assetSymbol: 'BTC', interval: '1h', status: btcStatuses['1h'], durationSeconds: 3600, decisionLeadSeconds: 180, orderSharesPerSide, limitPrice: baseLimitPrice, minSecondsToStart: baseMinSecondsToStart, confirmTicks: baseConfirmTicks, hedgeWindows: [600, 300, 60], priceFeedSymbol: 'btcusdt' }),
+  ];
+
+  for (const assetSymbol of ['ETH', 'SOL'] as const) {
+    for (const interval of ['5m', '15m', '1h'] as const) {
+      const durationSeconds = interval === '5m' ? 300 : interval === '15m' ? 900 : 3600;
+      const decisionLeadSeconds = interval === '5m' ? 30 : interval === '15m' ? 90 : 180;
+      const hedgeWindows: [number, number, number] = interval === '5m' ? [60, 30, 15] : interval === '15m' ? [180, 90, 30] : [600, 300, 60];
+      profiles.push(makeProfile({
+        id: `${assetSymbol.toLowerCase()}-${interval}` as MarketProfileId,
+        assetSymbol,
+        interval,
+        status: 'disabled',
+        durationSeconds,
+        decisionLeadSeconds,
+        orderSharesPerSide,
+        limitPrice: baseLimitPrice,
+        minSecondsToStart: baseMinSecondsToStart,
+        confirmTicks: baseConfirmTicks,
+        hedgeWindows,
+        priceFeedSymbol: `${assetSymbol.toLowerCase()}usdt`,
+      }));
+    }
+  }
+  return profiles;
+}
+
+function makeProfile(params: {
+  id: MarketProfileId;
+  assetSymbol: 'BTC' | 'ETH' | 'SOL';
+  interval: MarketInterval;
+  status: MarketProfile['status'];
+  durationSeconds: number;
+  decisionLeadSeconds: number;
+  orderSharesPerSide: number;
+  limitPrice: number;
+  minSecondsToStart: number;
+  confirmTicks: number;
+  hedgeWindows: [early: number, final: number, emergency: number];
+  priceFeedSymbol: string;
+}): MarketProfile {
+  const asset = params.assetSymbol.toLowerCase() as MarketProfile['asset'];
+  return {
+    id: params.id,
+    asset,
+    assetSymbol: params.assetSymbol,
+    interval: params.interval,
+    label: `${params.assetSymbol} ${params.interval}`,
+    status: params.status,
+    seriesSlug: `${asset}-updown-${params.interval}`,
+    title: `Polymarket ${params.assetSymbol} ${params.interval}`,
+    roundDurationSeconds: params.durationSeconds,
+    decisionLeadSeconds: params.decisionLeadSeconds,
+    avoidExpirySeconds: params.interval === '1h' ? 120 : 30,
+    priceFeedSymbol: params.priceFeedSymbol,
+    entry: {
+      enabled: true,
+      limitPrice: params.limitPrice,
+      sharesPerSide: params.orderSharesPerSide,
+      minSecondsToStart: params.minSecondsToStart,
+      confirmTicks: params.confirmTicks,
+    },
+    profitExit: {
+      enabled: booleanEnv('SINGLE_FILL_PROFIT_EXIT_ENABLED', true),
+      minProfitRate: numberEnv('SINGLE_FILL_PROFIT_EXIT_MIN_RATE', 0.05),
+      minPnlUsd: numberEnv('SINGLE_FILL_PROFIT_EXIT_MIN_PNL_USD', 0.3),
+      priceOffset: numberEnv('SINGLE_FILL_PROFIT_EXIT_PRICE_OFFSET', 0.01),
+      maxOrderbookAgeMs: parsePositiveInteger(process.env.SINGLE_FILL_PROFIT_EXIT_MAX_ORDERBOOK_AGE_MS, 1_000),
+      minSecondsToEnd: params.interval === '1h' ? 60 : parsePositiveInteger(process.env.SINGLE_FILL_PROFIT_EXIT_MIN_SECONDS_TO_END, 20),
+      maxSecondsToEnd: params.interval === '1h' ? 2700 : parsePositiveInteger(process.env.SINGLE_FILL_PROFIT_EXIT_MAX_SECONDS_TO_END, 240),
+    },
+    hedge: {
+      enabled: booleanEnv('SINGLE_FILL_HEDGE_ENABLED', true),
+      earlyWindowSeconds: params.hedgeWindows[0],
+      earlyMaxPairCost: numberEnv('SINGLE_FILL_EARLY_HEDGE_MAX_PAIR_COST', 1.02),
+      emergencyWindowSeconds: params.hedgeWindows[2],
+      emergencyMaxPrice: numberEnv('SINGLE_FILL_EMERGENCY_HEDGE_MAX_PRICE', 0.75),
+      emergencyMaxPairCost: numberEnv('SINGLE_FILL_EMERGENCY_HEDGE_MAX_PAIR_COST', 1.2),
+      finalWindowSeconds: params.hedgeWindows[1],
+      minSecondsToEnd: params.interval === '1h' ? 15 : parsePositiveInteger(process.env.SINGLE_FILL_HEDGE_MIN_SECONDS_TO_END, 5),
+      maxPrice: numberEnv('SINGLE_FILL_HEDGE_MAX_PRICE', 0.65),
+      priceOffset: numberEnv('SINGLE_FILL_HEDGE_PRICE_OFFSET', 0.01),
+      maxPairCost: numberEnv('SINGLE_FILL_HEDGE_MAX_PAIR_COST', 1.1),
+    },
+    cooldown: {
+      baseMs: parsePositiveInteger(process.env.SINGLE_FILL_COOLDOWN_BASE_MS, 30 * 60_000),
+      priceCapMs: parsePositiveInteger(process.env.SINGLE_FILL_COOLDOWN_PRICE_CAP_MS, 60 * 60_000),
+      executionMs: parsePositiveInteger(process.env.SINGLE_FILL_COOLDOWN_EXECUTION_MS, 2 * 60 * 60_000),
+      repeatWindowMs: parsePositiveInteger(process.env.SINGLE_FILL_COOLDOWN_REPEAT_WINDOW_MS, 2 * 60 * 60_000),
+      secondMs: parsePositiveInteger(process.env.SINGLE_FILL_COOLDOWN_SECOND_MS, 2 * 60 * 60_000),
+      thirdMs: parsePositiveInteger(process.env.SINGLE_FILL_COOLDOWN_THIRD_MS, 4 * 60 * 60_000),
+    },
+  };
+}
+
+function parseProfileStatus(value: string | undefined, fallback: MarketProfile['status']): MarketProfile['status'] {
+  const normalized = value?.trim().toLowerCase();
+  if (normalized === 'live' || normalized === 'monitor' || normalized === 'disabled') return normalized;
+  return fallback;
 }
 
 function parseExecutionMode(value: string | undefined): ExecutionMode {

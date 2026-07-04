@@ -6,8 +6,8 @@ import type { InMemoryStore } from './store';
 
 const FAILED_ORDER_COOLDOWN_MS = 5 * 60_000;
 const MIN_MARKETABLE_BUY_NOTIONAL_USD = 1;
-const EXPERIMENT_ENTRY_STRATEGY = 'BTC5M_NEXT_ROUND_50_49_STOP_ON_SINGLE';
-const ENTRY_STRATEGIES = new Set(['BTC5M_DUAL_45', EXPERIMENT_ENTRY_STRATEGY]);
+const EXPERIMENT_ENTRY_STRATEGY = 'UPDOWN_NEXT_ROUND_50_49_STOP_ON_SINGLE';
+const ENTRY_STRATEGIES = new Set(['UPDOWN_DUAL_ENTRY', EXPERIMENT_ENTRY_STRATEGY]);
 export type ExecuteIntentsParams = {
   appConfig: AppConfig;
   adapter: PolymarketAdapter;
@@ -80,6 +80,9 @@ async function executeOneIntent(params: ExecuteIntentsParams, intent: TradeInten
     });
     const order: OrderRecord = {
       id: `order-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+      profileId: intent.profileId,
+      asset: intent.asset,
+      interval: intent.interval,
       intentId: intent.id,
       strategy: intent.strategy,
       strategyProfile: strategyProfileForIntent(intent),
@@ -172,7 +175,7 @@ async function batchBuyBalanceGate(params: ExecuteIntentsParams): Promise<BatchG
 }
 
 async function executionGate(params: ExecuteIntentsParams, intent: TradeIntent): Promise<GateResult> {
-  const executionKey = [intent.roundId, intent.strategy, intent.tokenId, intent.side].join(':');
+  const executionKey = [intent.profileId, intent.roundId, intent.strategy, intent.tokenId, intent.side].filter(Boolean).join(':');
   const reject = (reason: string, recordFailure = false): GateResult => ({ ok: false, executionKey, reason, recordFailure });
 
   if (!roundTokens(params.snapshot).has(intent.tokenId)) return reject('TOKEN_NOT_IN_ROUND');
@@ -226,10 +229,13 @@ function quoteExecutionGate(quote: OrderBookQuote | undefined, intent: TradeInte
 function localOrder(snapshot: StateSnapshot, intent: TradeIntent): OrderRecord {
   return {
     id: `local-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+    profileId: intent.profileId,
+    asset: intent.asset,
+    interval: intent.interval,
     intentId: intent.id,
     strategy: intent.strategy,
     strategyProfile: strategyProfileForIntent(intent),
-    executionKey: [intent.roundId, intent.strategy, intent.tokenId, intent.side].join(':'),
+    executionKey: [intent.profileId, intent.roundId, intent.strategy, intent.tokenId, intent.side].filter(Boolean).join(':'),
     roundId: intent.roundId,
     eventSlug: snapshot.round.eventSlug,
     marketTitle: snapshot.round.title,
@@ -265,5 +271,5 @@ function roundDownShares(shares: number): number {
 }
 
 function strategyProfileForIntent(intent: TradeIntent): OrderRecord['strategyProfile'] {
-  return intent.strategy === 'BTC5M_NEXT_ROUND_50_49_STOP_ON_SINGLE' ? 'experiment_next_round' : 'classic';
+  return intent.strategy === 'UPDOWN_NEXT_ROUND_50_49_STOP_ON_SINGLE' ? 'experiment_next_round' : 'classic';
 }

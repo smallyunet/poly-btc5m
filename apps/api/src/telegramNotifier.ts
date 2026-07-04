@@ -63,15 +63,15 @@ export class TelegramNotifier {
   private nextRoundSummary(state: DashboardState, notifiedRoundKeys: Set<string>): PendingNotification | null {
     const settlements = [...state.settlements].sort((a, b) => toTime(b.resolvedAt) - toTime(a.resolvedAt));
     for (const settlement of settlements) {
-      const key = `${settlement.roundId}:${settlement.status}`;
+      const key = notificationRoundKey(settlement);
       if (notifiedRoundKeys.has(key)) continue;
-      if (roundEndMs(settlement.roundId) < this.startedAtMs) {
+      if (roundEndMs(settlement.roundId, settlement.profileId) < this.startedAtMs) {
         this.options.store.markTelegramRoundSummaryNotified(key);
         continue;
       }
-      const orders = state.orders.filter((order) => order.roundId === settlement.roundId);
+      const orders = state.orders.filter((order) => order.roundId === settlement.roundId && sameProfile(order.profileId, settlement.profileId));
       if (this.options.appConfig.telegramRoundSummaryOnOrderOnly && !orders.length) continue;
-      const fills = state.fills.filter((fill) => fill.roundId === settlement.roundId);
+      const fills = state.fills.filter((fill) => fill.roundId === settlement.roundId && sameProfile(fill.profileId, settlement.profileId));
       return {
         kind: 'round-summary',
         key,
@@ -86,9 +86,9 @@ export class TelegramNotifier {
     this.bootstrapped = true;
     const notifiedRoundKeys = new Set(this.options.store.getTelegramNotificationState().notifiedRoundSummaryKeys);
     for (const settlement of state.settlements) {
-      const key = `${settlement.roundId}:${settlement.status}`;
+      const key = notificationRoundKey(settlement);
       if (notifiedRoundKeys.has(key)) continue;
-      if (roundEndMs(settlement.roundId) <= this.startedAtMs) {
+      if (roundEndMs(settlement.roundId, settlement.profileId) <= this.startedAtMs) {
         this.options.store.markTelegramRoundSummaryNotified(key);
       }
     }
@@ -154,11 +154,12 @@ export class TelegramNotifier {
 
 function buildRoundSummary(state: DashboardState, settlement: SettlementRecord, orders: OrderRecord[], fills: FillRecord[]): string {
   const title = settlement.marketTitle || settlement.roundId;
+  const profileLabel = profileLabelFor(state, settlement.profileId);
   const statusLabel = settlement.status === 'settled' ? 'settled' : 'estimated';
   const filledOrders = orders.filter((order) => order.status === 'filled' || order.status === 'partially_filled').length;
   const failedOrders = orders.filter((order) => order.status === 'failed').length;
   const cancelledOrders = orders.filter((order) => order.status === 'cancelled').length;
-  return formatTelegramSummary('BTC5M Round Summary', [
+  return formatTelegramSummary(`${profileLabel} Round Summary`, [
     section('Market', [
       ['Round', title],
       ['Status', `${statusLabel}${settlement.winningLabel ? `, winner ${settlement.winningLabel}` : ''}`],
@@ -179,28 +180,45 @@ function buildRoundSummary(state: DashboardState, settlement: SettlementRecord, 
 }
 
 function buildIdleSummary(state: DashboardState, referenceMs: number): string {
-  const entryCheck = state.strategyChecks.find((check) => check.strategy === 'BTC5M_DUAL_45' || check.strategy === 'BTC5M_NEXT_ROUND_50_49_STOP_ON_SINGLE');
-  const blockers = topBlockers(entryCheck);
   const openOrders = state.orders.filter((order) => order.status === 'posted' || order.status === 'partially_filled' || (state.runtime.executionMode === 'monitor' && order.status === 'local')).length;
-  return formatTelegramSummary('BTC5M Idle Summary', [
+  const profileRows = profileIdleRows(state);
+  return formatTelegramSummary('Profile Idle Summary', [
     section('Idle', [
       ['No order', formatDuration(Date.now() - referenceMs)],
-      ['Round', state.latestSnapshot.round.title || state.latestSnapshot.round.id],
-      ['Phase', `${state.latestSnapshot.round.phase}, ${state.latestSnapshot.round.secondsToStart > 0 ? `${Math.round(state.latestSnapshot.round.secondsToStart)}s to start` : `${Math.round(state.latestSnapshot.round.secondsToEnd)}s to end`}`],
     ]),
-    section('Market', [
-      ['Regime', `${state.latestSnapshot.regime}, chop ${formatNumber(state.latestSnapshot.features.chopScore, 1)}`],
-      ['Open', `${openOrders} orders | ${state.latestSnapshot.positions.length} positions`],
-      ['Cooldown', state.runtime.entryCooldownUntil ? `${state.runtime.entryCooldownReason || 'active'} until ${state.runtime.entryCooldownUntil}` : 'none'],
+    section('Profiles', profileRows.length ? profileRows : [
+      ['Latest', 'pending'],
     ]),
     section('PnL', [
       ['Settled', formatPnlStatus(totalSettledPnl(state))],
+      ['Open', `${openOrders} orders`],
     ]),
     section('System', [
       ['Runtime', `${state.runtime.executionMode}, ${state.runtime.status}`],
     ]),
-    blockersSection(blockers),
+    blockersSection(topProfileBlockers(state)),
   ]);
+}
+
+function profileIdleRows(state: DashboardState): Array<[string, string]> {
+  return state.profiles.map((profileState) => {
+    const snapshot = profileState.latestSnapshot;
+    const entryCheck = profileState.strategyChecks.find((check) => check.strategy === 'UPDOWN_DUAL_ENTRY' || check.strategy === 'UPDOWN_NEXT_ROUND_50_49_STOP_ON_SINGLE');
+    const phase = snapshot
+      ? `${snapshot.round.phase}, ${snapshot.round.secondsToStart > 0 ? `${Math.round(snapshot.round.secondsToStart)}s to start` : `${Math.round(snapshot.round.secondsToEnd)}s to end`}`
+      : 'pending';
+    const cooldown = profileState.entryCooldownUntil ? 'cooldown' : 'clear';
+    return [profileState.profile.label, `${profileState.profile.status}, ${phase}, entry ${entryCheck?.status || 'pending'}, ${cooldown}, PnL ${formatSignedMoney(profileState.stats.settledPnl)}`];
+  });
+}
+
+function topProfileBlockers(state: DashboardState): string[] {
+  return state.profiles
+    .flatMap((profileState) => {
+      const entryCheck = profileState.strategyChecks.find((check) => check.strategy === 'UPDOWN_DUAL_ENTRY' || check.strategy === 'UPDOWN_NEXT_ROUND_50_49_STOP_ON_SINGLE');
+      return topBlockers(entryCheck).map((blocker) => `${profileState.profile.label}: ${blocker}`);
+    })
+    .slice(0, 4);
 }
 
 function fillSideSummary(fills: FillRecord[], label: 'YES' | 'NO'): string {
@@ -241,11 +259,29 @@ function toTime(value: string): number {
   return Number.isFinite(time) ? time : 0;
 }
 
-function roundEndMs(roundId: string): number {
-  const match = roundId.match(/btc-updown-5m-(\d+)$/);
+function notificationRoundKey(settlement: SettlementRecord): string {
+  return `${settlement.profileId}:${settlement.roundId}:${settlement.status}`;
+}
+
+function sameProfile(left: string, right: string): boolean {
+  return left === right;
+}
+
+function profileLabelFor(state: DashboardState, profileId: string): string {
+  return state.profiles.find((item) => item.profile.id === profileId)?.profile.label || profileId;
+}
+
+function roundEndMs(roundId: string, profileId?: string): number {
+  const match = roundId.match(/[a-z]+-updown-(?:5m|15m|1h)-(\d+)$/);
   const startSeconds = Number(match?.[1]);
   if (!Number.isFinite(startSeconds) || startSeconds <= 0) return 0;
-  return startSeconds * 1000 + 5 * 60_000;
+  return startSeconds * 1000 + roundDurationMs(profileId);
+}
+
+function roundDurationMs(profileId?: string): number {
+  if (profileId?.endsWith('-15m')) return 15 * 60_000;
+  if (profileId?.endsWith('-1h')) return 60 * 60_000;
+  return 5 * 60_000;
 }
 
 function sum(values: number[]): number {
@@ -327,5 +363,5 @@ function truncateTelegramMessage(text: string): string {
   if (text.length <= maxLength) return text;
   const plainText = text.replace(/<\/?[^>]+>/g, '');
   const truncated = `${plainText.slice(0, maxLength - 80)}\n... truncated`;
-  return `<b>BTC5M Notification</b>\n<pre>${escapeHtml(truncated)}</pre>`;
+  return `<b>Up/Down Notification</b>\n<pre>${escapeHtml(truncated)}</pre>`;
 }

@@ -28,6 +28,21 @@ type TabType = 'terminal' | 'portfolio' | 'orderbooks' | 'activity' | 'strategy'
 type ActivitySubTab = 'daily' | 'rounds' | 'orders';
 type DashboardOrder = DashboardState['orders'][number];
 type DashboardFill = DashboardState['fills'][number];
+type DashboardProfileState = DashboardState['profiles'][number];
+type DashboardSnapshot = NonNullable<DashboardProfileState['latestSnapshot']>;
+type VisibleState = {
+  runtime: DashboardState['runtime'];
+  profileState: DashboardProfileState;
+  feed: DashboardProfileState['feed'];
+  snapshot: DashboardSnapshot;
+  strategyChecks: DashboardProfileState['strategyChecks'];
+  intents: DashboardState['intents'];
+  orders: DashboardState['orders'];
+  fills: DashboardState['fills'];
+  settlements: DashboardState['settlements'];
+  runtimeLogs: DashboardState['runtimeLogs'];
+  rules: DashboardState['rules'];
+};
 type RoundExecutionSummary = {
   roundId: string;
   title: string;
@@ -120,14 +135,14 @@ function netFilledShares(round: Pick<RoundExecutionSummary, 'filledBuyYes' | 'fi
   };
 }
 
-function portfolioStatusTone(status?: NonNullable<DashboardState['latestSnapshot']['portfolio']>['status']): 'good' | 'warn' | 'bad' | 'neutral' {
+function portfolioStatusTone(status?: NonNullable<DashboardSnapshot['portfolio']>['status']): 'good' | 'warn' | 'bad' | 'neutral' {
   if (status === 'enabled') return 'good';
   if (status === 'partial') return 'warn';
   if (status === 'unavailable') return 'bad';
   return 'neutral';
 }
 
-function portfolioStatusLabel(status?: NonNullable<DashboardState['latestSnapshot']['portfolio']>['status']): string {
+function portfolioStatusLabel(status?: NonNullable<DashboardSnapshot['portfolio']>['status']): string {
   if (status === 'enabled') return 'ready';
   if (status === 'partial') return 'partial';
   if (status === 'unavailable') return 'unavailable';
@@ -142,16 +157,16 @@ function formatPercentValue(value: number | null | undefined): string {
   return value == null || !Number.isFinite(value) ? 'n/a' : `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`;
 }
 
-function positionValue(position: DashboardState['latestSnapshot']['positions'][number]): number {
+function positionValue(position: DashboardSnapshot['positions'][number]): number {
   if (position.currentValue != null) return position.currentValue;
   return position.shares * (position.currentPrice ?? position.avgPrice);
 }
 
-function positionCost(position: DashboardState['latestSnapshot']['positions'][number]): number {
+function positionCost(position: DashboardSnapshot['positions'][number]): number {
   return position.shares * position.avgPrice;
 }
 
-function positionPnl(position: DashboardState['latestSnapshot']['positions'][number]): number {
+function positionPnl(position: DashboardSnapshot['positions'][number]): number {
   if (position.cashPnl != null) return position.cashPnl;
   return positionValue(position) - positionCost(position);
 }
@@ -246,16 +261,23 @@ function formatEtRange(startMs: number, durationMs: number): string {
 }
 
 function roundStartTime(roundId: string): number {
-  const match = roundId.match(/btc-updown-5m-(\d+)$/);
+  const match = roundId.match(/[a-z]+-updown-(?:5m|15m|1h)-(\d+)$/);
   if (!match) return 0;
   const startMs = Number(match[1]) * 1000;
   return Number.isFinite(startMs) ? startMs : 0;
 }
 
-function derivedRoundTitle(roundId: string): string {
+function roundDurationMsForProfile(profileId: string | undefined): number {
+  if (profileId?.endsWith('-15m')) return 15 * 60_000;
+  if (profileId?.endsWith('-1h')) return 60 * 60_000;
+  return 5 * 60_000;
+}
+
+function derivedRoundTitle(roundId: string, profileId?: string): string {
   const startMs = roundStartTime(roundId);
   if (!startMs) return roundId;
-  return `Bitcoin Up or Down - ${formatEtRange(startMs, 5 * 60_000)}`;
+  const asset = profileId?.startsWith('eth-') ? 'Ethereum' : profileId?.startsWith('sol-') ? 'Solana' : 'Bitcoin';
+  return `${asset} Up or Down - ${formatEtRange(startMs, roundDurationMsForProfile(profileId))}`;
 }
 
 function toSortTime(value: string): number {
@@ -296,7 +318,7 @@ function clamp01(value: number): number {
   return Math.max(0, Math.min(1, value));
 }
 
-function scoreBreakdown(features: DashboardState['latestSnapshot']['features']) {
+function scoreBreakdown(features: DashboardSnapshot['features']) {
   const centerCrosses = features.centerCross120s ?? features.cross120s;
   const centerMinExcursion = features.centerMinBiExcursionBps120s ?? features.minBiExcursionBps120s;
   const centerBalance = features.centerExcursionBalance120s ?? features.excursionBalance120s;
@@ -344,11 +366,11 @@ function orderFilledShares(order: DashboardOrder, fills: DashboardFill[]): numbe
 }
 
 function orderMarketTitle(order: DashboardOrder): string {
-  return order.marketTitle || derivedRoundTitle(order.roundId);
+  return order.marketTitle || derivedRoundTitle(order.roundId, order.profileId);
 }
 
 function strategySourceLabel(order: DashboardOrder): string {
-  return order.strategy || 'BTC5M_DUAL_45';
+  return order.strategy || 'UPDOWN_DUAL_ENTRY';
 }
 
 function orderFailureReason(order: DashboardOrder): string {
@@ -364,7 +386,7 @@ function isRoutineHeartbeatLog(log: RuntimeLogRecord): boolean {
     && (message === 'scheduled tick completed.' || message === 'scheduled tick completed');
 }
 
-function buildRoundExecutionSummaries(state: DashboardState): RoundExecutionSummary[] {
+function buildRoundExecutionSummaries(state: Pick<DashboardState, 'orders' | 'fills' | 'settlements'>): RoundExecutionSummary[] {
   const byRound = new Map<string, {
     orders: DashboardOrder[];
     fills: DashboardFill[];
@@ -401,7 +423,7 @@ function buildRoundExecutionSummaries(state: DashboardState): RoundExecutionSumm
 
     return {
       roundId,
-      title: metadataSource?.marketTitle || derivedRoundTitle(roundId),
+      title: metadataSource?.marketTitle || derivedRoundTitle(roundId, metadataSource?.profileId),
       imageUrl: metadataSource?.imageUrl,
       latestTime,
       startTime,
@@ -492,6 +514,7 @@ export function App() {
   // Navigation Tab State
   const [activeTab, setActiveTab] = React.useState<TabType>(() => tabFromUrl());
   const [activitySubTab, setActivitySubTab] = React.useState<ActivitySubTab>('daily');
+  const [selectedProfileId, setSelectedProfileId] = React.useState<string>('all');
 
   // Logs Search & Filter States
   const [logSearch, setLogSearch] = React.useState('');
@@ -533,6 +556,29 @@ export function App() {
     return () => window.removeEventListener('popstate', handlePopState);
   }, []);
 
+  const visibleState = React.useMemo<VisibleState | null>(() => {
+    if (!state) return null;
+    const profileState = selectedProfileId === 'all'
+      ? state.profiles.find((item) => item.latestSnapshot) || state.profiles[0]
+      : state.profiles.find((item) => item.profile.id === selectedProfileId);
+    if (!profileState?.latestSnapshot) return null;
+    const profileId = profileState.profile.id;
+    const filterByProfile = selectedProfileId !== 'all';
+    return {
+      runtime: state.runtime,
+      profileState,
+      feed: profileState.feed,
+      snapshot: profileState.latestSnapshot,
+      strategyChecks: profileState.strategyChecks,
+      intents: filterByProfile ? state.intents.filter((intent) => intent.profileId === profileId) : state.intents,
+      orders: filterByProfile ? state.orders.filter((order) => order.profileId === profileId) : state.orders,
+      fills: filterByProfile ? state.fills.filter((fill) => fill.profileId === profileId) : state.fills,
+      settlements: filterByProfile ? state.settlements.filter((settlement) => settlement.profileId === profileId) : state.settlements,
+      runtimeLogs: state.runtimeLogs,
+      rules: state.rules,
+    };
+  }, [state, selectedProfileId]);
+
   // Filter logs in real-time
   const filteredLogs = React.useMemo(() => {
     if (!state?.runtimeLogs) return [];
@@ -548,12 +594,12 @@ export function App() {
     });
   }, [state?.runtimeLogs, logSearch, logLevel, logSource, hideRoutineLogs]);
 
-  const roundSummaries = React.useMemo(() => state ? buildRoundExecutionSummaries(state) : [], [state]);
+  const roundSummaries = React.useMemo(() => visibleState ? buildRoundExecutionSummaries(visibleState) : [], [visibleState]);
   const dailySummaries = React.useMemo(() => buildDailyExecutionSummaries(roundSummaries), [roundSummaries]);
 
   const dailyPagination = usePaginatedRows(dailySummaries, DAILY_PAGE_SIZE);
   const roundPagination = usePaginatedRows(roundSummaries, ROUND_PAGE_SIZE);
-  const ordersPagination = usePaginatedRows(state?.orders ?? [], ORDER_PAGE_SIZE);
+  const ordersPagination = usePaginatedRows(visibleState?.orders ?? [], ORDER_PAGE_SIZE);
   const logsPagination = usePaginatedRows(filteredLogs, LOG_PAGE_SIZE);
 
   React.useEffect(() => {
@@ -563,7 +609,7 @@ export function App() {
 
   React.useEffect(() => {
     ordersPagination.setPage(1);
-  }, [state?.orders.length]);
+  }, [visibleState?.orders.length, selectedProfileId]);
 
   React.useEffect(() => {
     logsPagination.setPage(1);
@@ -595,15 +641,27 @@ export function App() {
       <Shell>
         <div className="empty">
           <RefreshCw className="spin" size={48} style={{ color: 'var(--color-primary)' }} />
-          <p className="emptyText">Initializing BTC 5m Trading Terminal...</p>
+          <p className="emptyText">Initializing Up/Down Trading Terminal...</p>
         </div>
       </Shell>
     );
   }
 
-  const snapshot = state.latestSnapshot;
+  if (!visibleState) {
+    return (
+      <Shell>
+        <div className="empty">
+          <RefreshCw className="spin" size={48} style={{ color: 'var(--color-primary)' }} />
+          <p className="emptyText">Waiting for profile snapshots...</p>
+        </div>
+      </Shell>
+    );
+  }
+
+  const viewState = visibleState;
+  const snapshot = viewState.snapshot;
   const portfolio = snapshot.portfolio;
-  const entryCheck = state.strategyChecks.find((check) => check.strategy === 'BTC5M_DUAL_45');
+  const entryCheck = viewState.strategyChecks.find((check) => check.strategy === 'UPDOWN_DUAL_ENTRY');
   const entryEligibleLabel = entryCheck?.status === 'eligible' ? 'entry eligible' : 'entry blocked';
   const entryConditions = entryCheck?.conditions || [];
   const conditionByLabel = (label: string) => entryConditions.find((condition) => condition.label === label);
@@ -629,20 +687,23 @@ export function App() {
     'Holder concentration',
   ].map(conditionByLabel).filter((condition): condition is StrategyCheck['conditions'][number] => Boolean(condition));
   const participationDecisionPassed = participationConditions.length > 0 && participationConditions.every((condition) => condition.passed);
-  const activeOrders = state.orders.filter((order) => (
+  const activeOrders = viewState.orders.filter((order) => (
     order.status === 'posted'
     || order.status === 'partially_filled'
     || (state.runtime.executionMode === 'monitor' && order.status === 'local')
   )).length;
-  const pnl = state.settlements.reduce((sum, item) => sum + item.pnl, 0);
+  const pnl = viewState.settlements.reduce((sum, item) => sum + item.pnl, 0);
   const portfolioPnl = portfolio?.totalPnl ?? pnl;
   const signalLogCount = state.runtimeLogs.filter((log) => !isRoutineHeartbeatLog(log)).length;
   const alertLogCount = state.runtimeLogs.filter((log) => log.level === 'warn' || log.level === 'error').length;
+  const selectedProfile = selectedProfileId === 'all'
+    ? null
+    : state.profiles.find((item) => item.profile.id === selectedProfileId)?.profile || null;
 
   // Time progress bar calculation
   const secondsToEnd = snapshot.round.secondsToEnd;
   const secondsToStart = snapshot.round.secondsToStart;
-  const totalRoundDuration = 300; // 5 minutes
+  const totalRoundDuration = selectedProfile?.roundDurationSeconds || 300;
   const isRoundStarted = secondsToStart <= 0;
   const roundElapsedSeconds = isRoundStarted ? totalRoundDuration - Math.max(0, secondsToEnd) : 0;
   const progressPct = Math.min(100, Math.max(0, (roundElapsedSeconds / totalRoundDuration) * 100));
@@ -682,9 +743,9 @@ export function App() {
     ? fixedSharesActive ? `FIXED ${fixedSharesLabel}` : 'SCORE SIZE'
     : 'UNKNOWN';
   const entryConfigValue = entryBypassActive ? 'BYPASS ALL' : 'RULE GATED';
-  const entryCooldownActive = Boolean(state.runtime.entryCooldownUntil && new Date(state.runtime.entryCooldownUntil).getTime() > Date.now());
-  const entryCooldownRemaining = formatCooldownRemaining(state.runtime.entryCooldownUntil);
-  const entryCooldownReason = state.runtime.entryCooldownReason || 'no single-fill lockout';
+  const entryCooldownActive = Boolean(viewState.profileState.entryCooldownUntil && new Date(viewState.profileState.entryCooldownUntil).getTime() > Date.now());
+  const entryCooldownRemaining = formatCooldownRemaining(viewState.profileState.entryCooldownUntil);
+  const entryCooldownReason = viewState.profileState.entryCooldownReason || 'no single-fill lockout';
   const cooldownGateLabel = entryConfig?.bypassSingleFillCooldown ? 'BYPASSED' : 'ENFORCED';
   const participation = snapshot.participation;
   const participationStatus = participation?.status || 'missing';
@@ -718,9 +779,9 @@ export function App() {
       : `score policy active; ${scoreInfo.next}`
     : entryLimit == null ? 'waiting for strategy cap' : `active limit ${entryLimit.toFixed(3)}, ${scoreInfo.next}`;
   const priceSizeTone = entryBypassActive || fixedLimitActive || fixedSharesActive ? 'neutral' : scoreInfo.tone;
-  const currentEntryIntents = state.intents.filter((intent) => (
+  const currentEntryIntents = viewState.intents.filter((intent) => (
     intent.roundId === snapshot.round.id
-    && intent.strategy === 'BTC5M_DUAL_45'
+    && intent.strategy === 'UPDOWN_DUAL_ENTRY'
     && intent.status === 'generated'
   ));
   const previewShares = currentEntryIntents[0]?.shares;
@@ -756,7 +817,7 @@ export function App() {
     : 'neutral';
   const cooldownDetail = entryCooldownActive ? `${entryCooldownRemaining}; ${entryCooldownReason}` : entryCooldownReason;
   const executionLabel = state.runtime.executionMode === 'live' ? 'LIVE' : 'MONITOR';
-  const feedLabel = `${state.feed.source.toUpperCase()} / CLOB ${state.feed.clobConnected ? 'ON' : 'OFF'}`;
+  const feedLabel = `${viewState.feed.source.toUpperCase()} / CLOB ${viewState.feed.clobConnected ? 'ON' : 'OFF'}`;
 
   return (
     <Shell>
@@ -765,7 +826,7 @@ export function App() {
         <div>
           <h1>
             <Cpu size={24} style={{ color: 'var(--color-primary)' }} />
-            Poly BTC 5m Terminal
+            Poly Up/Down Terminal
           </h1>
         </div>
         
@@ -804,6 +865,56 @@ export function App() {
         </div>
       </section>
 
+      <section className="profileSwitcher" aria-label="Market profiles">
+        <button type="button" className={`profilePill ${selectedProfileId === 'all' ? 'active' : ''}`} onClick={() => setSelectedProfileId('all')}>
+          All
+        </button>
+        {state.profiles.map((item) => (
+          <button
+            key={item.profile.id}
+            type="button"
+            className={`profilePill ${selectedProfileId === item.profile.id ? 'active' : ''}`}
+            onClick={() => setSelectedProfileId(item.profile.id)}
+          >
+            <span>{item.profile.label}</span>
+            <em>{item.profile.status}</em>
+          </button>
+        ))}
+      </section>
+
+      {selectedProfileId === 'all' && (
+        <section className="profileMatrix" aria-label="Profile status matrix">
+          {state.profiles.map((item) => {
+            const profileEntryCheck = item.strategyChecks.find((check) => check.strategy === 'UPDOWN_DUAL_ENTRY');
+            const cooldownActive = Boolean(item.entryCooldownUntil && new Date(item.entryCooldownUntil).getTime() > Date.now());
+            return (
+              <button key={item.profile.id} type="button" className="profileCard" onClick={() => setSelectedProfileId(item.profile.id)}>
+                <div className="profileCardHeader">
+                  <strong>{item.profile.label}</strong>
+                  <Badge tone={item.profile.status === 'live' ? 'warn' : 'neutral'}>{item.profile.status}</Badge>
+                </div>
+                <div className="profileCardMetric">
+                  <span>Round</span>
+                  <em>{item.latestSnapshot?.round.phase || 'pending'}</em>
+                </div>
+                <div className="profileCardMetric">
+                  <span>Entry</span>
+                  <em>{profileEntryCheck?.status || 'pending'}</em>
+                </div>
+                <div className="profileCardMetric">
+                  <span>Cooldown</span>
+                  <em>{cooldownActive ? formatCooldownRemaining(item.entryCooldownUntil) : 'clear'}</em>
+                </div>
+                <div className="profileCardMetric">
+                  <span>PnL</span>
+                  <em>{formatSignedMoney(item.stats.settledPnl)}</em>
+                </div>
+              </button>
+            );
+          })}
+        </section>
+      )}
+
       <section className={`terminalCommandBar ${decisionState.tone}`} aria-label="Current terminal state">
         <div className="terminalCommandPrimary">
           <div className="terminalCommandIcon">
@@ -839,12 +950,12 @@ export function App() {
           <div className="terminalStat">
             <span>Feeds</span>
             <strong>{feedLabel}</strong>
-            <em>Binance {state.feed.binanceConnected ? 'on' : 'off'}</em>
+            <em>Binance {viewState.feed.binanceConnected ? 'on' : 'off'}</em>
           </div>
 	          <div className={`terminalStat pnl ${portfolioPnl > 0 ? 'good' : portfolioPnl < 0 ? 'bad' : 'neutral'}`}>
 	            <span>Portfolio</span>
 	            <strong>{formatSignedMoney(portfolioPnl)}</strong>
-	            <em>{portfolio ? `${portfolio.positionCount} positions / ${portfolioStatusLabel(portfolio.status)}` : `${activeOrders} open / ${state.settlements.length} settled`}</em>
+	            <em>{portfolio ? `${portfolio.positionCount} positions / ${portfolioStatusLabel(portfolio.status)}` : `${activeOrders} open / ${viewState.settlements.length} settled`}</em>
 	          </div>
         </div>
       </section>
@@ -858,7 +969,7 @@ export function App() {
                 <div className="decisionHeader">
                   <div>
                     <span className="decisionKicker">Primary Decision Surface</span>
-                    <strong>{entryCheck?.title || 'BTC 5m Dynamic Dual Pre-Round'}</strong>
+                    <strong>{entryCheck?.title || 'Up/Down Dual Entry'}</strong>
                   </div>
                   <Badge tone={entryStatusTone}>{entryStatusLabel}</Badge>
                 </div>
@@ -1090,7 +1201,7 @@ export function App() {
                   <strong>{failedEntryConditions.length ? `${failedEntryConditions.length} blockers` : 'clear'}</strong>
                 </summary>
                 <div className="checks">
-                  {state.strategyChecks.map((check) => (
+                  {viewState.strategyChecks.map((check) => (
                     <article key={check.strategy} className={`checkCard ${check.status}`}>
                       <div className="checkCardHeader">
                         <h3>{check.title}</h3>
@@ -1302,7 +1413,7 @@ export function App() {
 		                    <DecisionMetric label="Position Value" value={formatMoney(portfolio.positionValue)} detail={`${portfolio.positionCount} positions`} tone={portfolio.positionValue > 0 ? 'good' : 'neutral'} />
 		                    <DecisionMetric label="Open Cost" value={formatMoney(portfolio.positionCost)} detail="avg entry basis" tone="neutral" />
 		                    <DecisionMetric label="Unrealized PnL" value={formatSignedMoney(portfolio.unrealizedPnl)} detail="active positions" tone={portfolio.unrealizedPnl > 0 ? 'good' : portfolio.unrealizedPnl < 0 ? 'bad' : 'neutral'} />
-		                    <DecisionMetric label="Settled PnL" value={formatSignedMoney(portfolio.settledPnl)} detail={`${state.settlements.length} records`} tone={portfolio.settledPnl > 0 ? 'good' : portfolio.settledPnl < 0 ? 'bad' : 'neutral'} />
+		                    <DecisionMetric label="Settled PnL" value={formatSignedMoney(portfolio.settledPnl)} detail={`${viewState.settlements.length} records`} tone={portfolio.settledPnl > 0 ? 'good' : portfolio.settledPnl < 0 ? 'bad' : 'neutral'} />
 		                    <DecisionMetric label="Total PnL" value={formatSignedMoney(portfolio.totalPnl)} detail="settled + unrealized" tone={portfolio.totalPnl > 0 ? 'good' : portfolio.totalPnl < 0 ? 'bad' : 'neutral'} />
 		                    <DecisionMetric label="ROI" value={formatPercentValue(portfolio.roiPct)} detail="PnL / open cost" tone={portfolio.roiPct == null ? 'neutral' : portfolio.roiPct > 0 ? 'good' : portfolio.roiPct < 0 ? 'bad' : 'neutral'} />
 	                  </div>
@@ -1376,7 +1487,7 @@ export function App() {
               <h2>
                 Execution Review
                 <span className="panelSubTitle">
-                  {roundSummaries.length} rounds / {state.orders.length} orders
+                  {roundSummaries.length} rounds / {viewState.orders.length} orders
                 </span>
               </h2>
 
@@ -1403,7 +1514,7 @@ export function App() {
                   onClick={() => setActivitySubTab('orders')}
                 >
                   Orders
-                  <span>{state.orders.length}</span>
+                  <span>{viewState.orders.length}</span>
                 </button>
               </div>
 
@@ -1580,7 +1691,7 @@ export function App() {
               )}
 
               {activitySubTab === 'orders' && (
-                state.orders.length > 0 ? (
+                viewState.orders.length > 0 ? (
                   <>
                     <DataTable headers={['Time (ET)', 'Strategy', 'Market', 'Round ID', 'Outcome', 'Side', 'Price', 'Size', 'Status', 'Reason', 'Polymarket CLOB Order ID']}>
                       {ordersPagination.pageRows.map((order) => (
@@ -1616,7 +1727,7 @@ export function App() {
                     <PaginationControls
                       page={ordersPagination.page}
                       totalPages={ordersPagination.totalPages}
-                      totalRows={state.orders.length}
+                      totalRows={viewState.orders.length}
                       pageSize={ORDER_PAGE_SIZE}
                       onPageChange={ordersPagination.setPage}
                     />

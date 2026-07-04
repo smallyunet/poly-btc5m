@@ -128,11 +128,14 @@ export function evaluateEntry(snapshot: StateSnapshot, config: StrategyRiskConfi
   }
 
   const checks: StrategyCheck[] = [{
-    strategy: 'BTC5M_DUAL_45',
-    title: 'BTC 5m Dynamic Dual Pre-Round',
+    profileId: snapshot.profileId,
+    asset: snapshot.asset,
+    interval: snapshot.interval,
+    strategy: 'UPDOWN_DUAL_ENTRY',
+    title: 'Up/Down Dual Entry',
     status: reasons.length ? 'blocked' : 'eligible',
-    summary: 'Place paired YES/NO limit buys before the round starts using score-based limit pricing when BTC path structure is choppy.',
-    reason: reasons.length ? reasons.join(', ') : `Chop setup is eligible at ${limitPrice.toFixed(3)} per side.`,
+    summary: 'Place paired YES/NO limit buys before the round starts using the configured fixed limit and share size.',
+    reason: reasons.length ? reasons.join(', ') : `Dual entry is eligible at ${limitPrice.toFixed(3)} per side.`,
     blockers: reasons,
     amountUsd: shares * pairCost,
     limitPrice,
@@ -245,8 +248,11 @@ export function evaluateExit(snapshot: StateSnapshot, positions: PositionSnapsho
   const activePositions = positions.filter((item) => item.shares > 0).length;
 
   const checks: StrategyCheck[] = [{
-    strategy: 'BTC5M_SINGLE_EXIT',
-    title: 'BTC 5m Post-Start Exit Policy',
+    profileId: snapshot.profileId,
+    asset: snapshot.asset,
+    interval: snapshot.interval,
+    strategy: 'UPDOWN_SINGLE_EXIT',
+    title: 'Up/Down Post-Start Exit Policy',
     status: 'not-applicable',
     summary: 'Sell-side exits are disabled; regular post-start add/rebalance actions are disabled, except for the independent capped single-fill hedge rule.',
     reason: 'No sell-side exit or regular rebalance action is generated after round start.',
@@ -264,7 +270,10 @@ export function evaluateExit(snapshot: StateSnapshot, positions: PositionSnapsho
 function makeIntent(snapshot: StateSnapshot, label: 'YES' | 'NO', tokenId: string, shares: number, limitPrice: number, config: StrategyRiskConfig): TradeIntent {
   return {
     id: makeId('intent'),
-    strategy: 'BTC5M_DUAL_45',
+    profileId: snapshot.profileId,
+    asset: snapshot.asset,
+    interval: snapshot.interval,
+    strategy: 'UPDOWN_DUAL_ENTRY',
     roundId: snapshot.round.id,
     tokenId,
     label,

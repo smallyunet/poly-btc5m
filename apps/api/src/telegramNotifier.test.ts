@@ -51,6 +51,7 @@ test('sends a round summary with on-demand balance and marks the summary notifie
   const state = dashboardState({
     orders: [{
       id: 'order-1',
+      profileId: 'btc-5m',
       intentId: 'intent-1',
       roundId,
       eventSlug: roundId,
@@ -64,6 +65,7 @@ test('sends a round summary with on-demand balance and marks the summary notifie
     }],
     fills: [{
       id: 'fill-1',
+      profileId: 'btc-5m',
       roundId,
       eventSlug: roundId,
       tokenId: 'yes-token',
@@ -75,6 +77,7 @@ test('sends a round summary with on-demand balance and marks the summary notifie
     }],
     settlements: [{
       id: `settlement-${roundId}`,
+      profileId: 'btc-5m',
       roundId,
       eventSlug: roundId,
       marketTitle: 'BTC test round',
@@ -99,9 +102,9 @@ test('sends a round summary with on-demand balance and marks the summary notifie
   });
 
   assert.equal(balanceReads, 1);
-  assert.deepEqual(markedRoundKeys, [`${roundId}:settled`]);
+  assert.deepEqual(markedRoundKeys, [`btc-5m:${roundId}:settled`]);
   assert.equal(parseMode, 'HTML');
-  assert.match(sentText, /BTC5M Round Summary/);
+  assert.match(sentText, /BTC 5m Round Summary/);
   assert.match(sentText, /<b>PnL<\/b>/);
   assert.match(sentText, /Round: 🟢 PROFIT \+\$5\.50/);
   assert.match(sentText, /Settled: 🟢 PROFIT \+\$5\.50/);
@@ -149,6 +152,9 @@ test('bootstraps historical round summaries without sending backlog notification
     }],
     settlements: [{
       id: 'settlement-btc-updown-5m-2000',
+      profileId: 'btc-5m',
+      asset: 'btc',
+      interval: '5m',
       roundId: 'btc-updown-5m-2000',
       eventSlug: 'btc-updown-5m-2000',
       resolvedAt: new Date().toISOString(),
@@ -171,7 +177,51 @@ test('bootstraps historical round summaries without sending backlog notification
 
   assert.equal(balanceReads, 0);
   assert.equal(fetchCalls, 0);
-  assert.deepEqual(markedRoundKeys, ['btc-updown-5m-2000:settled']);
+  assert.deepEqual(markedRoundKeys, ['btc-5m:btc-updown-5m-2000:settled']);
+});
+
+test('sends idle summary with per-profile rows', async () => {
+  let sentText = '';
+  const notificationState: TelegramNotificationState = { notifiedRoundSummaryKeys: [] };
+  const notifier = new TelegramNotifier({
+    appConfig: { ...config(), telegramIdleSummaryIntervalMs: 1 },
+    store: fakeStore({
+      getTelegramNotificationState: () => notificationState,
+      markTelegramIdleSummaryNotified: (sentAt?: string) => {
+        notificationState.lastIdleSummaryAt = sentAt || new Date().toISOString();
+      },
+    }),
+    adapter: {
+      async getCollateralBalanceAllowance() {
+        return { balance: 12.34, allowance: 20 };
+      },
+    } as PolymarketAdapter,
+  });
+
+  const oldTime = new Date(Date.now() - 60_000).toISOString();
+  const state = dashboardState({
+    runtime: {
+      ...dashboardState().runtime,
+      startedAt: oldTime,
+    },
+    profiles: dashboardState().profiles.map((profile) => ({
+      ...profile,
+      latestSnapshot: profile.latestSnapshot ? { ...profile.latestSnapshot, capturedAt: oldTime } : undefined,
+    })),
+  });
+
+  await withFetch(async (_url, init) => {
+    const body = JSON.parse(String(init?.body));
+    sentText = body.text;
+    return new Response(JSON.stringify({ ok: true }), { status: 200 });
+  }, async () => {
+    await notifier.notifyAfterTick(state);
+  });
+
+  assert.match(sentText, /Profile Idle Summary/);
+  assert.match(sentText, /BTC 5m:/);
+  assert.match(sentText, /BTC 15m:/);
+  assert.match(sentText, /BTC 1h:/);
 });
 
 function config(): AppConfig {
@@ -214,69 +264,117 @@ function dashboardState(overrides: Partial<DashboardState> = {}): DashboardState
       dockerReady: true,
       activeStrategyProfile: 'classic',
     },
-    feed: { binanceConnected: true, clobConnected: true, priceSamples: 1, source: 'live' },
-    latestSnapshot: {
-      id: 'snapshot-1',
-      capturedAt: new Date().toISOString(),
-      round: {
-        id: 'btc-updown-5m-3000',
-        phase: 'decision',
-        eventSlug: 'btc-updown-5m-3000',
-        title: 'BTC current round',
-        startAt: new Date(Date.now() + 60_000).toISOString(),
-        endAt: new Date(Date.now() + 360_000).toISOString(),
-        secondsToStart: 60,
-        secondsToEnd: 360,
-        strike: 100000,
-        strikeStatus: 'locked',
-        yesTokenId: 'yes-token',
-        noTokenId: 'no-token',
-      },
-      features: {
-        price: 100000,
-        strike: 100000,
-        cross120s: 0,
-        crossFrequency: 0,
-        volatility120s: 0,
-        drift120s: 0,
-        momentum30s: 0,
-        range120s: 0,
-        range300s: 0,
-        rangeBps120s: 0,
-        rangeBps300s: 0,
-        centerPrice120s: 100000,
-        centerCross120s: 0,
-        latestRangePosition120s: 0,
-        upExcursionBps120s: 0,
-        downExcursionBps120s: 0,
-        minBiExcursionBps120s: 0,
-        excursionBalance120s: 0,
-        centerUpExcursionBps120s: 0,
-        centerDownExcursionBps120s: 0,
-        centerMinBiExcursionBps120s: 0,
-        centerExcursionBalance120s: 0,
-        driftRatio120s: 0,
-        momentumRatio30s: 0,
-        rangePercentile120s: null,
-        chopScore: 0,
-        samples120s: 1,
-        source: 'binance',
-        updatedAt: new Date().toISOString(),
-      },
-      regime: 'UNKNOWN',
-      orderbooks: [],
-      positions: [],
-      positionReadStatus: 'enabled',
-      diagnostics: [],
-    },
     intents: [],
     orders: [],
     fills: [],
     settlements: [],
     runtimeLogs: [],
     rules: [],
-    strategyChecks: [],
+    profiles: [
+      profileState('btc-5m', 'BTC 5m', '5m'),
+      profileState('btc-15m', 'BTC 15m', '15m'),
+      profileState('btc-1h', 'BTC 1h', '1h'),
+    ],
     ...overrides,
+  };
+}
+
+function profileState(id: 'btc-5m' | 'btc-15m' | 'btc-1h', label: string, interval: '5m' | '15m' | '1h'): DashboardState['profiles'][number] {
+  const duration = interval === '5m' ? 300 : interval === '15m' ? 900 : 3600;
+  const snapshot = {
+    ...baseSnapshot(),
+    profileId: id,
+    interval,
+    round: {
+      ...baseSnapshot().round,
+      id: `btc-updown-${interval}-3000`,
+      eventSlug: `btc-updown-${interval}-3000`,
+      title: `${label} current round`,
+    },
+  };
+  return {
+    profile: {
+      id,
+      asset: 'btc',
+      assetSymbol: 'BTC',
+      interval,
+      label,
+      status: interval === '5m' ? 'live' : 'monitor',
+      seriesSlug: `btc-updown-${interval}`,
+      title: `Polymarket ${label}`,
+      roundDurationSeconds: duration,
+      decisionLeadSeconds: interval === '5m' ? 30 : 90,
+      avoidExpirySeconds: 30,
+      priceFeedSymbol: 'btcusdt',
+      entry: { enabled: true, limitPrice: 0.45, sharesPerSide: 5, minSecondsToStart: 15, confirmTicks: 3 },
+      profitExit: { enabled: true, minProfitRate: 0.05, minPnlUsd: 0.3, priceOffset: 0.01, maxOrderbookAgeMs: 1000, minSecondsToEnd: 20, maxSecondsToEnd: 240 },
+      hedge: { enabled: true, earlyWindowSeconds: 60, earlyMaxPairCost: 1.02, emergencyWindowSeconds: 15, emergencyMaxPrice: 0.75, emergencyMaxPairCost: 1.2, finalWindowSeconds: 30, minSecondsToEnd: 5, maxPrice: 0.65, priceOffset: 0.01, maxPairCost: 1.1 },
+      cooldown: { baseMs: 900000, priceCapMs: 1800000, executionMs: 3600000, repeatWindowMs: 3600000, secondMs: 3600000, thirdMs: 3600000 },
+    },
+    feed: { binanceConnected: true, clobConnected: true, priceSamples: 1, source: 'live' },
+    latestSnapshot: snapshot,
+    strategyChecks: [],
+    stats: { orders: 0, fills: 0, settlements: 0, settledPnl: 0 },
+  };
+}
+
+function baseSnapshot(): NonNullable<DashboardState['profiles'][number]['latestSnapshot']> {
+  return {
+    profileId: 'btc-5m',
+    asset: 'btc',
+    interval: '5m',
+    id: 'snapshot-1',
+    capturedAt: new Date().toISOString(),
+    round: {
+      id: 'btc-updown-5m-3000',
+      phase: 'decision',
+      eventSlug: 'btc-updown-5m-3000',
+      title: 'BTC current round',
+      startAt: new Date(Date.now() + 60_000).toISOString(),
+      endAt: new Date(Date.now() + 360_000).toISOString(),
+      secondsToStart: 60,
+      secondsToEnd: 360,
+      strike: 100000,
+      strikeStatus: 'locked',
+      yesTokenId: 'yes-token',
+      noTokenId: 'no-token',
+    },
+    features: {
+      price: 100000,
+      strike: 100000,
+      cross120s: 0,
+      crossFrequency: 0,
+      volatility120s: 0,
+      drift120s: 0,
+      momentum30s: 0,
+      range120s: 0,
+      range300s: 0,
+      rangeBps120s: 0,
+      rangeBps300s: 0,
+      centerPrice120s: 100000,
+      centerCross120s: 0,
+      latestRangePosition120s: 0,
+      upExcursionBps120s: 0,
+      downExcursionBps120s: 0,
+      minBiExcursionBps120s: 0,
+      excursionBalance120s: 0,
+      centerUpExcursionBps120s: 0,
+      centerDownExcursionBps120s: 0,
+      centerMinBiExcursionBps120s: 0,
+      centerExcursionBalance120s: 0,
+      driftRatio120s: 0,
+      momentumRatio30s: 0,
+      rangePercentile120s: null,
+      chopScore: 0,
+      samples120s: 1,
+      source: 'binance',
+      updatedAt: new Date().toISOString(),
+    },
+    regime: 'UNKNOWN',
+    orderbooks: [],
+    positions: [],
+    positionReadStatus: 'enabled',
+    diagnostics: [],
   };
 }
 

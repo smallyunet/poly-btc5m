@@ -175,7 +175,7 @@ test('does not execute a hedge after a prior profit exit sell fill', async () =>
     id: 'classic-yes-buy',
     roundId: activeCandidate.roundId,
     eventSlug: activeCandidate.eventSlug,
-    strategy: 'BTC5M_DUAL_45',
+    strategy: 'UPDOWN_DUAL_ENTRY',
     filledSize: 10,
     avgFillPrice: 0.44,
     status: 'filled',
@@ -184,7 +184,7 @@ test('does not execute a hedge after a prior profit exit sell fill', async () =>
     id: 'classic-no-buy',
     roundId: activeCandidate.roundId,
     eventSlug: activeCandidate.eventSlug,
-    strategy: 'BTC5M_DUAL_45',
+    strategy: 'UPDOWN_DUAL_ENTRY',
     filledSize: 0,
     status: 'cancelled',
     clobOrderId: 'no-cancelled',
@@ -194,7 +194,7 @@ test('does not execute a hedge after a prior profit exit sell fill', async () =>
     intentId: 'profit-exit-intent',
     roundId: activeCandidate.roundId,
     eventSlug: activeCandidate.eventSlug,
-    strategy: 'BTC5M_SINGLE_FILL_PROFIT_EXIT',
+    strategy: 'UPDOWN_SINGLE_FILL_PROFIT_EXIT',
     side: 'SELL',
     filledSize: 10,
     avgFillPrice: 0.51,
@@ -423,6 +423,7 @@ function config(): AppConfig {
 
 function candidate(patch: Partial<SingleFillHedgeCandidate> = {}): SingleFillHedgeCandidate {
   return {
+    profileId: 'btc-5m',
     roundId: 'btc-updown-5m-1782432000',
     eventSlug: 'btc-updown-5m-1782432000',
     startAt: '2026-06-26T00:00:00.000Z',
@@ -437,6 +438,9 @@ function candidate(patch: Partial<SingleFillHedgeCandidate> = {}): SingleFillHed
 function order(label: 'YES' | 'NO', patch: Partial<OrderRecord>): OrderRecord {
   return {
     id: `order-${label}`,
+    profileId: 'btc-5m',
+    asset: 'btc',
+    interval: '5m',
     intentId: `intent-${label}`,
     roundId: 'btc-updown-5m-1782432000',
     eventSlug: 'btc-updown-5m-1782432000',

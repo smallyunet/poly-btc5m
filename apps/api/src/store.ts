@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { STRATEGY_RULES } from '../../../packages/strategy/src';
-import type { BotRuntimeStatus, DashboardState, DataFeedStatus, EntryRuntimeConfig, ExecutionMode, FillRecord, OrderRecord, RuntimeLogRecord, SettlementRecord, StateSnapshot, StrategyCheck, StrategyId, StrategyProfile, TradeIntent } from '../../../packages/shared/src';
+import type { BotRuntimeStatus, DashboardState, DataFeedStatus, EntryRuntimeConfig, ExecutionMode, FillRecord, MarketProfile, MarketProfileId, OrderRecord, RuntimeLogRecord, SettlementRecord, StateSnapshot, StrategyCheck, StrategyId, StrategyProfile, TradeIntent } from '../../../packages/shared/src';
 
 type OpenOrderLike = {
   id: string;
@@ -10,6 +10,7 @@ type OpenOrderLike = {
 };
 
 export type SingleFillHedgeCandidate = {
+  profileId: MarketProfileId;
   roundId: string;
   eventSlug: string;
   marketTitle?: string;
@@ -24,6 +25,7 @@ export type SingleFillHedgeCandidate = {
 export type SingleFillProfitExitCandidate = SingleFillHedgeCandidate;
 
 export type SingleFillHedgeOutcome = {
+  profileId: MarketProfileId;
   roundId: string;
   status: 'posted' | 'blocked' | 'failed' | 'monitor';
   reason: string;
@@ -45,7 +47,7 @@ type StoreOptions = {
 };
 
 type PersistedRuntimeState = {
-  version: 1;
+  version: 2;
   savedAt: string;
   intents: TradeIntent[];
   orders: OrderRecord[];
@@ -53,7 +55,7 @@ type PersistedRuntimeState = {
   settlements: SettlementRecord[];
   telegramNotifications?: TelegramNotificationState;
   roundStrikes?: Record<string, number>;
-  singleFillCooldown?: SingleFillCooldownRecord | null;
+  singleFillCooldowns: Record<string, SingleFillCooldownRecord>;
   singleFillCooldownRoundIds?: string[];
   pendingSingleFillReviewRoundIds?: string[];
   singleFillHedgeOutcomes?: Record<string, SingleFillHedgeOutcome>;
@@ -62,6 +64,7 @@ type PersistedRuntimeState = {
 };
 
 type SingleFillCooldownRecord = {
+  profileId: MarketProfileId;
   roundId: string;
   triggeredAt: string;
   finalizedAt?: string;
@@ -74,12 +77,14 @@ type SingleFillCooldownRecord = {
 };
 
 type SingleFillCooldownEvent = {
+  profileId: MarketProfileId;
   roundId: string;
   triggeredAt: string;
   category: string;
 };
 
 type ExperimentStopRecord = {
+  profileId: MarketProfileId;
   roundId: string;
   stoppedAt: string;
   reason: string;
@@ -93,21 +98,22 @@ export type TelegramNotificationState = {
 };
 
 const FINAL_SINGLE_FILL_GRACE_MS = 60_000;
-const CLASSIC_ENTRY_STRATEGY: StrategyId = 'BTC5M_DUAL_45';
-const EXPERIMENT_STRATEGY: StrategyId = 'BTC5M_NEXT_ROUND_50_49_STOP_ON_SINGLE';
+const CLASSIC_ENTRY_STRATEGY: StrategyId = 'UPDOWN_DUAL_ENTRY';
+const EXPERIMENT_STRATEGY: StrategyId = 'UPDOWN_NEXT_ROUND_50_49_STOP_ON_SINGLE';
 const PRICE_CAP_HEDGE_REASONS = new Set(['HEDGE_ASK_ABOVE_CAP', 'HEDGE_PAIR_COST_ABOVE_CAP', 'EARLY_HEDGE_PAIR_COST_ABOVE_CAP', 'EMERGENCY_HEDGE_PAIR_COST_ABOVE_CAP']);
 const BENIGN_HEDGE_REASONS = new Set(['NO_MATERIAL_SINGLE_FILL_EXPOSURE', 'NOT_IN_HEDGE_WINDOW', 'HEDGE_TOO_CLOSE_TO_EXPIRY']);
 
 export class InMemoryStore {
   private runtime: BotRuntimeStatus;
-  private latestSnapshot: StateSnapshot | null = null;
-  private latestFeed: DataFeedStatus = { binanceConnected: false, clobConnected: false, priceSamples: 0, source: 'unavailable' };
+  private readonly profiles: MarketProfile[];
+  private latestSnapshots = new Map<MarketProfileId, StateSnapshot>();
+  private latestFeeds = new Map<MarketProfileId, DataFeedStatus>();
   private intents: TradeIntent[] = [];
   private orders: OrderRecord[] = [];
   private fills: FillRecord[] = [];
   private settlements: SettlementRecord[] = [];
   private roundStrikes = new Map<string, number>();
-  private singleFillCooldown: SingleFillCooldownRecord | null = null;
+  private singleFillCooldowns = new Map<MarketProfileId, SingleFillCooldownRecord>();
   private singleFillCooldownRoundIds = new Set<string>();
   private pendingSingleFillReviewRoundIds = new Set<string>();
   private singleFillHedgeOutcomes = new Map<string, SingleFillHedgeOutcome>();
@@ -115,13 +121,14 @@ export class InMemoryStore {
   private experimentStop: ExperimentStopRecord | null = null;
   private entrySignalCounts = new Map<string, number>();
   private runtimeLogs: RuntimeLogRecord[] = [];
-  private strategyChecks: StrategyCheck[] = [];
+  private strategyChecksByProfile = new Map<MarketProfileId, StrategyCheck[]>();
   private telegramNotifications: TelegramNotificationState = { notifiedRoundSummaryKeys: [] };
   private experimentRunStartedAt = new Date().toISOString();
   private readonly persistencePath?: string;
   private readonly maxRecords: number;
 
-  constructor(mode: ExecutionMode, private readonly tickIntervalMs: number, options: StoreOptions = {}, activeStrategyProfile: StrategyProfile = 'classic', entryConfig?: EntryRuntimeConfig) {
+  constructor(mode: ExecutionMode, private readonly tickIntervalMs: number, options: StoreOptions = {}, activeStrategyProfile: StrategyProfile = 'classic', entryConfig?: EntryRuntimeConfig, profiles: MarketProfile[] = []) {
+    this.profiles = profiles;
     this.persistencePath = options.persistencePath === false ? undefined : options.persistencePath;
     this.maxRecords = options.maxRecords ?? 10_000;
     const startedAt = new Date();
@@ -162,8 +169,8 @@ export class InMemoryStore {
   }
 
   recordSnapshot(snapshot: StateSnapshot, feed: DataFeedStatus): void {
-    this.latestSnapshot = snapshot;
-    this.latestFeed = feed;
+    this.latestSnapshots.set(snapshot.profileId, snapshot);
+    this.latestFeeds.set(snapshot.profileId, feed);
     const capturedAtMs = new Date(snapshot.capturedAt).getTime();
     this.runtime = {
       ...this.runtime,
@@ -227,8 +234,8 @@ export class InMemoryStore {
     return roundMoney(sum(this.settlements.filter((settlement) => settlement.status === 'settled').map((settlement) => settlement.pnl)));
   }
 
-  recordStrategyChecks(checks: StrategyCheck[]): void {
-    this.strategyChecks = checks;
+  recordStrategyChecks(checks: StrategyCheck[], profileId: MarketProfileId): void {
+    this.strategyChecksByProfile.set(profileId, checks);
   }
 
   recordEntrySignal(roundId: string, passed: boolean): number {
@@ -263,44 +270,46 @@ export class InMemoryStore {
     ));
   }
 
-  roundFills(roundId: string): FillRecord[] {
-    return this.fills.filter((fill) => fill.roundId === roundId);
+  roundFills(profileId: MarketProfileId, roundId: string): FillRecord[] {
+    return this.fills.filter((fill) => fill.roundId === roundId && fill.profileId === profileId);
   }
 
-  roundFillsByStrategy(roundId: string, strategy: StrategyId): FillRecord[] {
-    return this.fills.filter((fill) => fill.roundId === roundId && fillStrategy(fill) === strategy);
+  roundFillsByStrategy(profileId: MarketProfileId, roundId: string, strategy: StrategyId): FillRecord[] {
+    return this.fills.filter((fill) => fill.roundId === roundId && fill.profileId === profileId && fillStrategy(fill) === strategy);
   }
 
-  roundOrders(roundId: string, strategy?: StrategyId): OrderRecord[] {
-    return this.orders.filter((order) => order.roundId === roundId && (!strategy || orderStrategy(order) === strategy));
+  roundOrders(profileId: MarketProfileId, roundId: string, strategy?: StrategyId): OrderRecord[] {
+    return this.orders.filter((order) => order.roundId === roundId && order.profileId === profileId && (!strategy || orderStrategy(order) === strategy));
   }
 
-  hedgeWatchTokenIds(windowSeconds: number, minSecondsToEnd: number, nowMs = Date.now()): string[] {
-    return this.singleFillHedgeCandidates(windowSeconds, minSecondsToEnd, nowMs)
+  hedgeWatchTokenIds(profileId: MarketProfileId, windowSeconds: number, minSecondsToEnd: number, nowMs = Date.now()): string[] {
+    return this.singleFillHedgeCandidates(profileId, windowSeconds, minSecondsToEnd, nowMs)
       .flatMap((candidate) => [candidate.yesTokenId, candidate.noTokenId])
       .filter(Boolean);
   }
 
-  profitExitWatchTokenIds(maxSecondsToEnd: number, minSecondsToEnd: number, nowMs = Date.now()): string[] {
-    return this.singleFillProfitExitCandidates(maxSecondsToEnd, minSecondsToEnd, nowMs)
+  profitExitWatchTokenIds(profileId: MarketProfileId, maxSecondsToEnd: number, minSecondsToEnd: number, nowMs = Date.now()): string[] {
+    return this.singleFillProfitExitCandidates(profileId, maxSecondsToEnd, minSecondsToEnd, nowMs)
       .flatMap((candidate) => [candidate.yesTokenId, candidate.noTokenId])
       .filter(Boolean);
   }
 
-  singleFillHedgeCandidates(windowSeconds: number, minSecondsToEnd: number, nowMs = Date.now(), strategy: StrategyId = CLASSIC_ENTRY_STRATEGY): SingleFillHedgeCandidate[] {
+  singleFillHedgeCandidates(profileId: MarketProfileId, windowSeconds: number, minSecondsToEnd: number, nowMs = Date.now(), strategy: StrategyId = CLASSIC_ENTRY_STRATEGY): SingleFillHedgeCandidate[] {
     const byRound = new Map<string, SingleFillHedgeCandidate>();
     for (const order of this.orders) {
       if (order.side !== 'BUY') continue;
+      if (order.profileId !== profileId) continue;
       if (orderStrategy(order) !== strategy) continue;
       const startMs = roundStartMs(order.roundId);
       if (startMs == null) continue;
-      const endMs = startMs + 5 * 60_000;
+      const endMs = startMs + profileDurationMs(profileId);
       const secondsToEnd = (endMs - nowMs) / 1000;
       if (nowMs < startMs || secondsToEnd > windowSeconds || secondsToEnd <= minSecondsToEnd) continue;
 
       const existing = byRound.get(order.roundId);
       const candidate: SingleFillHedgeCandidate = existing || {
         roundId: order.roundId,
+        profileId,
         eventSlug: order.eventSlug,
         marketTitle: order.marketTitle,
         imageUrl: order.imageUrl,
@@ -317,20 +326,22 @@ export class InMemoryStore {
     return [...byRound.values()].filter((candidate) => candidate.yesTokenId && candidate.noTokenId);
   }
 
-  singleFillProfitExitCandidates(maxSecondsToEnd: number, minSecondsToEnd: number, nowMs = Date.now(), strategy: StrategyId = CLASSIC_ENTRY_STRATEGY): SingleFillProfitExitCandidate[] {
+  singleFillProfitExitCandidates(profileId: MarketProfileId, maxSecondsToEnd: number, minSecondsToEnd: number, nowMs = Date.now(), strategy: StrategyId = CLASSIC_ENTRY_STRATEGY): SingleFillProfitExitCandidate[] {
     const byRound = new Map<string, SingleFillProfitExitCandidate>();
     for (const order of this.orders) {
       if (order.side !== 'BUY') continue;
+      if (order.profileId !== profileId) continue;
       if (orderStrategy(order) !== strategy) continue;
       const startMs = roundStartMs(order.roundId);
       if (startMs == null) continue;
-      const endMs = startMs + 5 * 60_000;
+      const endMs = startMs + profileDurationMs(profileId);
       const secondsToEnd = (endMs - nowMs) / 1000;
       if (nowMs < startMs || secondsToEnd > maxSecondsToEnd || secondsToEnd <= minSecondsToEnd) continue;
 
       const existing = byRound.get(order.roundId);
       const candidate: SingleFillProfitExitCandidate = existing || {
         roundId: order.roundId,
+        profileId,
         eventSlug: order.eventSlug,
         marketTitle: order.marketTitle,
         imageUrl: order.imageUrl,
@@ -347,18 +358,19 @@ export class InMemoryStore {
     return [...byRound.values()].filter((candidate) => candidate.yesTokenId && candidate.noTokenId);
   }
 
-  ordersNeedingReconciliation(limit = 200): OrderRecord[] {
+  ordersNeedingReconciliation(profileId: MarketProfileId, limit = 200): OrderRecord[] {
     return this.orders
-      .filter((order) => order.status === 'posted' || order.status === 'partially_filled')
+      .filter((order) => order.profileId === profileId && (order.status === 'posted' || order.status === 'partially_filled'))
       .sort((a, b) => toTime(b.createdAt) - toTime(a.createdAt))
       .slice(0, limit);
   }
 
-  roundsNeedingSettlement(limit = 50): Array<{ roundId: string; eventSlug: string; marketTitle?: string; imageUrl?: string; strike?: number }> {
-    const settled = new Set(this.settlements.map((settlement) => settlement.roundId));
+  roundsNeedingSettlement(profileId: MarketProfileId, durationSeconds = 300, limit = 50): Array<{ roundId: string; eventSlug: string; marketTitle?: string; imageUrl?: string; strike?: number }> {
+    const settled = new Set(this.settlements.filter((settlement) => settlement.profileId === profileId).map((settlement) => settlement.roundId));
     const byRound = new Map<string, { roundId: string; eventSlug: string; marketTitle?: string; imageUrl?: string; latestTime: number; strike?: number }>();
     for (const fill of this.fills) {
-      if (settled.has(fill.roundId) || !isRoundEnded(fill.roundId, Date.now(), 0)) continue;
+      if (fill.profileId !== profileId) continue;
+      if (settled.has(fill.roundId) || !isRoundEnded(fill.roundId, Date.now(), 0, durationSeconds)) continue;
       const existing = byRound.get(fill.roundId);
       const latestTime = Math.max(existing?.latestTime ?? 0, toTime(fill.matchedAt));
       byRound.set(fill.roundId, {
@@ -418,31 +430,32 @@ export class InMemoryStore {
     return this.roundStrikes.get(roundId);
   }
 
-  getActiveEntryCooldown(nowMs = Date.now()): SingleFillCooldownRecord | null {
-    if (!this.singleFillCooldown) return null;
-    if (!this.singleFillCooldown.finalizedAt) {
-      this.clearSingleFillCooldown();
+  getActiveEntryCooldown(profileId: MarketProfileId, nowMs = Date.now()): SingleFillCooldownRecord | null {
+    const active = this.singleFillCooldowns.get(profileId) || null;
+    if (!active) return null;
+    if (!active.finalizedAt) {
+      this.clearSingleFillCooldown(profileId);
       return null;
     }
-    if (!this.isFinalSingleSidedBuyRound(this.singleFillCooldown.roundId, nowMs)) {
-      this.clearSingleFillCooldown();
+    if (!this.isFinalSingleSidedBuyRound(active.roundId, nowMs, profileId)) {
+      this.clearSingleFillCooldown(profileId);
       return null;
     }
-    const expiresAtMs = new Date(this.singleFillCooldown.expiresAt).getTime();
+    const expiresAtMs = new Date(active.expiresAt).getTime();
     if (!Number.isFinite(expiresAtMs) || expiresAtMs <= nowMs) {
-      this.clearSingleFillCooldown();
+      this.clearSingleFillCooldown(profileId);
       return null;
     }
-    return this.singleFillCooldown;
+    return active;
   }
 
   recordSingleFillHedgeOutcome(outcome: SingleFillHedgeOutcome): void {
-    this.singleFillHedgeOutcomes.set(outcome.roundId, outcome);
+    this.singleFillHedgeOutcomes.set(profileRoundKey(outcome.profileId, outcome.roundId), outcome);
     this.persistState();
   }
 
-  getSingleFillHedgeOutcome(roundId: string): SingleFillHedgeOutcome | undefined {
-    return this.singleFillHedgeOutcomes.get(roundId);
+  getSingleFillHedgeOutcome(profileId: MarketProfileId, roundId: string): SingleFillHedgeOutcome | undefined {
+    return this.singleFillHedgeOutcomes.get(profileRoundKey(profileId, roundId));
   }
 
   getExperimentRunStartedAt(): string {
@@ -457,18 +470,21 @@ export class InMemoryStore {
   maybeStopExperimentOnSingle(newFills: FillRecord[], nowMs = Date.now()): ExperimentStopRecord | null {
     if (this.getExperimentStop()) return null;
     const runStartedAtMs = toTime(this.experimentRunStartedAt);
-    const roundIds = new Set<string>();
+    const roundKeys = new Set<string>();
     for (const fill of [...newFills, ...this.fills]) {
       if (fill.side !== 'BUY') continue;
       if (fillStrategy(fill) !== EXPERIMENT_STRATEGY) continue;
       if (toTime(fill.matchedAt) < runStartedAtMs) continue;
-      roundIds.add(fill.roundId);
+      roundKeys.add(profileRoundKey(fill.profileId, fill.roundId));
     }
-    for (const roundId of roundIds) {
-      if (!isRoundEnded(roundId, nowMs, FINAL_SINGLE_FILL_GRACE_MS)) continue;
-      const exposure = this.singleSidedBuyExposure(roundId, EXPERIMENT_STRATEGY);
+    for (const key of roundKeys) {
+      const { profileId, roundId } = parseProfileRoundKey(key);
+      if (!profileId) continue;
+      if (!isRoundEnded(roundId, nowMs, FINAL_SINGLE_FILL_GRACE_MS, profileDurationSeconds(profileId))) continue;
+      const exposure = this.singleSidedBuyExposure(roundId, EXPERIMENT_STRATEGY, profileId);
       if (!exposure.singleSided) continue;
       const record: ExperimentStopRecord = {
+        profileId,
         roundId,
         stoppedAt: new Date(nowMs).toISOString(),
         reason: 'EXPERIMENT_SINGLE_FILL',
@@ -482,36 +498,41 @@ export class InMemoryStore {
     return null;
   }
 
-  maybeStartSingleFillCooldown(newFills: FillRecord[], cooldown: number | SingleFillCooldownPolicy, nowMs = Date.now(), strategy: StrategyId = CLASSIC_ENTRY_STRATEGY): SingleFillCooldownRecord | null {
+  maybeStartSingleFillCooldown(newFills: FillRecord[], cooldown: number | SingleFillCooldownPolicy, nowMs = Date.now(), strategy: StrategyId = CLASSIC_ENTRY_STRATEGY, profileId: MarketProfileId): SingleFillCooldownRecord | null {
     const policy = normalizeCooldownPolicy(cooldown);
     let dirty = false;
     for (const fill of newFills) {
-      if (fill.side !== 'BUY' || this.singleFillCooldownRoundIds.has(fill.roundId)) continue;
+      if (fill.profileId !== profileId) continue;
+      const key = profileRoundKey(profileId, fill.roundId);
+      if (fill.side !== 'BUY' || this.singleFillCooldownRoundIds.has(key)) continue;
       if (fillStrategy(fill) !== strategy) continue;
-      if (!this.hasTrackedBuyOrderForFill(fill, strategy)) continue;
+      if (!this.hasTrackedBuyOrderForFill(fill, strategy, profileId)) continue;
       const before = this.pendingSingleFillReviewRoundIds.size;
-      this.pendingSingleFillReviewRoundIds.add(fill.roundId);
+      this.pendingSingleFillReviewRoundIds.add(key);
       dirty ||= this.pendingSingleFillReviewRoundIds.size !== before;
     }
 
-    const activeCooldown = this.getActiveEntryCooldown(nowMs);
+    const activeCooldown = this.getActiveEntryCooldown(profileId, nowMs);
     const cooldownCandidates: SingleFillCooldownRecord[] = [];
 
-    for (const roundId of this.pendingSingleFillReviewRoundIds) {
-      if (this.singleFillCooldownRoundIds.has(roundId)) continue;
-      if (!isRoundEnded(roundId, nowMs, FINAL_SINGLE_FILL_GRACE_MS)) continue;
-      const exposure = this.singleSidedBuyExposure(roundId, strategy);
-      this.pendingSingleFillReviewRoundIds.delete(roundId);
-      this.singleFillCooldownRoundIds.add(roundId);
+    for (const key of this.pendingSingleFillReviewRoundIds) {
+      const { roundId } = parseProfileRoundKey(key);
+      const effectiveProfileId = profileId;
+      if (this.singleFillCooldownRoundIds.has(key)) continue;
+      if (!isRoundEnded(roundId, nowMs, FINAL_SINGLE_FILL_GRACE_MS, profileDurationSeconds(effectiveProfileId))) continue;
+      const exposure = this.singleSidedBuyExposure(roundId, strategy, effectiveProfileId);
+      this.pendingSingleFillReviewRoundIds.delete(key);
+      this.singleFillCooldownRoundIds.add(key);
       dirty = true;
       if (!exposure.singleSided) {
         this.persistState();
         continue;
       }
 
-      const cooldownStartMs = finalSingleFillReviewMs(roundId) ?? nowMs;
-      const cooldownDecision = this.singleFillCooldownDecision(roundId, policy, cooldownStartMs);
+      const cooldownStartMs = finalSingleFillReviewMs(roundId, effectiveProfileId) ?? nowMs;
+      const cooldownDecision = this.singleFillCooldownDecision(roundId, policy, cooldownStartMs, effectiveProfileId);
       const record: SingleFillCooldownRecord = {
+        profileId: effectiveProfileId,
         roundId,
         triggeredAt: new Date(cooldownStartMs).toISOString(),
         finalizedAt: new Date(cooldownStartMs).toISOString(),
@@ -523,8 +544,8 @@ export class InMemoryStore {
         recentSingleFillCount: cooldownDecision.recentCount,
       };
       this.singleFillCooldownEvents = [
-        { roundId, triggeredAt: record.triggeredAt, category: cooldownDecision.category },
-        ...this.singleFillCooldownEvents.filter((event) => nowMs - toTime(event.triggeredAt) <= policy.repeatWindowMs),
+        { profileId: effectiveProfileId, roundId, triggeredAt: record.triggeredAt, category: cooldownDecision.category },
+        ...this.singleFillCooldownEvents.filter((event) => event.profileId === effectiveProfileId && nowMs - toTime(event.triggeredAt) <= policy.repeatWindowMs),
       ].slice(0, 100);
       cooldownCandidates.push(record);
     }
@@ -540,12 +561,7 @@ export class InMemoryStore {
       const changedActiveCooldown = !activeCooldown
         || activeCooldown.roundId !== nextCooldown.roundId
         || activeCooldown.expiresAt !== nextCooldown.expiresAt;
-      this.singleFillCooldown = nextCooldown;
-      this.runtime = {
-        ...this.runtime,
-        entryCooldownUntil: nextCooldown.expiresAt,
-        entryCooldownReason: `single fill on ${nextCooldown.roundId}${nextCooldown.category ? ` (${nextCooldown.category})` : ''}`,
-      };
+      this.singleFillCooldowns.set(nextCooldown.profileId, nextCooldown);
       this.persistState();
       return changedActiveCooldown ? nextCooldown : null;
     }
@@ -601,18 +617,29 @@ export class InMemoryStore {
   }
 
   dashboardState(): DashboardState {
-    if (!this.latestSnapshot) throw new Error('No snapshot has been captured yet.');
+    const profiles = this.profiles.filter((profile) => profile.status !== 'disabled').map((profile) => ({
+      profile,
+      feed: this.latestFeeds.get(profile.id) || { binanceConnected: false, clobConnected: false, priceSamples: 0, source: 'unavailable' as const },
+      latestSnapshot: this.latestSnapshots.get(profile.id),
+      strategyChecks: this.strategyChecksByProfile.get(profile.id) || [],
+      entryCooldownUntil: this.singleFillCooldowns.get(profile.id)?.expiresAt,
+      entryCooldownReason: this.singleFillCooldowns.get(profile.id) ? `single fill on ${this.singleFillCooldowns.get(profile.id)?.roundId}` : undefined,
+      stats: {
+        orders: this.orders.filter((order) => order.profileId === profile.id).length,
+        fills: this.fills.filter((fill) => fill.profileId === profile.id).length,
+        settlements: this.settlements.filter((settlement) => settlement.profileId === profile.id).length,
+        settledPnl: roundMoney(sum(this.settlements.filter((settlement) => settlement.profileId === profile.id && settlement.status === 'settled').map((settlement) => settlement.pnl))),
+      },
+    }));
     return {
       runtime: this.runtimeWithCooldown(),
-      feed: this.latestFeed,
-      latestSnapshot: this.latestSnapshot,
+      profiles,
       intents: this.intents,
       orders: this.orders,
       fills: this.fills,
       settlements: this.settlements,
       runtimeLogs: this.runtimeLogs,
       rules: STRATEGY_RULES,
-      strategyChecks: this.strategyChecks,
     };
   }
 
@@ -626,7 +653,7 @@ export class InMemoryStore {
       this.settlements = Array.isArray(parsed.settlements) ? parsed.settlements.slice(0, this.maxRecords) : [];
       this.telegramNotifications = isTelegramNotificationStateLike(parsed.telegramNotifications) ? parsed.telegramNotifications : { notifiedRoundSummaryKeys: [] };
       this.roundStrikes = new Map(Object.entries(parsed.roundStrikes || {}).filter(([, strike]) => Number.isFinite(strike) && strike > 0));
-      this.singleFillCooldown = isSingleFillCooldownLike(parsed.singleFillCooldown) ? parsed.singleFillCooldown : null;
+      this.singleFillCooldowns = new Map(Object.entries(parsed.singleFillCooldowns || {}).filter((entry): entry is [MarketProfileId, SingleFillCooldownRecord] => isMarketProfileId(entry[0]) && isSingleFillCooldownLike(entry[1])));
       this.singleFillCooldownRoundIds = new Set(Array.isArray(parsed.singleFillCooldownRoundIds) ? parsed.singleFillCooldownRoundIds.filter((roundId): roundId is string => typeof roundId === 'string') : []);
       this.pendingSingleFillReviewRoundIds = new Set(Array.isArray(parsed.pendingSingleFillReviewRoundIds) ? parsed.pendingSingleFillReviewRoundIds.filter((roundId): roundId is string => typeof roundId === 'string') : []);
       this.singleFillHedgeOutcomes = new Map(Object.entries(parsed.singleFillHedgeOutcomes || {}).filter((entry): entry is [string, SingleFillHedgeOutcome] => isSingleFillHedgeOutcomeLike(entry[1])));
@@ -673,7 +700,7 @@ export class InMemoryStore {
     try {
       fs.mkdirSync(path.dirname(this.persistencePath), { recursive: true });
       const payload: PersistedRuntimeState = {
-        version: 1,
+        version: 2,
         savedAt: new Date().toISOString(),
         intents: this.intents,
         orders: this.orders,
@@ -681,7 +708,7 @@ export class InMemoryStore {
         settlements: this.settlements,
         telegramNotifications: this.telegramNotifications,
         roundStrikes: Object.fromEntries(this.roundStrikes),
-        singleFillCooldown: this.singleFillCooldown,
+        singleFillCooldowns: Object.fromEntries(this.singleFillCooldowns),
         singleFillCooldownRoundIds: [...this.singleFillCooldownRoundIds],
         pendingSingleFillReviewRoundIds: [...this.pendingSingleFillReviewRoundIds],
         singleFillHedgeOutcomes: Object.fromEntries(this.singleFillHedgeOutcomes),
@@ -703,21 +730,12 @@ export class InMemoryStore {
       experimentStoppedReason: experimentStop.reason,
       experimentStoppedRoundId: experimentStop.roundId,
     } : {};
-    const activeCooldown = this.getActiveEntryCooldown(nowMs);
-    if (!activeCooldown) {
-      const { entryCooldownUntil: _entryCooldownUntil, entryCooldownReason: _entryCooldownReason, ...runtime } = this.runtime;
-      return { ...runtime, ...experimentFields };
-    }
-    return {
-      ...this.runtime,
-      entryCooldownUntil: activeCooldown.expiresAt,
-      entryCooldownReason: `single fill on ${activeCooldown.roundId}${activeCooldown.category ? ` (${activeCooldown.category})` : ''}`,
-      ...experimentFields,
-    };
+    void nowMs;
+    return { ...this.runtime, ...experimentFields };
   }
 
-  private singleFillCooldownDecision(roundId: string, policy: SingleFillCooldownPolicy, referenceMs: number): { cooldownMs: number; category: string; hedgeReason?: string; recentCount: number } {
-    const hedgeOutcome = this.singleFillHedgeOutcomes.get(roundId);
+  private singleFillCooldownDecision(roundId: string, policy: SingleFillCooldownPolicy, referenceMs: number, profileId: MarketProfileId): { cooldownMs: number; category: string; hedgeReason?: string; recentCount: number } {
+    const hedgeOutcome = this.singleFillHedgeOutcomes.get(profileRoundKey(profileId, roundId));
     const category = cooldownCategory(hedgeOutcome);
     const baseMs = category === 'price-cap'
       ? policy.priceCapMs
@@ -726,7 +744,7 @@ export class InMemoryStore {
         : policy.baseMs;
     const recentCount = this.singleFillCooldownEvents.filter((event) => {
       const eventMs = toTime(event.triggeredAt);
-      return eventMs <= referenceMs && referenceMs - eventMs <= policy.repeatWindowMs;
+      return event.profileId === profileId && eventMs <= referenceMs && referenceMs - eventMs <= policy.repeatWindowMs;
     }).length + 1;
     const repeatMs = recentCount >= 3 ? policy.thirdMs : recentCount >= 2 ? policy.secondMs : 0;
     return {
@@ -737,14 +755,14 @@ export class InMemoryStore {
     };
   }
 
-  private isFinalSingleSidedBuyRound(roundId: string, nowMs: number): boolean {
-    if (!isRoundEnded(roundId, nowMs, FINAL_SINGLE_FILL_GRACE_MS)) return false;
-    if (!this.hasTrackedBuyOrderForRound(roundId, CLASSIC_ENTRY_STRATEGY)) return false;
-    return this.singleSidedBuyExposure(roundId, CLASSIC_ENTRY_STRATEGY).singleSided;
+  private isFinalSingleSidedBuyRound(roundId: string, nowMs: number, profileId: MarketProfileId): boolean {
+    if (!isRoundEnded(roundId, nowMs, FINAL_SINGLE_FILL_GRACE_MS, profileDurationSeconds(profileId))) return false;
+    if (!this.hasTrackedBuyOrderForRound(roundId, CLASSIC_ENTRY_STRATEGY, profileId)) return false;
+    return this.singleSidedBuyExposure(roundId, CLASSIC_ENTRY_STRATEGY, profileId).singleSided;
   }
 
-  private singleSidedBuyExposure(roundId: string, strategy: StrategyId): { yesShares: number; noShares: number; singleSided: boolean } {
-    const roundFills = this.fills.filter((fill) => fill.roundId === roundId && fillStrategy(fill) === strategy);
+  private singleSidedBuyExposure(roundId: string, strategy: StrategyId, profileId: MarketProfileId): { yesShares: number; noShares: number; singleSided: boolean } {
+    const roundFills = this.fills.filter((fill) => fill.roundId === roundId && fill.profileId === profileId && fillStrategy(fill) === strategy);
     const yesShares = netShares(roundFills, 'YES');
     const noShares = netShares(roundFills, 'NO');
     return {
@@ -754,9 +772,10 @@ export class InMemoryStore {
     };
   }
 
-  private hasTrackedBuyOrderForFill(fill: FillRecord, strategy: StrategyId): boolean {
+  private hasTrackedBuyOrderForFill(fill: FillRecord, strategy: StrategyId, profileId: MarketProfileId): boolean {
     return this.orders.some((order) => (
       order.roundId === fill.roundId
+      && order.profileId === profileId
       && orderStrategy(order) === strategy
       && order.side === 'BUY'
       && order.status !== 'failed'
@@ -768,8 +787,8 @@ export class InMemoryStore {
     ));
   }
 
-  private hasTrackedBuyOrderForRound(roundId: string, strategy: StrategyId): boolean {
-    return this.orders.some((order) => order.roundId === roundId && orderStrategy(order) === strategy && order.side === 'BUY' && order.status !== 'failed');
+  private hasTrackedBuyOrderForRound(roundId: string, strategy: StrategyId, profileId: MarketProfileId): boolean {
+    return this.orders.some((order) => order.roundId === roundId && order.profileId === profileId && orderStrategy(order) === strategy && order.side === 'BUY' && order.status !== 'failed');
   }
 
   private fillWithStrategySource(fill: FillRecord): FillRecord {
@@ -790,11 +809,8 @@ export class InMemoryStore {
     return { ...fill, strategy, strategyProfile: strategyProfileForStrategy(strategy) };
   }
 
-  private clearSingleFillCooldown(): void {
-    if (!this.singleFillCooldown && !this.runtime.entryCooldownUntil && !this.runtime.entryCooldownReason) return;
-    this.singleFillCooldown = null;
-    const { entryCooldownUntil: _entryCooldownUntil, entryCooldownReason: _entryCooldownReason, ...runtime } = this.runtime;
-    this.runtime = runtime;
+  private clearSingleFillCooldown(profileId: MarketProfileId): void {
+    this.singleFillCooldowns.delete(profileId);
     this.persistState();
   }
 }
@@ -856,7 +872,8 @@ function isSingleFillCooldownEventLike(value: unknown): value is SingleFillCoold
 function isExperimentStopLike(value: unknown): value is ExperimentStopRecord {
   if (!value || typeof value !== 'object') return false;
   const item = value as Partial<ExperimentStopRecord>;
-  return typeof item.roundId === 'string'
+  return isMarketProfileId(item.profileId)
+    && typeof item.roundId === 'string'
     && typeof item.stoppedAt === 'string'
     && typeof item.reason === 'string'
     && typeof item.yesShares === 'number'
@@ -869,6 +886,10 @@ function isTelegramNotificationStateLike(value: unknown): value is TelegramNotif
   return Array.isArray(item.notifiedRoundSummaryKeys)
     && item.notifiedRoundSummaryKeys.every((key) => typeof key === 'string')
     && (item.lastIdleSummaryAt == null || typeof item.lastIdleSummaryAt === 'string');
+}
+
+function isMarketProfileId(value: unknown): value is MarketProfileId {
+  return typeof value === 'string' && /^(btc|eth|sol)-(5m|15m|1h)$/.test(value);
 }
 
 function normalizeCooldownPolicy(value: number | SingleFillCooldownPolicy): SingleFillCooldownPolicy {
@@ -900,11 +921,12 @@ function maxCooldown(records: SingleFillCooldownRecord[]): SingleFillCooldownRec
 
 function matchingOrderFills(order: OrderRecord, fills: FillRecord[]): FillRecord[] {
   const exact = order.clobOrderId
-    ? fills.filter((fill) => fill.clobOrderId === order.clobOrderId && fillStrategy(fill) === orderStrategy(order))
+    ? fills.filter((fill) => fill.clobOrderId === order.clobOrderId && fillStrategy(fill) === orderStrategy(order) && (!order.profileId || fill.profileId === order.profileId))
     : [];
   if (exact.length) return exact;
   return fills.filter((fill) => (
     fill.roundId === order.roundId
+    && (!order.profileId || fill.profileId === order.profileId)
     && fill.tokenId === order.tokenId
     && fill.side === order.side
     && fillStrategy(fill) === orderStrategy(order)
@@ -948,22 +970,44 @@ function roundMoney(value: number): number {
   return Math.round(value * 100) / 100;
 }
 
-function isRoundEnded(roundId: string, nowMs: number, graceMs: number): boolean {
+function isRoundEnded(roundId: string, nowMs: number, graceMs: number, durationSeconds = 300): boolean {
   const startMs = roundStartMs(roundId);
   if (startMs == null) return false;
-  return nowMs >= startMs + 5 * 60_000 + graceMs;
+  return nowMs >= startMs + durationSeconds * 1000 + graceMs;
 }
 
-function finalSingleFillReviewMs(roundId: string): number | null {
+function finalSingleFillReviewMs(roundId: string, profileId?: MarketProfileId): number | null {
   const startMs = roundStartMs(roundId);
-  return startMs == null ? null : startMs + 5 * 60_000 + FINAL_SINGLE_FILL_GRACE_MS;
+  return startMs == null ? null : startMs + profileDurationMs(profileId) + FINAL_SINGLE_FILL_GRACE_MS;
 }
 
 function roundStartMs(roundId: string): number | null {
-  const match = roundId.match(/btc-updown-5m-(\d+)$/);
+  const match = roundId.match(/[a-z]+-updown-(?:5m|15m|1h)-(\d+)$/);
   const parsed = Number(match?.[1]);
   if (!Number.isFinite(parsed) || parsed <= 0) return null;
   return parsed * 1000;
+}
+
+function profileDurationSeconds(profileId?: MarketProfileId): number {
+  if (profileId?.endsWith('-15m')) return 900;
+  if (profileId?.endsWith('-1h')) return 3600;
+  return 300;
+}
+
+function profileDurationMs(profileId?: MarketProfileId): number {
+  return profileDurationSeconds(profileId) * 1000;
+}
+
+function profileRoundKey(profileId: MarketProfileId | undefined, roundId: string): string {
+  return profileId ? `${profileId}:${roundId}` : roundId;
+}
+
+function parseProfileRoundKey(value: string): { profileId?: MarketProfileId; roundId: string } {
+  const [maybeProfileId, ...rest] = value.split(':');
+  if (rest.length && /^(btc|eth|sol)-(5m|15m|1h)$/.test(maybeProfileId)) {
+    return { profileId: maybeProfileId as MarketProfileId, roundId: rest.join(':') };
+  }
+  return { roundId: value };
 }
 
 function toTime(value: string): number {

@@ -1,4 +1,4 @@
-import type { BtcRoundConfig, FillRecord, OrderBookQuote, OrderbookCapacityTier, OrderbookDepthLevel, OrderbookDepthSnapshot, PortfolioSnapshot, PositionSnapshot, RoundPhase, RoundSnapshot, SettlementRecord, StateSnapshot, StrategyCheck, StrategyCondition, TradeIntent } from '../../../packages/shared/src';
+import type { BtcRoundConfig, FillRecord, MarketProfile, OrderBookQuote, OrderbookCapacityTier, OrderbookDepthLevel, OrderbookDepthSnapshot, PortfolioSnapshot, PositionSnapshot, RoundPhase, RoundSnapshot, SettlementRecord, StateSnapshot, StrategyCheck, StrategyCondition, TradeIntent } from '../../../packages/shared/src';
 import { classifyRegime, evaluateEntry, evaluateExit, type StrategyEvaluation, type StrategyRiskConfig } from '../../../packages/strategy/src';
 import { PolymarketAdapter, type FillTarget } from '../../../packages/polymarket/src';
 import type { AppConfig } from './config';
@@ -7,30 +7,40 @@ import { executeLiveIntents } from './execution';
 import { buildSingleFillProfitExitCheck, executeSingleFillProfitExits, planSingleFillProfitExit, profitExitExposureOrders } from './profitExit';
 import type { MarketDataService } from './marketData';
 import type { ParticipationService } from './participation';
-import type { Btc5mRoundDiscovery } from './roundDiscovery';
+import type { RecurringCryptoRoundDiscovery } from './roundDiscovery';
 import type { InMemoryStore } from './store';
 
-export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, data: MarketDataService, adapter: PolymarketAdapter, discovery: Btc5mRoundDiscovery, participationService: ParticipationService): Promise<StateSnapshot> {
+export async function runAllProfilesTick(appConfig: AppConfig, store: InMemoryStore, data: MarketDataService, adapter: PolymarketAdapter, discovery: RecurringCryptoRoundDiscovery, participationService: ParticipationService): Promise<StateSnapshot[]> {
+  const enabledProfiles = appConfig.marketProfiles.filter((profile) => profile.status !== 'disabled');
+  const snapshots: StateSnapshot[] = [];
+  for (const profile of enabledProfiles) {
+    snapshots.push(await runBotTick(appConfigForProfile(appConfig, profile), store, data, adapter, discovery, participationService, profile));
+  }
+  return snapshots;
+}
+
+export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, data: MarketDataService, adapter: PolymarketAdapter, discovery: RecurringCryptoRoundDiscovery, participationService: ParticipationService, profile: MarketProfile = appConfig.marketProfiles[0]): Promise<StateSnapshot> {
   const diagnostics: string[] = [];
   store.setActiveStrategyProfile(appConfig.activeStrategyProfile);
   const classicActive = appConfig.activeStrategyProfile === 'classic';
   const discovered = await discovery.discover({
-    latestPrice: data.latestPrice(),
+    profile,
+    latestPrice: data.latestPrice(profile),
     persistedStrike: (roundId) => store.getRoundStrike(roundId),
   });
   diagnostics.push(...discovered.diagnostics);
-  const round = captureOpeningStrike(discovered.round, store, data.latestPrice());
+  const round = captureOpeningStrike(discovered.round, store, data.latestPrice(profile));
   const hedgeWatchTokenIds = classicActive && appConfig.singleFillHedgeEnabled
-    ? store.hedgeWatchTokenIds(activeHedgeWindowSeconds(appConfig), appConfig.singleFillHedgeMinSecondsToEnd)
+    ? store.hedgeWatchTokenIds(profile.id, activeHedgeWindowSeconds(appConfig), appConfig.singleFillHedgeMinSecondsToEnd)
     : [];
   const profitExitWatchTokenIds = classicActive && appConfig.singleFillProfitExitEnabled
-    ? store.profitExitWatchTokenIds(appConfig.singleFillProfitExitMaxSecondsToEnd, appConfig.singleFillProfitExitMinSecondsToEnd)
+    ? store.profitExitWatchTokenIds(profile.id, appConfig.singleFillProfitExitMaxSecondsToEnd, appConfig.singleFillProfitExitMinSecondsToEnd)
     : [];
   data.syncClobRound(round, [...hedgeWatchTokenIds, ...profitExitWatchTokenIds]);
   const orderbooks = await data.refreshOrderbooks(round);
   const participation = await participationService.refresh(round);
   diagnostics.push(...participation.diagnostics);
-  const features = data.features(round);
+  const features = data.features(round, profile);
   const roundSnapshot = roundToSnapshot(appConfig, store, round);
   const tokenLabels = new Map<string, 'YES' | 'NO'>([
     [round.yesTokenId, 'YES'],
@@ -40,6 +50,9 @@ export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, dat
   const positions = portfolio.positions.filter((position) => position.label !== 'UNKNOWN');
   const baseSnapshot: StateSnapshot = {
     id: `snapshot-${Date.now()}`,
+    profileId: profile.id,
+    asset: profile.asset,
+    interval: profile.interval,
     capturedAt: new Date().toISOString(),
     round: roundSnapshot,
     features,
@@ -51,16 +64,16 @@ export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, dat
     participation,
     diagnostics,
   };
-  const activeCooldown = store.getActiveEntryCooldown();
+  const activeCooldown = store.getActiveEntryCooldown(profile.id);
   const risk = riskConfig(appConfig, store.getRuntime().executionMode !== 'live', activeCooldown?.expiresAt, activeCooldown ? `single fill on ${activeCooldown.roundId}` : undefined);
   const snapshot: StateSnapshot = { ...baseSnapshot, regime: classifyRegime(baseSnapshot, risk) };
   snapshot.orderbookDepth = buildOrderbookDepthSnapshot(snapshot, appConfig);
   const evaluatedEntry = classicActive ? evaluateEntry(snapshot, risk) : evaluateExperimentEntry(snapshot, appConfig, store);
   const entry = classicActive
-    ? applyEntryConfirmation(evaluatedEntry, store.recordEntrySignal(snapshot.round.id, evaluatedEntry.intents.length > 0), appConfig.entryConfirmTicks)
+    ? applyEntryConfirmation(evaluatedEntry, store.recordEntrySignal(`${profile.id}:${snapshot.round.id}`, evaluatedEntry.intents.length > 0), appConfig.entryConfirmTicks)
     : evaluatedEntry;
-  const intents = [...entry.intents];
-  store.recordIntents([...intents, ...entry.rejected]);
+  const intents = entry.intents.map((intent) => withProfile(intent, profile));
+  store.recordIntents([...intents, ...entry.rejected.map((intent) => withProfile(intent, profile))]);
   const executionDiagnostics = await executeLiveIntents({
     appConfig,
     adapter,
@@ -70,8 +83,8 @@ export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, dat
     risk,
     experimentRunStartedAt: classicActive ? undefined : store.getExperimentRunStartedAt(),
   });
-  await reconcileFills(appConfig, adapter, store, roundSnapshot, tokenLabels, diagnostics);
-  await reconcileTrackedOrders(appConfig, adapter, store, diagnostics);
+  await reconcileFills(appConfig, adapter, store, roundSnapshot, tokenLabels, diagnostics, profile);
+  await reconcileTrackedOrders(appConfig, adapter, store, diagnostics, profile);
   const maturedExperimentStop = appConfig.experimentStopOnSingle ? store.maybeStopExperimentOnSingle([]) : null;
   if (maturedExperimentStop) {
     store.recordRuntimeLog({
@@ -82,10 +95,10 @@ export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, dat
     });
   }
   const hedgeCandidates = classicActive && appConfig.singleFillHedgeEnabled
-    ? store.singleFillHedgeCandidates(activeHedgeWindowSeconds(appConfig), appConfig.singleFillHedgeMinSecondsToEnd)
+    ? store.singleFillHedgeCandidates(profile.id, activeHedgeWindowSeconds(appConfig), appConfig.singleFillHedgeMinSecondsToEnd)
     : [];
   const profitExitCandidates = classicActive && appConfig.singleFillProfitExitEnabled
-    ? store.singleFillProfitExitCandidates(appConfig.singleFillProfitExitMaxSecondsToEnd, appConfig.singleFillProfitExitMinSecondsToEnd)
+    ? store.singleFillProfitExitCandidates(profile.id, appConfig.singleFillProfitExitMaxSecondsToEnd, appConfig.singleFillProfitExitMinSecondsToEnd)
     : [];
   const hedgeOrderbooks = data.refreshOrderbooksForTokenIds([
     ...hedgeCandidates.flatMap((candidate) => [candidate.yesTokenId, candidate.noTokenId]),
@@ -94,16 +107,66 @@ export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, dat
   const profitExitDiagnostics = classicActive ? await executeSingleFillProfitExits({ appConfig, adapter, store, candidates: profitExitCandidates, orderbooks: hedgeOrderbooks }) : [];
   const hedgeDiagnostics = classicActive ? await executeSingleFillHedges({ appConfig, adapter, store, candidates: hedgeCandidates, orderbooks: hedgeOrderbooks }) : [];
   const exit = classicActive
-    ? evaluateExit(snapshot, positions, risk, { orders: store.roundOrders(snapshot.round.id, 'BTC5M_DUAL_45'), fills: store.roundFillsByStrategy(snapshot.round.id, 'BTC5M_DUAL_45') })
+    ? evaluateExit(snapshot, positions, risk, { orders: store.roundOrders(profile.id, snapshot.round.id, 'UPDOWN_DUAL_ENTRY'), fills: store.roundFillsByStrategy(profile.id, snapshot.round.id, 'UPDOWN_DUAL_ENTRY') })
     : disabledExperimentExitCheck(snapshot);
-  const hedgeCheck = classicActive ? buildCurrentRoundHedgeCheck(appConfig, store, snapshot, [...orderbooks, ...hedgeOrderbooks]) : disabledClassicCheck('BTC5M_SINGLE_FILL_HEDGE', 'BTC 5m Single-Fill Hedge', 'Disabled while experimental profile is active.');
-  const profitExitCheck = classicActive ? buildCurrentRoundProfitExitCheck(appConfig, store, snapshot, [...orderbooks, ...hedgeOrderbooks]) : disabledClassicCheck('BTC5M_SINGLE_FILL_PROFIT_EXIT', 'BTC 5m Single-Fill Profit Exit', 'Disabled while experimental profile is active.');
-  await reconcileSettlements(appConfig, store, diagnostics);
-  maybeRecordEstimatedSettlement(store, snapshot);
+  const hedgeCheck = classicActive ? buildCurrentRoundHedgeCheck(appConfig, store, snapshot, [...orderbooks, ...hedgeOrderbooks]) : disabledClassicCheck(snapshot, 'UPDOWN_SINGLE_FILL_HEDGE', 'Up/Down Single-Fill Hedge', 'Disabled while experimental profile is active.');
+  const profitExitCheck = classicActive ? buildCurrentRoundProfitExitCheck(appConfig, store, snapshot, [...orderbooks, ...hedgeOrderbooks]) : disabledClassicCheck(snapshot, 'UPDOWN_SINGLE_FILL_PROFIT_EXIT', 'Up/Down Single-Fill Profit Exit', 'Disabled while experimental profile is active.');
+  await reconcileSettlements(appConfig, store, diagnostics, profile);
+  maybeRecordEstimatedSettlement(store, snapshot, profile);
   const finalSnapshot = { ...snapshot, diagnostics: [...diagnostics, ...entry.diagnostics, ...executionDiagnostics, ...hedgeDiagnostics, ...profitExitDiagnostics] };
-  store.recordSnapshot(finalSnapshot, data.status());
-  store.recordStrategyChecks([...entry.checks, ...exit.checks, hedgeCheck, profitExitCheck]);
+  store.recordSnapshot(finalSnapshot, data.status(profile));
+  store.recordStrategyChecks([...entry.checks, ...exit.checks, hedgeCheck, profitExitCheck].map((check) => withProfile(check, profile)), profile.id);
   return finalSnapshot;
+}
+
+function appConfigForProfile(appConfig: AppConfig, profile: MarketProfile): AppConfig {
+  return {
+    ...appConfig,
+    executionMode: profile.status === 'live' ? appConfig.executionMode : 'monitor',
+    marketConfig: {
+      seriesSlug: profile.seriesSlug,
+      title: profile.title,
+      roundDurationSeconds: profile.roundDurationSeconds,
+      decisionLeadSeconds: profile.decisionLeadSeconds,
+      avoidExpirySeconds: profile.avoidExpirySeconds,
+    },
+    dualLimitPrice: profile.entry.limitPrice,
+    dynamicLimitEnabled: false,
+    orderSharesPerSide: profile.entry.sharesPerSide,
+    dynamicSharesEnabled: false,
+    maxOrderSharesPerSide: profile.entry.sharesPerSide,
+    entryConfirmTicks: profile.entry.confirmTicks,
+    entryMinSecondsToStart: profile.entry.minSecondsToStart,
+    singleFillHedgeEnabled: profile.hedge.enabled,
+    singleFillEarlyHedgeWindowSeconds: profile.hedge.earlyWindowSeconds,
+    singleFillEarlyHedgeMaxPairCost: profile.hedge.earlyMaxPairCost,
+    singleFillEmergencyHedgeWindowSeconds: profile.hedge.emergencyWindowSeconds,
+    singleFillEmergencyHedgeMaxPrice: profile.hedge.emergencyMaxPrice,
+    singleFillEmergencyHedgeMaxPairCost: profile.hedge.emergencyMaxPairCost,
+    singleFillHedgeWindowSeconds: profile.hedge.finalWindowSeconds,
+    singleFillHedgeMinSecondsToEnd: profile.hedge.minSecondsToEnd,
+    singleFillHedgeMaxPrice: profile.hedge.maxPrice,
+    singleFillHedgePriceOffset: profile.hedge.priceOffset,
+    singleFillHedgeMaxPairCost: profile.hedge.maxPairCost,
+    singleFillProfitExitEnabled: profile.profitExit.enabled,
+    singleFillProfitExitMinRate: profile.profitExit.minProfitRate,
+    singleFillProfitExitMinPrice: 0,
+    singleFillProfitExitMinPnlUsd: profile.profitExit.minPnlUsd,
+    singleFillProfitExitPriceOffset: profile.profitExit.priceOffset,
+    singleFillProfitExitMaxOrderbookAgeMs: profile.profitExit.maxOrderbookAgeMs,
+    singleFillProfitExitMinSecondsToEnd: profile.profitExit.minSecondsToEnd,
+    singleFillProfitExitMaxSecondsToEnd: profile.profitExit.maxSecondsToEnd,
+    singleFillCooldownBaseMs: profile.cooldown.baseMs,
+    singleFillCooldownPriceCapMs: profile.cooldown.priceCapMs,
+    singleFillCooldownExecutionMs: profile.cooldown.executionMs,
+    singleFillCooldownRepeatWindowMs: profile.cooldown.repeatWindowMs,
+    singleFillCooldownSecondMs: profile.cooldown.secondMs,
+    singleFillCooldownThirdMs: profile.cooldown.thirdMs,
+  };
+}
+
+function withProfile<T extends object>(value: T, profile: MarketProfile): T {
+  return { ...value, profileId: profile.id, asset: profile.asset, interval: profile.interval };
 }
 
 function buildOrderbookDepthSnapshot(snapshot: StateSnapshot, appConfig: AppConfig): OrderbookDepthSnapshot {
@@ -286,8 +349,11 @@ function evaluateExperimentEntry(snapshot: StateSnapshot, appConfig: AppConfig, 
   const rejected = reasons.length ? base.map((intent) => ({ ...intent, status: 'rejected' as const, rejectionReason: reasons.join(',') })) : [];
   const intents = reasons.length ? [] : base;
   const check: StrategyCheck = {
-    strategy: 'BTC5M_NEXT_ROUND_50_49_STOP_ON_SINGLE',
-    title: 'BTC 5m Experimental Next-Round 50/49',
+    profileId: snapshot.profileId,
+    asset: snapshot.asset,
+    interval: snapshot.interval,
+    strategy: 'UPDOWN_NEXT_ROUND_50_49_STOP_ON_SINGLE',
+    title: 'Up/Down Experimental Next-Round 50/49',
     status: reasons.includes('EXPERIMENT_ORDERS_ALREADY_PLACED') ? 'not-applicable' : reasons.length ? 'blocked' : 'eligible',
     summary: 'Posts fixed next-round UP and DOWN BUY limits and stops after a final single-sided experimental fill.',
     reason: reasons.length ? reasons.join(', ') : `Experimental entry eligible: UP ${upPrice.toFixed(3)} / DOWN ${downPrice.toFixed(3)} / ${shares.toFixed(2)} shares.`,
@@ -314,13 +380,16 @@ function evaluateExperimentEntry(snapshot: StateSnapshot, appConfig: AppConfig, 
 
 function experimentExecutionKey(snapshot: StateSnapshot, label: 'YES' | 'NO'): string {
   const tokenId = label === 'YES' ? snapshot.round.yesTokenId : snapshot.round.noTokenId;
-  return [snapshot.round.id, 'BTC5M_NEXT_ROUND_50_49_STOP_ON_SINGLE', tokenId, 'BUY'].join(':');
+  return [snapshot.profileId, snapshot.round.id, 'UPDOWN_NEXT_ROUND_50_49_STOP_ON_SINGLE', tokenId, 'BUY'].filter(Boolean).join(':');
 }
 
 function experimentIntent(snapshot: StateSnapshot, label: 'YES' | 'NO', tokenId: string, shares: number, limitPrice: number): TradeIntent {
   return {
     id: `experiment-intent-${Date.now()}-${label}-${Math.random().toString(16).slice(2, 8)}`,
-    strategy: 'BTC5M_NEXT_ROUND_50_49_STOP_ON_SINGLE',
+    profileId: snapshot.profileId,
+    asset: snapshot.asset,
+    interval: snapshot.interval,
+    strategy: 'UPDOWN_NEXT_ROUND_50_49_STOP_ON_SINGLE',
     roundId: snapshot.round.id,
     tokenId,
     label,
@@ -337,8 +406,11 @@ function experimentIntent(snapshot: StateSnapshot, label: 'YES' | 'NO', tokenId:
 
 function disabledExperimentExitCheck(snapshot: StateSnapshot): StrategyEvaluation {
   const check: StrategyCheck = {
-    strategy: 'BTC5M_SINGLE_EXIT',
-    title: 'BTC 5m Experimental Exit Policy',
+    profileId: snapshot.profileId,
+    asset: snapshot.asset,
+    interval: snapshot.interval,
+    strategy: 'UPDOWN_SINGLE_EXIT',
+    title: 'Up/Down Experimental Exit Policy',
     status: 'not-applicable',
     summary: 'Experimental profile has no profit exit, hedge, sell, or rebalance path.',
     reason: 'No exit intent is generated while the experimental profile is active.',
@@ -353,8 +425,11 @@ function disabledExperimentExitCheck(snapshot: StateSnapshot): StrategyEvaluatio
   return { intents: [], rejected: [], diagnostics: [], checks: [check] };
 }
 
-function disabledClassicCheck(strategy: StrategyCheck['strategy'], title: string, reason: string): StrategyCheck {
+function disabledClassicCheck(snapshot: StateSnapshot, strategy: StrategyCheck['strategy'], title: string, reason: string): StrategyCheck {
   return {
+    profileId: snapshot.profileId,
+    asset: snapshot.asset,
+    interval: snapshot.interval,
     strategy,
     title,
     status: 'not-applicable',
@@ -367,6 +442,7 @@ function disabledClassicCheck(strategy: StrategyCheck['strategy'], title: string
 
 function buildCurrentRoundHedgeCheck(appConfig: AppConfig, store: InMemoryStore, snapshot: StateSnapshot, orderbooks: StateSnapshot['orderbooks']) {
   const candidate = {
+    profileId: snapshot.profileId,
     roundId: snapshot.round.id,
     eventSlug: snapshot.round.eventSlug,
     marketTitle: snapshot.round.title,
@@ -377,16 +453,16 @@ function buildCurrentRoundHedgeCheck(appConfig: AppConfig, store: InMemoryStore,
     yesTokenId: snapshot.round.yesTokenId,
     noTokenId: snapshot.round.noTokenId,
   };
-  const orders = hedgeExposureOrders(store.roundOrders(snapshot.round.id));
+  const orders = hedgeExposureOrders(store.roundOrders(snapshot.profileId, snapshot.round.id));
   const plan = planSingleFillHedge({ candidate, orders, orderbooks, appConfig });
-  const executionKey = plan.ok ? [plan.intent.roundId, plan.intent.strategy, plan.intent.tokenId, plan.intent.side].join(':') : undefined;
+  const executionKey = plan.ok ? [snapshot.profileId, plan.intent.roundId, plan.intent.strategy, plan.intent.tokenId, plan.intent.side].filter(Boolean).join(':') : undefined;
   return buildSingleFillHedgeCheck({
     candidate,
     orders,
     orderbooks,
     appConfig,
     runtimeStatus: store.getRuntime().status,
-    outcome: store.getSingleFillHedgeOutcome(snapshot.round.id),
+    outcome: store.getSingleFillHedgeOutcome(snapshot.profileId, snapshot.round.id),
     hasRecentHedgeOrder: executionKey ? store.hasRecentOrder(executionKey, activeHedgeWindowSeconds(appConfig) * 1000) : false,
     hasRecentFailedHedgeOrder: executionKey ? store.hasRecentFailedOrder(executionKey, 60_000) : false,
   });
@@ -394,6 +470,7 @@ function buildCurrentRoundHedgeCheck(appConfig: AppConfig, store: InMemoryStore,
 
 function buildCurrentRoundProfitExitCheck(appConfig: AppConfig, store: InMemoryStore, snapshot: StateSnapshot, orderbooks: StateSnapshot['orderbooks']) {
   const candidate = {
+    profileId: snapshot.profileId,
     roundId: snapshot.round.id,
     eventSlug: snapshot.round.eventSlug,
     marketTitle: snapshot.round.title,
@@ -404,9 +481,9 @@ function buildCurrentRoundProfitExitCheck(appConfig: AppConfig, store: InMemoryS
     yesTokenId: snapshot.round.yesTokenId,
     noTokenId: snapshot.round.noTokenId,
   };
-  const orders = profitExitExposureOrders(store.roundOrders(snapshot.round.id));
+  const orders = profitExitExposureOrders(store.roundOrders(snapshot.profileId, snapshot.round.id));
   const plan = planSingleFillProfitExit({ candidate, orders, orderbooks, appConfig });
-  const executionKey = plan.ok ? [plan.intent.roundId, plan.intent.strategy, plan.intent.tokenId, plan.intent.side].join(':') : undefined;
+  const executionKey = plan.ok ? [snapshot.profileId, plan.intent.roundId, plan.intent.strategy, plan.intent.tokenId, plan.intent.side].filter(Boolean).join(':') : undefined;
   return buildSingleFillProfitExitCheck({
     candidate,
     orders,
@@ -562,27 +639,33 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-async function reconcileFills(appConfig: AppConfig, adapter: PolymarketAdapter, store: InMemoryStore, round: RoundSnapshot, tokenLabels: Map<string, 'YES' | 'NO'>, diagnostics: string[]): Promise<void> {
+async function reconcileFills(appConfig: AppConfig, adapter: PolymarketAdapter, store: InMemoryStore, round: RoundSnapshot, tokenLabels: Map<string, 'YES' | 'NO'>, diagnostics: string[], profile: MarketProfile): Promise<void> {
   if (!tokenLabels.size) return;
   try {
     const fills = await adapter.getRecentFills({
+      profileId: profile.id,
+      asset: profile.asset,
+      interval: profile.interval,
       roundId: round.id,
       eventSlug: round.eventSlug,
       tokenLabels,
       marketTitle: round.title,
       imageUrl: round.imageUrl,
     });
-    recordFillsAndMaybeCooldown(appConfig, store, fills);
+    recordFillsAndMaybeCooldown(appConfig, store, fills, profile);
   } catch (error) {
     if (store.getRuntime().executionMode === 'live') diagnostics.push(`Fill reconciliation failed: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
-async function reconcileTrackedOrders(appConfig: AppConfig, adapter: PolymarketAdapter, store: InMemoryStore, diagnostics: string[]): Promise<void> {
-  const orders = store.ordersNeedingReconciliation();
+async function reconcileTrackedOrders(appConfig: AppConfig, adapter: PolymarketAdapter, store: InMemoryStore, diagnostics: string[], profile: MarketProfile): Promise<void> {
+  const orders = store.ordersNeedingReconciliation(profile.id);
   if (!orders.length) return;
   try {
     const targets: FillTarget[] = orders.map((order) => ({
+      profileId: order.profileId,
+      asset: order.asset,
+      interval: order.interval,
       roundId: order.roundId,
       eventSlug: order.eventSlug,
       marketTitle: order.marketTitle,
@@ -592,7 +675,7 @@ async function reconcileTrackedOrders(appConfig: AppConfig, adapter: PolymarketA
       clobOrderId: order.clobOrderId,
     }));
     const fills = await adapter.getRecentFillsForTargets(targets);
-    recordFillsAndMaybeCooldown(appConfig, store, fills);
+    recordFillsAndMaybeCooldown(appConfig, store, fills, profile);
 
     const openOrders = await adapter.getOpenOrders();
     const cancelled = store.reconcileOpenOrderStatuses(openOrders);
@@ -608,7 +691,7 @@ async function reconcileTrackedOrders(appConfig: AppConfig, adapter: PolymarketA
   }
 }
 
-function recordFillsAndMaybeCooldown(appConfig: AppConfig, store: InMemoryStore, fills: FillRecord[]): void {
+function recordFillsAndMaybeCooldown(appConfig: AppConfig, store: InMemoryStore, fills: FillRecord[], profile: MarketProfile): void {
   const newFills = store.recordFills(fills);
   const experimentStop = appConfig.experimentStopOnSingle ? store.maybeStopExperimentOnSingle(newFills) : null;
   if (experimentStop) {
@@ -627,7 +710,7 @@ function recordFillsAndMaybeCooldown(appConfig: AppConfig, store: InMemoryStore,
     repeatWindowMs: appConfig.singleFillCooldownRepeatWindowMs,
     secondMs: appConfig.singleFillCooldownSecondMs,
     thirdMs: appConfig.singleFillCooldownThirdMs,
-  });
+  }, Date.now(), 'UPDOWN_DUAL_ENTRY', profile.id);
   if (!cooldown) return;
   store.recordRuntimeLog({
     level: 'warn',
@@ -637,17 +720,20 @@ function recordFillsAndMaybeCooldown(appConfig: AppConfig, store: InMemoryStore,
   });
 }
 
-async function reconcileSettlements(appConfig: AppConfig, store: InMemoryStore, diagnostics: string[]): Promise<void> {
-  const rounds = store.roundsNeedingSettlement();
+async function reconcileSettlements(appConfig: AppConfig, store: InMemoryStore, diagnostics: string[], profile: MarketProfile): Promise<void> {
+  const rounds = store.roundsNeedingSettlement(profile.id, profile.roundDurationSeconds);
   if (!rounds.length) return;
   for (const round of rounds) {
     try {
       const winningLabel = await resolvedWinningLabel(appConfig, round.eventSlug);
       if (!winningLabel) continue;
-      const fills = store.roundFills(round.roundId);
+      const fills = store.roundFills(profile.id, round.roundId);
       const settlementValues = calculateSettlementValues(fills, winningLabel);
       const settlement: SettlementRecord = {
         id: `settlement-${round.roundId}`,
+        profileId: profile.id,
+        asset: profile.asset,
+        interval: profile.interval,
         roundId: round.roundId,
         eventSlug: round.eventSlug,
         marketTitle: round.marketTitle,
@@ -664,14 +750,17 @@ async function reconcileSettlements(appConfig: AppConfig, store: InMemoryStore, 
   }
 }
 
-function maybeRecordEstimatedSettlement(store: InMemoryStore, snapshot: StateSnapshot): void {
+function maybeRecordEstimatedSettlement(store: InMemoryStore, snapshot: StateSnapshot, profile: MarketProfile): void {
   if (snapshot.round.phase !== 'settled') return;
-  const fills = store.roundFills(snapshot.round.id);
+  const fills = store.roundFills(profile.id, snapshot.round.id);
   if (!fills.length) return;
   const winningLabel = snapshot.features.price == null ? undefined : snapshot.features.price >= snapshot.round.strike ? 'YES' : 'NO';
   const settlementValues = calculateSettlementValues(fills, winningLabel);
   const settlement: SettlementRecord = {
     id: `settlement-${snapshot.round.id}`,
+    profileId: profile.id,
+    asset: profile.asset,
+    interval: profile.interval,
     roundId: snapshot.round.id,
     eventSlug: snapshot.round.eventSlug,
     marketTitle: snapshot.round.title,

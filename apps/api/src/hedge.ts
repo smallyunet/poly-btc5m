@@ -1,4 +1,4 @@
-import type { OrderBookQuote, OrderRecord, StrategyCheck, TradeIntent } from '../../../packages/shared/src';
+import type { MarketAsset, MarketInterval, MarketProfileId, OrderBookQuote, OrderRecord, StrategyCheck, TradeIntent } from '../../../packages/shared/src';
 import type { PolymarketAdapter, FillTarget } from '../../../packages/polymarket/src';
 import type { AppConfig } from './config';
 import type { InMemoryStore, SingleFillHedgeCandidate } from './store';
@@ -17,9 +17,9 @@ type ExecuteHedgesParams = {
   orderbooks: OrderBookQuote[];
 };
 
-const HEDGE_STRATEGY = 'BTC5M_SINGLE_FILL_HEDGE';
-const CLASSIC_ENTRY_STRATEGY = 'BTC5M_DUAL_45';
-const PROFIT_EXIT_STRATEGY = 'BTC5M_SINGLE_FILL_PROFIT_EXIT';
+const HEDGE_STRATEGY = 'UPDOWN_SINGLE_FILL_HEDGE';
+const CLASSIC_ENTRY_STRATEGY = 'UPDOWN_DUAL_ENTRY';
+const PROFIT_EXIT_STRATEGY = 'UPDOWN_SINGLE_FILL_PROFIT_EXIT';
 const FAILED_HEDGE_COOLDOWN_MS = 60_000;
 const FAK_NO_MATCH_RETRY_LIMIT = 2;
 const FAK_NO_MATCH_RETRY_DELAY_MS = 750;
@@ -113,6 +113,9 @@ export function planSingleFillHedge(params: {
 
   const intent: TradeIntent = {
     id: makeId('hedge-intent'),
+    profileId: params.candidate.profileId,
+    asset: assetFromProfileId(params.candidate.profileId),
+    interval: intervalFromProfileId(params.candidate.profileId),
     strategy: HEDGE_STRATEGY,
     roundId: params.candidate.roundId,
     tokenId,
@@ -186,8 +189,11 @@ export function buildSingleFillHedgeCheck(params: {
         : 'blocked';
 
   return {
+    profileId: params.candidate.profileId,
+    asset: assetFromProfileId(params.candidate.profileId),
+    interval: intervalFromProfileId(params.candidate.profileId),
     strategy: HEDGE_STRATEGY,
-    title: 'BTC 5m Single-Fill Hedge',
+    title: 'Up/Down Single-Fill Hedge',
     status,
     summary: 'When one side fills and the other does not, buy the missing side in the final round window using a capped aggressive limit order.',
     reason: hedgeCheckReason(plan, outcome, params.hasRecentHedgeOrder, params.hasRecentFailedHedgeOrder),
@@ -212,12 +218,13 @@ export function buildSingleFillHedgeCheck(params: {
 }
 
 async function executeOneHedge(params: ExecuteHedgesParams, candidate: SingleFillHedgeCandidate): Promise<string | null> {
-  const orders = params.store.roundOrders(candidate.roundId, CLASSIC_ENTRY_STRATEGY);
+  const orders = params.store.roundOrders(candidate.profileId, candidate.roundId, CLASSIC_ENTRY_STRATEGY);
   await reconcileCandidateFills(params, orders);
-  const plan = planSingleFillHedge({ candidate, orders: hedgeExposureOrders(params.store.roundOrders(candidate.roundId)), orderbooks: params.orderbooks, appConfig: params.appConfig });
+  const plan = planSingleFillHedge({ candidate, orders: hedgeExposureOrders(params.store.roundOrders(candidate.profileId, candidate.roundId)), orderbooks: params.orderbooks, appConfig: params.appConfig });
 
   if (!plan.ok) {
     params.store.recordSingleFillHedgeOutcome({
+      profileId: candidate.profileId,
       roundId: candidate.roundId,
       status: 'blocked',
       reason: plan.reason,
@@ -229,9 +236,10 @@ async function executeOneHedge(params: ExecuteHedgesParams, candidate: SingleFil
     return null;
   }
 
-  const executionKey = [plan.intent.roundId, plan.intent.strategy, plan.intent.tokenId, plan.intent.side].join(':');
+  const executionKey = [plan.intent.profileId, plan.intent.roundId, plan.intent.strategy, plan.intent.tokenId, plan.intent.side].filter(Boolean).join(':');
   if (params.store.hasRecentOrder(executionKey, activeHedgeWindowSeconds(params.appConfig) * 1000)) {
     params.store.recordSingleFillHedgeOutcome({
+      profileId: candidate.profileId,
       roundId: candidate.roundId,
       status: 'blocked',
       reason: 'RECENT_HEDGE_ORDER_EXISTS',
@@ -241,6 +249,7 @@ async function executeOneHedge(params: ExecuteHedgesParams, candidate: SingleFil
   }
   if (params.store.hasRecentFailedOrder(executionKey, FAILED_HEDGE_COOLDOWN_MS)) {
     params.store.recordSingleFillHedgeOutcome({
+      profileId: candidate.profileId,
       roundId: candidate.roundId,
       status: 'blocked',
       reason: 'RECENT_FAILED_HEDGE_ORDER',
@@ -249,9 +258,10 @@ async function executeOneHedge(params: ExecuteHedgesParams, candidate: SingleFil
     return null;
   }
 
-  const cancelResult = await cancelMissingSideOrders(params, candidate.roundId, plan.intent.label);
+  const cancelResult = await cancelMissingSideOrders(params, candidate.profileId, candidate.roundId, plan.intent.label);
   if (!cancelResult.ok) {
     params.store.recordSingleFillHedgeOutcome({
+      profileId: candidate.profileId,
       roundId: candidate.roundId,
       status: 'failed',
       reason: cancelResult.reason,
@@ -262,10 +272,11 @@ async function executeOneHedge(params: ExecuteHedgesParams, candidate: SingleFil
     return `Single-fill hedge blocked for ${plan.intent.label}: ${cancelResult.reason}.`;
   }
 
-  await reconcileCandidateFills(params, params.store.roundOrders(candidate.roundId, CLASSIC_ENTRY_STRATEGY));
-  const finalPlan = planSingleFillHedge({ candidate, orders: hedgeExposureOrders(params.store.roundOrders(candidate.roundId)), orderbooks: params.orderbooks, appConfig: params.appConfig });
+  await reconcileCandidateFills(params, params.store.roundOrders(candidate.profileId, candidate.roundId, CLASSIC_ENTRY_STRATEGY));
+  const finalPlan = planSingleFillHedge({ candidate, orders: hedgeExposureOrders(params.store.roundOrders(candidate.profileId, candidate.roundId)), orderbooks: params.orderbooks, appConfig: params.appConfig });
   if (!finalPlan.ok) {
     params.store.recordSingleFillHedgeOutcome({
+      profileId: candidate.profileId,
       roundId: candidate.roundId,
       status: 'blocked',
       reason: finalPlan.reason,
@@ -279,6 +290,7 @@ async function executeOneHedge(params: ExecuteHedgesParams, candidate: SingleFil
     params.store.recordOrder(localHedgeOrder(candidate, finalPlan.intent, executionKey));
     params.store.updateIntent(finalPlan.intent.id, { status: 'executed' });
     params.store.recordSingleFillHedgeOutcome({
+      profileId: candidate.profileId,
       roundId: candidate.roundId,
       status: 'monitor',
       reason: 'MONITOR_HEDGE_RECORDED',
@@ -290,6 +302,7 @@ async function executeOneHedge(params: ExecuteHedgesParams, candidate: SingleFil
   if (!params.appConfig.ownerPrivateKey?.trim()) {
     params.store.updateIntent(finalPlan.intent.id, { status: 'failed', rejectionReason: 'OWNER_PRIVATE_KEY_MISSING' });
     params.store.recordSingleFillHedgeOutcome({
+      profileId: candidate.profileId,
       roundId: candidate.roundId,
       status: 'failed',
       reason: 'OWNER_PRIVATE_KEY_MISSING',
@@ -300,6 +313,7 @@ async function executeOneHedge(params: ExecuteHedgesParams, candidate: SingleFil
   if (!params.appConfig.depositWallet?.trim()) {
     params.store.updateIntent(finalPlan.intent.id, { status: 'failed', rejectionReason: 'POLYMARKET_DEPOSIT_WALLET_MISSING' });
     params.store.recordSingleFillHedgeOutcome({
+      profileId: candidate.profileId,
       roundId: candidate.roundId,
       status: 'failed',
       reason: 'POLYMARKET_DEPOSIT_WALLET_MISSING',
@@ -322,6 +336,7 @@ async function executeOneHedge(params: ExecuteHedgesParams, candidate: SingleFil
     });
     params.store.updateIntent(postedPlan.intent.id, { status: posted.ok ? 'executed' : 'failed', rejectionReason: posted.ok ? undefined : posted.error || 'CLOB_POST_FAILED' });
     params.store.recordSingleFillHedgeOutcome({
+      profileId: candidate.profileId,
       roundId: candidate.roundId,
       status: posted.ok ? 'posted' : 'failed',
       reason: posted.ok ? (attempts > 1 ? `HEDGE_POSTED_AFTER_${attempts}_ATTEMPTS` : 'HEDGE_POSTED') : posted.error || 'CLOB_POST_FAILED',
@@ -341,6 +356,7 @@ async function executeOneHedge(params: ExecuteHedgesParams, candidate: SingleFil
     params.store.recordOrder({ ...localHedgeOrder(candidate, finalPlan.intent, executionKey), status: 'failed', error: message, rawResponse: { error: message } });
     params.store.updateIntent(finalPlan.intent.id, { status: 'failed', rejectionReason: message });
     params.store.recordSingleFillHedgeOutcome({
+      profileId: candidate.profileId,
       roundId: candidate.roundId,
       status: 'failed',
       reason: message,
@@ -366,10 +382,10 @@ async function postHedgeWithFakNoMatchRetry(
 
     retryReasons.push(posted.error || 'FAK_NO_MATCH');
     await delay(FAK_NO_MATCH_RETRY_DELAY_MS);
-    await reconcileCandidateFills(params, params.store.roundOrders(candidate.roundId, CLASSIC_ENTRY_STRATEGY));
+    await reconcileCandidateFills(params, params.store.roundOrders(candidate.profileId, candidate.roundId, CLASSIC_ENTRY_STRATEGY));
     const nextPlan = planSingleFillHedge({
       candidate,
-      orders: hedgeExposureOrders(params.store.roundOrders(candidate.roundId)),
+      orders: hedgeExposureOrders(params.store.roundOrders(candidate.profileId, candidate.roundId)),
       orderbooks: params.orderbooks,
       appConfig: params.appConfig,
     });
@@ -388,6 +404,9 @@ async function postHedgeWithFakNoMatchRetry(
 
 async function reconcileCandidateFills(params: ExecuteHedgesParams, orders: OrderRecord[]): Promise<void> {
   const targets: FillTarget[] = orders.map((order) => ({
+    profileId: order.profileId,
+    asset: order.asset,
+    interval: order.interval,
     roundId: order.roundId,
     eventSlug: order.eventSlug,
     marketTitle: order.marketTitle,
@@ -405,8 +424,8 @@ async function reconcileCandidateFills(params: ExecuteHedgesParams, orders: Orde
   }
 }
 
-async function cancelMissingSideOrders(params: ExecuteHedgesParams, roundId: string, label: 'YES' | 'NO'): Promise<{ ok: true } | { ok: false; reason: string }> {
-  const orders = params.store.roundOrders(roundId, CLASSIC_ENTRY_STRATEGY).filter((order) => (
+async function cancelMissingSideOrders(params: ExecuteHedgesParams, profileId: SingleFillHedgeCandidate['profileId'], roundId: string, label: 'YES' | 'NO'): Promise<{ ok: true } | { ok: false; reason: string }> {
+  const orders = params.store.roundOrders(profileId, roundId, CLASSIC_ENTRY_STRATEGY).filter((order) => (
     order.label === label
     && order.side === 'BUY'
     && (order.status === 'posted' || order.status === 'partially_filled')
@@ -505,6 +524,9 @@ function delay(ms: number): Promise<void> {
 function localHedgeOrder(candidate: SingleFillHedgeCandidate, intent: TradeIntent, executionKey: string): OrderRecord {
   return {
     id: `local-hedge-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+    profileId: candidate.profileId,
+    asset: intent.asset,
+    interval: intent.interval,
     intentId: intent.id,
     strategy: intent.strategy,
     strategyProfile: 'classic',
@@ -526,6 +548,14 @@ function localHedgeOrder(candidate: SingleFillHedgeCandidate, intent: TradeInten
 
 function makeId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+}
+
+function assetFromProfileId(profileId: MarketProfileId): MarketAsset {
+  return profileId.split('-')[0] as MarketAsset;
+}
+
+function intervalFromProfileId(profileId: MarketProfileId): MarketInterval {
+  return profileId.split('-').slice(1).join('-') as MarketInterval;
 }
 
 function sum(values: number[]): number {
