@@ -1,26 +1,21 @@
 import React from 'react';
 import { 
-  Activity, 
   AlertTriangle, 
   CheckCircle2, 
   RefreshCw, 
-  Radio, 
   Shield, 
   Timer, 
-  TrendingUp,
   BookOpen,
   History,
   Terminal,
   Cpu,
-  SlidersHorizontal,
   Search,
-  Info,
-  Users
+  Info
 } from 'lucide-react';
 
 import type { BotRuntimeStatus, DashboardState, RuntimeLogRecord, StrategyCheck } from '../../../packages/shared/src';
 import { api, DASHBOARD_REFRESH_MS } from './lib/api';
-import { formatMoney, formatNumber, formatSeconds, modeLabel } from './lib/format';
+import { formatMoney, formatNumber, formatSeconds } from './lib/format';
 import { formatEtTime, outcomeLabel, outcomeTone, shortenTokenId } from './lib/dashboardFormat';
 
 import { ScoreGauge } from './components/ScoreGauge';
@@ -633,7 +628,6 @@ export function App() {
   const strikeLabel = snapshot.round.strikeStatus === 'locked' ? 'Opening Strike' : 'Estimated Open';
   const entryStatusTone = entryCheck?.status === 'eligible' ? 'good' : entryCheck?.status === 'blocked' ? 'bad' : 'neutral';
   const entryStatusLabel = entryCheck?.status || 'not-loaded';
-  const topBlockers = failedEntryConditions.slice(0, 4).map((condition) => condition.label).join(', ') || 'none';
   const entryLimit = entryCheck?.limitPrice;
   const entryPairCost = entryLimit == null ? null : entryLimit * 2;
   const entryPairEdge = entryPairCost == null ? null : 1 - entryPairCost;
@@ -650,9 +644,6 @@ export function App() {
     ? fixedSharesActive ? `FIXED ${fixedSharesLabel}` : 'SCORE SIZE'
     : 'UNKNOWN';
   const entryConfigValue = entryBypassActive ? 'BYPASS ALL' : 'RULE GATED';
-  const entryConfigDetail = entryConfig
-    ? `${pricePolicyLabel} / ${sizePolicyLabel} / ${entryConfig.bypassSingleFillCooldown ? 'cooldown bypass' : 'cooldown gate'}`
-    : 'runtime entry config unavailable';
   const entryCooldownActive = Boolean(state.runtime.entryCooldownUntil && new Date(state.runtime.entryCooldownUntil).getTime() > Date.now());
   const entryCooldownRemaining = formatCooldownRemaining(state.runtime.entryCooldownUntil);
   const entryCooldownReason = state.runtime.entryCooldownReason || 'no single-fill lockout';
@@ -669,6 +660,11 @@ export function App() {
   const decisionWindowCondition = conditionByLabel('Decision window');
   const cooldownCondition = conditionByLabel('Single-fill cooldown');
   const entryWindowPassed = decisionWindowCondition?.passed ?? false;
+  const effectiveBlockers = entryBypassActive
+    ? failedEntryConditions.filter((condition) => condition.label === 'Single-fill cooldown')
+    : failedEntryConditions;
+  const diagnosticBlockerCount = Math.max(0, failedEntryConditions.length - effectiveBlockers.length);
+  const topBlockers = effectiveBlockers.slice(0, 4).map((condition) => condition.label).join(', ') || 'none';
   const scoreInfo = scoreTier(snapshot.features.chopScore);
   const scoreParts = scoreBreakdown(snapshot.features);
   const scoreMetricValue = entryBypassActive ? 'BYPASSED' : formatNumber(snapshot.features.chopScore, 1);
@@ -693,7 +689,10 @@ export function App() {
   const previewLabels = currentEntryIntents.map((intent) => outcomeLabel(intent.label)).join(' + ');
   const entryActionDetail = entryCheck?.status === 'eligible'
     ? `${previewLabels || 'UP + DOWN'} BUY LIMIT${previewShares == null ? '' : `, ${formatShares(previewShares)} shares/side`} @ ${entryLimit == null ? 'strategy limit' : entryLimit.toFixed(3)}`
-    : failedEntryConditions.slice(0, 3).map(blockerDetail).join(' / ') || entryCheck?.reason || 'waiting for strategy check';
+    : effectiveBlockers.slice(0, 3).map(blockerDetail).join(' / ')
+      || (entryBypassActive && failedEntryConditions.length ? `${diagnosticBlockerCount} strategy checks bypassed by config` : '')
+      || entryCheck?.reason
+      || 'waiting for strategy check';
   const decisionState = entryCheck?.status === 'eligible'
     ? { label: 'ENTER READY', detail: entryActionDetail, tone: 'good' as const }
     : entryCooldownActive || cooldownCondition?.passed === false
@@ -803,91 +802,45 @@ export function App() {
 
       <RuntimeModeStrip items={runtimeModeItems} />
 
-      {/* Top Status Cards / Digest */}
-      <section className="digest">
-        <div className="digestGroup action">
-          <span className="digestGroupLabel">Action</span>
-          <Digest
-            icon={<Timer size={16} />}
-            label="Round Phase"
-            value={snapshot.round.phase.toUpperCase()}
-            detail={roundPhaseDetail}
-            tone={snapshot.round.phase === 'decision' || snapshot.round.phase === 'posting' ? 'warn' : 'neutral'}
-            priority="primary"
-          />
-          <Digest
-            icon={<AlertTriangle size={16} />}
-            label="Current Action"
-            value={decisionState.label}
-            detail={decisionState.detail}
-            tone={decisionState.tone}
-            priority="primary"
-          />
-          <Digest
-            icon={<Timer size={16} />}
-            label="Entry Cooldown"
-            value={entryCooldownActive ? 'ACTIVE' : 'INACTIVE'}
-            detail={entryCooldownActive ? `${entryCooldownRemaining} / ${entryCooldownReason}` : entryCooldownReason}
-            tone={entryCooldownActive ? 'warn' : 'neutral'}
-            priority="primary"
-          />
-          <Digest
-            icon={<Shield size={16} />}
-            label="Active Trades"
-            value={`${activeOrders} Orders`}
-            detail={`${state.fills.length} fills / ${state.orders.length} total`}
-            tone={activeOrders ? 'warn' : 'neutral'}
-            priority="primary"
-          />
-        </div>
-        <div className="digestGroup system">
-          <span className="digestGroupLabel">System</span>
-          <Digest
-            icon={<Activity size={16} />}
-            label="Runtime"
-            value={state.runtime.status.toUpperCase()}
-            detail={`${modeLabel(state.runtime.executionMode)} / ${runtimeBuildLabel(state.runtime)}`}
-            tone={state.runtime.executionMode === 'live' ? 'warn' : 'neutral'}
-          />
-          <Digest
-            icon={<SlidersHorizontal size={16} />}
-            label="Entry Config"
-            value={entryConfigValue}
-            detail={entryConfigDetail}
-            tone={entryBypassActive ? 'warn' : fixedLimitActive || fixedSharesActive ? 'neutral' : 'good'}
-          />
-          <Digest
-            icon={<TrendingUp size={16} />}
-            label="Market Regime"
-            value={snapshot.regime}
-            detail={`Score ${formatNumber(snapshot.features.chopScore, 1)} / ${entryEligibleLabel}`}
-            tone={entryBypassActive ? 'neutral' : snapshot.regime === 'CHOP' ? 'good' : snapshot.regime === 'TREND' ? 'bad' : 'neutral'}
-          />
-          <Digest
-            icon={<Radio size={16} />}
-            label="Feeds Connection"
-            value={state.feed.source.toUpperCase()}
-            detail={`BINANCE: ${state.feed.binanceConnected ? 'ON' : 'OFF'} / CLOB: ${state.feed.clobConnected ? 'ON' : 'OFF'}`}
-            tone={state.feed.source === 'live' && state.feed.binanceConnected ? 'good' : 'warn'}
-          />
-        </div>
-        <div className="digestGroup result">
-          <span className="digestGroupLabel">Results</span>
-          <Digest
-            icon={<CheckCircle2 size={16} />}
-            label="Net Realized PnL"
-            value={formatMoney(pnl)}
-            detail={`${state.settlements.length} settled rounds`}
-            tone={pnl > 0 ? 'good' : pnl < 0 ? 'bad' : 'neutral'}
-          />
-          <Digest
-            icon={<Users size={16} />}
-            label="Participation"
-            value={participationStatus.toUpperCase()}
-            detail={participationSummary}
-            tone={participationTone}
-          />
-        </div>
+      {/* Focus cards only show the state that still matters after config pruning. */}
+      <section className="focusDigest">
+        <Digest
+          icon={<AlertTriangle size={16} />}
+          label="Current Action"
+          value={decisionState.label}
+          detail={decisionState.detail}
+          tone={decisionState.tone}
+          priority="primary"
+        />
+        <Digest
+          icon={<Timer size={16} />}
+          label="Round Phase"
+          value={snapshot.round.phase.toUpperCase()}
+          detail={roundPhaseDetail}
+          tone={snapshot.round.phase === 'decision' || snapshot.round.phase === 'posting' ? 'warn' : 'neutral'}
+          priority="primary"
+        />
+        <Digest
+          icon={<Timer size={16} />}
+          label="Cooldown"
+          value={entryCooldownActive ? 'ACTIVE' : cooldownGateLabel}
+          detail={entryCooldownActive ? `${entryCooldownRemaining} / ${entryCooldownReason}` : entryCooldownReason}
+          tone={entryCooldownActive ? 'warn' : entryConfig?.bypassSingleFillCooldown ? 'warn' : 'neutral'}
+        />
+        <Digest
+          icon={<Shield size={16} />}
+          label="Active Trades"
+          value={`${activeOrders} Orders`}
+          detail={`${state.fills.length} fills / ${state.orders.length} total`}
+          tone={activeOrders ? 'warn' : 'neutral'}
+        />
+        <Digest
+          icon={<CheckCircle2 size={16} />}
+          label="Net Realized PnL"
+          value={formatMoney(pnl)}
+          detail={`${state.settlements.length} settled rounds`}
+          tone={pnl > 0 ? 'good' : pnl < 0 ? 'bad' : 'neutral'}
+        />
       </section>
 
       {/* Main Tabbed Area */}
@@ -909,12 +862,15 @@ export function App() {
                     <span className="decisionKicker">Current Action</span>
                     <strong>{decisionState.label}</strong>
                     <p>{decisionState.detail}</p>
-                    {failedEntryConditions.length > 0 && (
+                    {effectiveBlockers.length > 0 && (
                       <div className={`blockerChips ${entryBypassActive ? 'muted' : ''}`}>
-                        {failedEntryConditions.slice(0, 3).map((condition) => (
+                        {effectiveBlockers.slice(0, 3).map((condition) => (
                           <span key={condition.label}>{condition.label}</span>
                         ))}
                       </div>
+                    )}
+                    {entryBypassActive && diagnosticBlockerCount > 0 && (
+                      <div className="bypassNote">{diagnosticBlockerCount} strategy checks are hidden because score gating is bypassed.</div>
                     )}
                   </div>
                   <div className="decisionSummaryMeta">
@@ -940,10 +896,10 @@ export function App() {
                     tone={buyPolicyTone}
                   />
                   <DecisionMetric
-                    label="BTC Dynamic Score"
-                    value={scoreMetricValue}
-                    detail={scoreMetricDetail}
-                    tone={entryBypassActive ? 'neutral' : btcDecisionPassed ? 'good' : 'bad'}
+                    label="Cooldown Gate"
+                    value={entryCooldownActive ? 'ACTIVE' : cooldownGateLabel}
+                    detail={entryCooldownActive ? `${entryCooldownRemaining} remaining; ${entryCooldownReason}` : entryConfig?.bypassSingleFillCooldown ? 'single-fill cooldown is ignored by config' : 'single-fill cooldown still gates entry'}
+                    tone={entryCooldownActive ? 'warn' : entryConfig?.bypassSingleFillCooldown ? 'warn' : 'good'}
                   />
                   <DecisionMetric
                     label="Entry Price / Size"
@@ -952,41 +908,55 @@ export function App() {
                     tone={priceSizeTone}
                   />
                   <DecisionMetric
-                    label="Entry Bypass"
-                    value={entryConfigValue}
-                    detail={entryBypassActive ? 'strategy blockers and entry quote gate are bypassed; cooldown still gates' : `live score floor ${entryConfig?.minLiveChopScore ?? 80}; confirmation ${entryConfig?.entryConfirmTicks ?? 3} ticks`}
-                    tone={entryBypassActive ? 'warn' : 'neutral'}
-                  />
-                  <DecisionMetric
                     label="Entry Limit"
                     value={entryLimit == null ? '-' : entryLimit.toFixed(3)}
                     detail={entryPairCost == null || entryPairEdge == null ? 'waiting for strategy check' : `pair cost ${entryPairCost.toFixed(3)} / edge ${entryPairEdge.toFixed(3)}`}
                     tone={entryLimit == null ? 'neutral' : entryPairEdge != null && entryPairEdge >= 0.08 ? 'good' : 'warn'}
                   />
-                  <DecisionMetric
-                    label="Orderbook Role"
-                    value={orderbookDecisionPassed ? 'TRADABLE' : 'NOT TRADABLE'}
-                    detail="live/fresh token books with buy ask only"
-                    tone={orderbookDecisionPassed ? 'good' : 'bad'}
-                  />
-                  <DecisionMetric
-                    label="Participation Gate"
-                    value={participationGateValue}
-                    detail={participationSummary}
-                    tone={participationGateTone}
-                  />
+                  {!entryBypassActive && (
+                    <>
+                      <DecisionMetric
+                        label="BTC Dynamic Score"
+                        value={scoreMetricValue}
+                        detail={scoreMetricDetail}
+                        tone={btcDecisionPassed ? 'good' : 'bad'}
+                      />
+                      <DecisionMetric
+                        label="Orderbook Role"
+                        value={orderbookDecisionPassed ? 'TRADABLE' : 'NOT TRADABLE'}
+                        detail="live/fresh token books with buy ask only"
+                        tone={orderbookDecisionPassed ? 'good' : 'bad'}
+                      />
+                      <DecisionMetric
+                        label="Participation Gate"
+                        value={participationGateValue}
+                        detail={participationSummary}
+                        tone={participationGateTone}
+                      />
+                    </>
+                  )}
+                  {entryBypassActive && (
+                    <DecisionMetric
+                      label="Bypass Scope"
+                      value={entryConfigValue}
+                      detail="score, strategy blockers, and entry quote gates are diagnostic; cooldown remains active"
+                      tone="warn"
+                    />
+                  )}
                   <DecisionMetric
                     label="Post-Start Actions"
                     value="REGULAR OFF"
                     detail="no add/sell/rebalance; capped single-fill hedge can run late"
                     tone="neutral"
                   />
-                  <DecisionMetric
-                    label="Current Blockers"
-                    value={failedEntryConditions.length ? String(failedEntryConditions.length) : '0'}
-                    detail={entryBypassActive && failedEntryConditions.length ? `diagnostic only: ${topBlockers}` : topBlockers}
-                    tone={entryBypassActive ? 'neutral' : failedEntryConditions.length ? 'warn' : 'good'}
-                  />
+                  {!entryBypassActive && (
+                    <DecisionMetric
+                      label="Current Blockers"
+                      value={effectiveBlockers.length ? String(effectiveBlockers.length) : '0'}
+                      detail={topBlockers}
+                      tone={effectiveBlockers.length ? 'warn' : 'good'}
+                    />
+                  )}
                 </div>
                 <details className={`collapsiblePanel ${entryBypassActive ? 'diagnosticOnly' : ''}`}>
                   <summary>
