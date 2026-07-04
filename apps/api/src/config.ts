@@ -41,6 +41,7 @@ export type AppConfig = {
   maxEntryQueueImbalance: number;
   minLiveChopScore: number;
   bypassEntryScoreGating: boolean;
+  bypassSingleFillCooldown: boolean;
   entryConfirmTicks: number;
   entryMinSecondsToStart: number;
   participationEnabled: boolean;
@@ -128,6 +129,7 @@ export function loadConfig(): AppConfig {
     maxEntryQueueImbalance: numberEnv('MAX_ENTRY_QUEUE_IMBALANCE', 5),
     minLiveChopScore: numberEnv('MIN_LIVE_CHOP_SCORE', 80),
     bypassEntryScoreGating: booleanEnv('BYPASS_ENTRY_SCORE_GATING', false),
+    bypassSingleFillCooldown: booleanEnv('BYPASS_SINGLE_FILL_COOLDOWN', false),
     entryConfirmTicks: parsePositiveInteger(process.env.ENTRY_CONFIRM_TICKS, 3),
     entryMinSecondsToStart: parsePositiveInteger(process.env.ENTRY_MIN_SECONDS_TO_START, 15),
     participationEnabled: booleanEnv('PARTICIPATION_ENABLED', true),

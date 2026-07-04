@@ -376,6 +376,7 @@ function config(): AppConfig {
     maxEntryQueueImbalance: 5,
     minLiveChopScore: 80,
     bypassEntryScoreGating: false,
+    bypassSingleFillCooldown: false,
     entryConfirmTicks: 3,
     participationEnabled: true,
     participationCacheMs: 30_000,

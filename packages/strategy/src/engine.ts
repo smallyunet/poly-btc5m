@@ -23,6 +23,7 @@ export type StrategyRiskConfig = {
   maxEntryQueueImbalance: number;
   minLiveChopScore: number;
   bypassEntryScoreGating: boolean;
+  bypassSingleFillCooldown: boolean;
   entryMinSecondsToStart: number;
   minParticipationHoldersPerSide: number;
   minParticipationTopHolderSharesPerSide: number;
@@ -84,6 +85,7 @@ export function evaluateEntry(snapshot: StateSnapshot, config: StrategyRiskConfi
   const participation = participationStats(snapshot, config);
   const cooldownUntilMs = config.entryCooldownUntil ? new Date(config.entryCooldownUntil).getTime() : 0;
   const cooldownActive = Number.isFinite(cooldownUntilMs) && cooldownUntilMs > Date.now();
+  const cooldownPassed = config.bypassSingleFillCooldown || !cooldownActive;
   const centerCrosses = snapshot.features.centerCross120s ?? snapshot.features.cross120s;
   const centerMinBiExcursion = snapshot.features.centerMinBiExcursionBps120s ?? snapshot.features.minBiExcursionBps120s;
   const scoreGatingPassed = config.bypassEntryScoreGating || snapshot.regime === 'CHOP';
@@ -95,7 +97,7 @@ export function evaluateEntry(snapshot: StateSnapshot, config: StrategyRiskConfi
   const momentumThresholdPassed = config.bypassEntryScoreGating || snapshot.features.momentumRatio30s <= config.maxMomentumRatio30s;
   const liveScoreFloorPassed = config.bypassEntryScoreGating || config.dryRun || snapshot.features.chopScore >= config.minLiveChopScore;
 
-  if (cooldownActive) reasons.push('SINGLE_FILL_COOLDOWN');
+  if (!cooldownPassed) reasons.push('SINGLE_FILL_COOLDOWN');
   if (!inDecisionWindow) reasons.push('NOT_IN_DECISION_WINDOW');
   if (!scoreGatingPassed) reasons.push(`REGIME_${snapshot.regime}`);
   if (!booksTradable) reasons.push('ORDERBOOK_NOT_TRADABLE');
@@ -128,7 +130,7 @@ export function evaluateEntry(snapshot: StateSnapshot, config: StrategyRiskConfi
     limitPrice,
     conditions: [
       condition('Decision window', inDecisionWindow, `${snapshot.round.secondsToStart.toFixed(1)}s to start / min ${config.entryMinSecondsToStart}s`),
-      condition('Single-fill cooldown', !cooldownActive, cooldownActive ? cooldownLabel(config.entryCooldownUntil, config.entryCooldownReason) : 'inactive'),
+      condition('Single-fill cooldown', cooldownPassed, config.bypassSingleFillCooldown && cooldownActive ? `${cooldownLabel(config.entryCooldownUntil, config.entryCooldownReason)} (bypassed)` : cooldownActive ? cooldownLabel(config.entryCooldownUntil, config.entryCooldownReason) : 'inactive'),
       condition('Regime is CHOP', scoreGatingPassed, config.bypassEntryScoreGating ? `${snapshot.regime} (score gating bypassed)` : snapshot.regime),
       condition('CHOP score threshold', chopScoreThresholdPassed, config.bypassEntryScoreGating ? `${snapshot.features.chopScore.toFixed(1)} / ${config.minChopScore} (bypassed)` : `${snapshot.features.chopScore.toFixed(1)} / ${config.minChopScore}`),
       condition('center cross_120s threshold', centerCrossThresholdPassed, config.bypassEntryScoreGating ? `${centerCrosses} / ${config.minCross120s} (bypassed)` : `${centerCrosses} / ${config.minCross120s}`),

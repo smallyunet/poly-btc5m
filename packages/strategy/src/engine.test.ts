@@ -27,6 +27,7 @@ const risk: StrategyRiskConfig = {
   maxEntryQueueImbalance: 5,
   minLiveChopScore: 80,
   bypassEntryScoreGating: false,
+  bypassSingleFillCooldown: false,
   minParticipationHoldersPerSide: 3,
   minParticipationTopHolderSharesPerSide: 300,
   minParticipationTopPositionPnl: 40,
@@ -126,6 +127,20 @@ test('ignores expired single-fill cooldown', () => {
   });
   assert.equal(result.intents.length, 2);
   assert.equal(result.checks[0].conditions.find((item) => item.label === 'Single-fill cooldown')?.passed, true);
+});
+
+test('bypasses active single-fill cooldown when enabled', () => {
+  const snapshot = { ...baseSnapshot(chopFeatures()), regime: 'CHOP' as const };
+  const result = evaluateEntry(snapshot, {
+    ...risk,
+    bypassSingleFillCooldown: true,
+    entryCooldownUntil: new Date(Date.now() + 4 * 60 * 60_000).toISOString(),
+    entryCooldownReason: 'single fill on round-0',
+  });
+  assert.equal(result.intents.length, 2);
+  assert.equal(result.rejected.length, 0);
+  assert.equal(result.checks[0].conditions.find((item) => item.label === 'Single-fill cooldown')?.passed, true);
+  assert.match(result.checks[0].conditions.find((item) => item.label === 'Single-fill cooldown')?.actual || '', /bypassed/);
 });
 
 test('generates paired YES and NO intents in a fresh CHOP decision window', () => {
