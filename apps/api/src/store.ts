@@ -389,11 +389,12 @@ export class InMemoryStore {
       .map(({ latestTime: _latestTime, ...round }) => round);
   }
 
-  reconcileOpenOrderStatuses(openOrders: OpenOrderLike[]): number {
+  reconcileOpenOrderStatuses(profileId: MarketProfileId, openOrders: OpenOrderLike[]): number {
     const openOrderIds = new Set(openOrders.map((order) => order.id).filter(Boolean));
     const openTokenIds = new Set(openOrders.map((order) => order.tokenId).filter(Boolean));
     let updated = 0;
     this.orders = this.orders.map((order) => {
+      if (order.profileId !== profileId) return order;
       if (order.status !== 'posted' && order.status !== 'partially_filled') return order;
       if (order.clobOrderId && openOrderIds.has(order.clobOrderId)) return order;
       if (!order.clobOrderId && openTokenIds.has(order.tokenId)) return order;
@@ -799,6 +800,7 @@ export class InMemoryStore {
       : undefined;
     const candidates = exact ? [exact] : this.orders.filter((order) => (
       order.roundId === fill.roundId
+      && order.profileId === fill.profileId
       && order.tokenId === fill.tokenId
       && order.label === fill.label
       && order.side === fill.side

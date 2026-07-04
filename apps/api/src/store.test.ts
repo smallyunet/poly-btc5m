@@ -286,6 +286,26 @@ test('profile duration controls final single-fill review timing', () => {
   assert.equal(store.getActiveEntryCooldown('btc-15m', nowMs), null);
 });
 
+test('open-order reconciliation only cancels orders for the requested profile', () => {
+  const nowMs = Date.now();
+  const fiveMinuteRound = roundIdFromStart(nowMs - 7 * 60_000);
+  const fifteenMinuteRound = `btc-updown-15m-${Math.floor((nowMs - 20 * 60_000) / 1000)}`;
+  const store = new InMemoryStore('live', 2_000, { persistencePath: false });
+
+  store.recordOrder(order(fiveMinuteRound, 'YES', { profileId: 'btc-5m' }));
+  store.recordOrder(order(fifteenMinuteRound, 'YES', { profileId: 'btc-15m', interval: '15m' }));
+
+  assert.equal(store.reconcileOpenOrderStatuses('btc-5m', []), 1);
+  store.recordFills([fill(fifteenMinuteRound, 'YES', { profileId: 'btc-15m', interval: '15m' })]);
+
+  const orders = store.dashboardState().orders;
+  const fiveMinuteOrder = orders.find((item) => item.profileId === 'btc-5m');
+  const fifteenMinuteOrder = orders.find((item) => item.profileId === 'btc-15m');
+  assert.equal(fiveMinuteOrder?.status, 'cancelled');
+  assert.equal(fifteenMinuteOrder?.status, 'filled');
+  assert.equal(fifteenMinuteOrder?.filledSize, 10);
+});
+
 function roundIdFromStart(startMs: number): string {
   return `btc-updown-5m-${Math.floor(startMs / 1000)}`;
 }

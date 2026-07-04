@@ -683,7 +683,7 @@ async function reconcileTrackedOrders(appConfig: AppConfig, adapter: PolymarketA
     recordFillsAndMaybeCooldown(appConfig, store, fills, profile);
 
     const openOrders = await adapter.getOpenOrders();
-    const cancelled = store.reconcileOpenOrderStatuses(openOrders);
+    const cancelled = store.reconcileOpenOrderStatuses(profile.id, openOrders);
     if (cancelled) {
       store.recordRuntimeLog({
         level: 'info',
