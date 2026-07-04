@@ -7,6 +7,19 @@ import { loadConfig } from './config';
 import { runAllProfilesTick } from './runtime';
 import { InMemoryStore } from './store';
 
+test('entry signal confirmation counts are isolated by market profile', () => {
+  const store = new InMemoryStore('live', 2_000, { persistencePath: false });
+
+  assert.equal(store.recordEntrySignal('btc-5m:round-a', true), 1);
+  assert.equal(store.recordEntrySignal('btc-15m:round-b', true), 1);
+  assert.equal(store.recordEntrySignal('btc-5m:round-a', true), 2);
+  assert.equal(store.recordEntrySignal('btc-15m:round-b', true), 2);
+
+  assert.equal(store.recordEntrySignal('btc-5m:round-c', true), 1);
+  assert.equal(store.recordEntrySignal('btc-15m:round-b', true), 3);
+  assert.equal(store.recordEntrySignal('btc-5m:round-a', true), 1);
+});
+
 test('runAllProfilesTick captures isolated BTC 5m, 15m, and 1h profile snapshots', async () => {
   const config = loadConfig();
   config.executionMode = 'monitor';
@@ -113,9 +126,15 @@ test('runAllProfilesTick captures isolated BTC 5m, 15m, and 1h profile snapshots
 
   const snapshots = await runAllProfilesTick(config, store, data as never, adapter, discovery as never, participation as never);
   const dashboard = store.dashboardState();
+  const entryChecks = dashboard.profiles
+    .map((item) => item.strategyChecks.find((check) => check.strategy === 'UPDOWN_DUAL_ENTRY'))
+    .filter(Boolean);
 
   assert.deepEqual(snapshots.map((snapshot) => snapshot.profileId).sort(), enabledProfiles.map((profile) => profile.id).sort());
   assert.equal(dashboard.profiles.length, enabledProfiles.length);
   assert.deepEqual(dashboard.profiles.map((item) => item.profile.id).sort(), ['btc-15m', 'btc-1h', 'btc-5m']);
   assert.deepEqual(syncedTokens.flat().filter((token) => token.endsWith('-yes')).sort(), ['btc-15m-yes', 'btc-1h-yes', 'btc-5m-yes']);
+  assert.equal(entryChecks.length, enabledProfiles.length);
+  assert.ok(entryChecks.every((check) => check?.status === 'eligible'));
+  assert.ok(entryChecks.every((check) => /bypassed/.test(check?.conditions.find((condition) => condition.label === 'Entry signal confirmation')?.actual || '')));
 });

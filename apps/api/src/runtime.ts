@@ -70,7 +70,12 @@ export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, dat
   snapshot.orderbookDepth = buildOrderbookDepthSnapshot(snapshot, appConfig);
   const evaluatedEntry = classicActive ? evaluateEntry(snapshot, risk) : evaluateExperimentEntry(snapshot, appConfig, store);
   const entry = classicActive
-    ? applyEntryConfirmation(evaluatedEntry, store.recordEntrySignal(`${profile.id}:${snapshot.round.id}`, evaluatedEntry.intents.length > 0), appConfig.entryConfirmTicks)
+    ? applyEntryConfirmation(
+      evaluatedEntry,
+      appConfig.bypassEntryScoreGating ? appConfig.entryConfirmTicks : store.recordEntrySignal(`${profile.id}:${snapshot.round.id}`, evaluatedEntry.intents.length > 0),
+      appConfig.entryConfirmTicks,
+      appConfig.bypassEntryScoreGating,
+    )
     : evaluatedEntry;
   const intents = entry.intents.map((intent) => withProfile(intent, profile));
   store.recordIntents([...intents, ...entry.rejected.map((intent) => withProfile(intent, profile))]);
@@ -290,13 +295,13 @@ function roundRatio(value: number): number {
   return Math.round(value * 100) / 100;
 }
 
-function applyEntryConfirmation(entry: ReturnType<typeof evaluateEntry>, signalCount: number, requiredTicks: number): ReturnType<typeof evaluateEntry> {
-  const confirmed = signalCount >= requiredTicks;
+function applyEntryConfirmation(entry: ReturnType<typeof evaluateEntry>, signalCount: number, requiredTicks: number, bypassed = false): ReturnType<typeof evaluateEntry> {
+  const confirmed = bypassed || signalCount >= requiredTicks;
   const check = entry.checks[0];
   const confirmationCondition = {
     label: 'Entry signal confirmation',
     passed: confirmed,
-    actual: `${signalCount} / ${requiredTicks} consecutive eligible ticks`,
+    actual: bypassed ? `${signalCount} / ${requiredTicks} consecutive eligible ticks (bypassed)` : `${signalCount} / ${requiredTicks} consecutive eligible ticks`,
   };
   if (!entry.intents.length) {
     return { ...entry, checks: [{ ...check, conditions: [...check.conditions, confirmationCondition] }] };

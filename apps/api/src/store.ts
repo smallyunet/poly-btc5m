@@ -238,11 +238,12 @@ export class InMemoryStore {
     this.strategyChecksByProfile.set(profileId, checks);
   }
 
-  recordEntrySignal(roundId: string, passed: boolean): number {
-    const next = passed ? (this.entrySignalCounts.get(roundId) ?? 0) + 1 : 0;
-    this.entrySignalCounts.set(roundId, next);
+  recordEntrySignal(signalKey: string, passed: boolean): number {
+    const next = passed ? (this.entrySignalCounts.get(signalKey) ?? 0) + 1 : 0;
+    this.entrySignalCounts.set(signalKey, next);
+    const scope = entrySignalScope(signalKey);
     for (const key of this.entrySignalCounts.keys()) {
-      if (key !== roundId) this.entrySignalCounts.delete(key);
+      if (key !== signalKey && entrySignalScope(key) === scope) this.entrySignalCounts.delete(key);
     }
     return next;
   }
@@ -912,6 +913,11 @@ function cooldownCategory(outcome: SingleFillHedgeOutcome | undefined): string {
   if (PRICE_CAP_HEDGE_REASONS.has(outcome.reason)) return 'price-cap';
   if (BENIGN_HEDGE_REASONS.has(outcome.reason)) return 'unhedged';
   return 'execution';
+}
+
+function entrySignalScope(signalKey: string): string {
+  const separator = signalKey.indexOf(':');
+  return separator > 0 ? signalKey.slice(0, separator) : 'default';
 }
 
 function maxCooldown(records: SingleFillCooldownRecord[]): SingleFillCooldownRecord {
