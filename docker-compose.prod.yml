@@ -11,6 +11,9 @@ services:
     env_file: .env
     environment:
       NODE_ENV: production
+      APP_VERSION: ${APP_VERSION:-0.1.0}
+      GIT_SHA: ${GIT_SHA:-unknown}
+      BUILD_TIME: ${BUILD_TIME:-unknown}
       PORT: 8788
       WEB_DIST_DIR: /app/dist/apps/web
       RUNTIME_STATE_PATH: /app/data/runtime-state.json
