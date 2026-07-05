@@ -130,6 +130,7 @@ MAX_ENTRY_QUEUE_IMBALANCE=5
 MIN_LIVE_CHOP_SCORE=70
 BYPASS_ENTRY_SCORE_GATING=true
 BYPASS_SINGLE_FILL_COOLDOWN=false
+REFRESH_SINGLE_FILL_COOLDOWN_ON_BOOT=false
 ENTRY_CONFIRM_TICKS=3
 PARTICIPATION_ENABLED=true
 PARTICIPATION_CACHE_MS=30000
@@ -174,6 +175,7 @@ Live entry orders are configured as CLOB limit order `price + size`:
 - In live mode, `MIN_LIVE_CHOP_SCORE=80` blocks edge-score 42c setups from posting real orders.
 - `BYPASS_ENTRY_SCORE_GATING=true` bypasses strategy entry blockers and the entry orderbook quote gate so each round can attempt paired entry, but it does not bypass `SINGLE_FILL_COOLDOWN`. It still leaves execution-level duplicate/open-order, balance, credential, round-start, invalid price/size, and exit/hedge rules in place.
 - `BYPASS_SINGLE_FILL_COOLDOWN=true` bypasses only the active single-fill cooldown entry blocker. It does not disable the single-fill hedge/profit-exit logic.
+- `REFRESH_SINGLE_FILL_COOLDOWN_ON_BOOT=true` recomputes any persisted active single-fill cooldown from the current profile cooldown config during process boot. It preserves fills, reviewed rounds, and repeat history, and only updates or clears active cooldown records.
 - `ENTRY_CONFIRM_TICKS=3` requires the full entry setup to remain eligible across three consecutive bot ticks before orders are posted.
 - `DUAL_LIMIT_PRICE` is the fixed fallback price when dynamic limit pricing is disabled.
 - With `DYNAMIC_SHARES_ENABLED=true`, CHOP score maps to `0.5x/1.0x/1.0x/1.25x` of `ORDER_SHARES_PER_SIDE`, capped by `MAX_ORDER_SHARES_PER_SIDE`.

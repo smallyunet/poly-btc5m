@@ -497,6 +497,61 @@ export class InMemoryStore {
     return active;
   }
 
+  refreshActiveSingleFillCooldowns(nowMs = Date.now()): { refreshed: number; cleared: number } {
+    let refreshed = 0;
+    let cleared = 0;
+    let dirty = false;
+
+    for (const [profileId, active] of [...this.singleFillCooldowns.entries()]) {
+      const sourceProfileId = active.sourceProfileId || active.profileId;
+      const sourceRoundId = active.sourceRoundId || active.roundId;
+      if (!active.finalizedAt || !this.isFinalSingleSidedBuyRound(sourceRoundId, nowMs, sourceProfileId)) {
+        this.singleFillCooldowns.delete(profileId);
+        cleared += 1;
+        dirty = true;
+        continue;
+      }
+
+      const configured = this.profiles.find((profile) => profile.id === profileId);
+      if (!configured) continue;
+      const referenceMs = finalSingleFillReviewMs(sourceRoundId, sourceProfileId) ?? toTime(active.finalizedAt || active.triggeredAt);
+      const cooldownDecision = this.singleFillCooldownDecision(sourceRoundId, configured.cooldown, referenceMs, profileId, sourceProfileId, active);
+      const expiresAt = new Date(referenceMs + cooldownDecision.cooldownMs).toISOString();
+      if (toTime(expiresAt) <= nowMs) {
+        this.singleFillCooldowns.delete(profileId);
+        cleared += 1;
+        dirty = true;
+        continue;
+      }
+
+      const next: SingleFillCooldownRecord = {
+        ...active,
+        profileId,
+        sourceProfileId,
+        sourceRoundId,
+        triggeredAt: new Date(referenceMs).toISOString(),
+        finalizedAt: new Date(referenceMs).toISOString(),
+        expiresAt,
+        category: cooldownDecision.category,
+        hedgeReason: cooldownDecision.hedgeReason,
+        recentSingleFillCount: cooldownDecision.recentCount,
+      };
+      if (
+        active.expiresAt !== next.expiresAt
+        || active.category !== next.category
+        || active.hedgeReason !== next.hedgeReason
+        || active.recentSingleFillCount !== next.recentSingleFillCount
+      ) {
+        this.singleFillCooldowns.set(profileId, next);
+        refreshed += 1;
+        dirty = true;
+      }
+    }
+
+    if (dirty) this.persistState();
+    return { refreshed, cleared };
+  }
+
   recordSingleFillHedgeOutcome(outcome: SingleFillHedgeOutcome): void {
     this.singleFillHedgeOutcomes.set(profileRoundKey(outcome.profileId, outcome.roundId), outcome);
     this.persistState();
@@ -794,7 +849,7 @@ export class InMemoryStore {
     return { ...this.runtime, ...experimentFields };
   }
 
-  private singleFillCooldownDecision(roundId: string, policy: SingleFillCooldownPolicy, referenceMs: number, profileId: MarketProfileId, sourceProfileId = profileId): { cooldownMs: number; category: string; hedgeReason?: string; recentCount: number } {
+  private singleFillCooldownDecision(roundId: string, policy: SingleFillCooldownPolicy, referenceMs: number, profileId: MarketProfileId, sourceProfileId = profileId, excludeEvent?: Pick<SingleFillCooldownRecord, 'profileId' | 'sourceProfileId' | 'roundId' | 'sourceRoundId' | 'triggeredAt'>): { cooldownMs: number; category: string; hedgeReason?: string; recentCount: number } {
     const hedgeOutcome = this.singleFillHedgeOutcomes.get(profileRoundKey(sourceProfileId, roundId));
     const category = cooldownCategory(hedgeOutcome);
     const baseMs = category === 'price-cap'
@@ -804,6 +859,7 @@ export class InMemoryStore {
         : policy.baseMs;
     const recentCount = this.singleFillCooldownEvents.filter((event) => {
       const eventMs = toTime(event.triggeredAt);
+      if (excludeEvent && isSameCooldownEvent(event, excludeEvent)) return false;
       return event.profileId === profileId && eventMs <= referenceMs && referenceMs - eventMs <= policy.repeatWindowMs;
     }).length + 1;
     const repeatMs = recentCount >= 3 ? policy.thirdMs : recentCount >= 2 ? policy.secondMs : 0;
@@ -1005,6 +1061,13 @@ function cooldownCategory(outcome: SingleFillHedgeOutcome | undefined): string {
   if (PRICE_CAP_HEDGE_REASONS.has(outcome.reason)) return 'price-cap';
   if (BENIGN_HEDGE_REASONS.has(outcome.reason)) return 'unhedged';
   return 'execution';
+}
+
+function isSameCooldownEvent(event: SingleFillCooldownEvent, record: Pick<SingleFillCooldownRecord, 'profileId' | 'sourceProfileId' | 'roundId' | 'sourceRoundId' | 'triggeredAt'>): boolean {
+  return event.profileId === record.profileId
+    && (event.sourceProfileId || event.profileId) === (record.sourceProfileId || record.profileId)
+    && (event.sourceRoundId || event.roundId) === (record.sourceRoundId || record.roundId)
+    && event.triggeredAt === record.triggeredAt;
 }
 
 function entrySignalScope(signalKey: string): string {

@@ -259,6 +259,83 @@ test('clears persisted profile cooldown records that were not created from final
   assert.equal(store.getActiveEntryCooldown(PROFILE, nowMs), null);
 });
 
+test('refreshes persisted active cooldown expiry from the current profile policy', () => {
+  const nowMs = Date.now();
+  const roundId = roundIdFromStart(nowMs - 7 * 60_000);
+  const reviewMs = finalReviewMs(roundId);
+  const statePath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'poly-btc5m-store-')), 'runtime-state.json');
+  fs.writeFileSync(statePath, JSON.stringify({
+    version: 2,
+    savedAt: new Date(nowMs).toISOString(),
+    intents: [],
+    orders: [order(roundId, 'YES')],
+    fills: [fill(roundId, 'YES')],
+    settlements: [],
+    singleFillCooldowns: {
+      [PROFILE]: {
+        profileId: PROFILE,
+        roundId,
+        sourceProfileId: PROFILE,
+        sourceRoundId: roundId,
+        triggeredAt: new Date(reviewMs).toISOString(),
+        finalizedAt: new Date(reviewMs).toISOString(),
+        expiresAt: new Date(reviewMs + 30 * 60_000).toISOString(),
+        yesShares: 10,
+        noShares: 0,
+        category: 'unhedged',
+        recentSingleFillCount: 1,
+      },
+    },
+    singleFillCooldownEvents: [
+      { profileId: PROFILE, sourceProfileId: PROFILE, roundId, sourceRoundId: roundId, triggeredAt: new Date(reviewMs).toISOString(), category: 'unhedged' },
+    ],
+  }));
+  const store = new InMemoryStore('live', 2_000, { persistencePath: statePath }, 'classic', undefined, [
+    marketProfile(PROFILE, { baseMs: 90 * 60_000 }),
+  ]);
+
+  assert.deepEqual(store.refreshActiveSingleFillCooldowns(nowMs), { refreshed: 1, cleared: 0 });
+  const cooldown = store.getActiveEntryCooldown(PROFILE, nowMs);
+  assert.equal(new Date(cooldown?.expiresAt || 0).getTime(), reviewMs + 90 * 60_000);
+  assert.equal(cooldown?.recentSingleFillCount, 1);
+});
+
+test('refresh clears persisted active cooldown when the current profile policy has expired it', () => {
+  const nowMs = Date.now();
+  const roundId = roundIdFromStart(nowMs - 7 * 60_000);
+  const reviewMs = finalReviewMs(roundId);
+  const statePath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'poly-btc5m-store-')), 'runtime-state.json');
+  fs.writeFileSync(statePath, JSON.stringify({
+    version: 2,
+    savedAt: new Date(nowMs).toISOString(),
+    intents: [],
+    orders: [order(roundId, 'YES')],
+    fills: [fill(roundId, 'YES')],
+    settlements: [],
+    singleFillCooldowns: {
+      [PROFILE]: {
+        profileId: PROFILE,
+        roundId,
+        sourceProfileId: PROFILE,
+        sourceRoundId: roundId,
+        triggeredAt: new Date(reviewMs).toISOString(),
+        finalizedAt: new Date(reviewMs).toISOString(),
+        expiresAt: new Date(reviewMs + 30 * 60_000).toISOString(),
+        yesShares: 10,
+        noShares: 0,
+        category: 'unhedged',
+        recentSingleFillCount: 1,
+      },
+    },
+  }));
+  const store = new InMemoryStore('live', 2_000, { persistencePath: statePath }, 'classic', undefined, [
+    marketProfile(PROFILE, { baseMs: 30_000 }),
+  ]);
+
+  assert.deepEqual(store.refreshActiveSingleFillCooldowns(nowMs), { refreshed: 0, cleared: 1 });
+  assert.equal(store.getActiveEntryCooldown(PROFILE, nowMs), null);
+});
+
 test('single-fill cooldown is shared to sibling intervals and keeps each target policy length', () => {
   const nowMs = Date.now();
   const roundId = roundIdFromStart(nowMs - 7 * 60_000);

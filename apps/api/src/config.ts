@@ -42,6 +42,7 @@ export type AppConfig = {
   minLiveChopScore: number;
   bypassEntryScoreGating: boolean;
   bypassSingleFillCooldown: boolean;
+  refreshSingleFillCooldownOnBoot: boolean;
   entryConfirmTicks: number;
   entryMinSecondsToStart: number;
   participationEnabled: boolean;
@@ -133,6 +134,7 @@ export function loadConfig(): AppConfig {
     minLiveChopScore: numberEnv('MIN_LIVE_CHOP_SCORE', 70),
     bypassEntryScoreGating: booleanEnv('BYPASS_ENTRY_SCORE_GATING', true),
     bypassSingleFillCooldown: booleanEnv('BYPASS_SINGLE_FILL_COOLDOWN', false),
+    refreshSingleFillCooldownOnBoot: booleanEnv('REFRESH_SINGLE_FILL_COOLDOWN_ON_BOOT', false),
     entryConfirmTicks: parsePositiveInteger(process.env.ENTRY_CONFIRM_TICKS, 3),
     entryMinSecondsToStart: parsePositiveInteger(process.env.ENTRY_MIN_SECONDS_TO_START, 15),
     participationEnabled: booleanEnv('PARTICIPATION_ENABLED', true),

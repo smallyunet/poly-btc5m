@@ -11,6 +11,10 @@ import { TelegramNotifier } from './telegramNotifier';
 async function main() {
   const config = loadConfig();
   const store = new InMemoryStore(config.executionMode, config.tickIntervalMs, { persistencePath: config.runtimeStatePath, maxRecords: config.runtimeMaxRecords }, config.activeStrategyProfile, entryRuntimeConfig(config), config.marketProfiles);
+  if (config.refreshSingleFillCooldownOnBoot) {
+    const result = store.refreshActiveSingleFillCooldowns();
+    if (result.refreshed || result.cleared) console.log('[api] refreshed single-fill cooldowns on boot', JSON.stringify(result));
+  }
   const adapter = new PolymarketAdapter({
     clobApiUrl: config.clobApiUrl,
     chainId: config.chainId,
