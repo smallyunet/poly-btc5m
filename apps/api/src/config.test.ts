@@ -22,16 +22,16 @@ const COOLDOWN_ENV_KEYS = [
   '1H_SINGLE_FILL_COOLDOWN_BASE_MS',
 ];
 
-test('market profile cooldown defaults scale with interval duration', () => {
+test('market profile cooldown defaults use the five-minute baseline for every interval', () => {
   withEnv(COOLDOWN_ENV_KEYS, {}, () => {
     const config = loadConfig();
     const byId = new Map(config.marketProfiles.map((profile) => [profile.id, profile]));
 
     assert.equal(byId.get('btc-5m')?.cooldown.baseMs, 30 * 60_000);
-    assert.equal(byId.get('btc-15m')?.cooldown.baseMs, 90 * 60_000);
-    assert.equal(byId.get('btc-1h')?.cooldown.baseMs, 360 * 60_000);
-    assert.equal(byId.get('btc-15m')?.cooldown.priceCapMs, 180 * 60_000);
-    assert.equal(byId.get('btc-1h')?.cooldown.executionMs, 24 * 60 * 60_000);
+    assert.equal(byId.get('btc-15m')?.cooldown.baseMs, 30 * 60_000);
+    assert.equal(byId.get('btc-1h')?.cooldown.baseMs, 30 * 60_000);
+    assert.equal(byId.get('btc-15m')?.cooldown.priceCapMs, 60 * 60_000);
+    assert.equal(byId.get('btc-1h')?.cooldown.executionMs, 2 * 60 * 60_000);
   });
 });
 
@@ -46,7 +46,7 @@ test('market profile cooldown supports profile-specific env override', () => {
     assert.equal(config.singleFillCooldownBaseMs, 11 * 60_000);
     assert.equal(byId.get('btc-5m')?.cooldown.baseMs, 30 * 60_000);
     assert.equal(byId.get('btc-15m')?.cooldown.baseMs, 22 * 60_000);
-    assert.equal(byId.get('btc-1h')?.cooldown.baseMs, 360 * 60_000);
+    assert.equal(byId.get('btc-1h')?.cooldown.baseMs, 30 * 60_000);
   });
 });
 

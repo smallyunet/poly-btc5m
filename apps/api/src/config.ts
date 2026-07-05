@@ -304,12 +304,11 @@ function makeProfile(params: {
   };
 }
 
-function profileCooldownMs(params: { assetSymbol: 'BTC' | 'ETH' | 'SOL'; interval: MarketInterval; durationSeconds: number }, key: string, fiveMinuteDefaultMs: number): number {
+function profileCooldownMs(params: { assetSymbol: 'BTC' | 'ETH' | 'SOL'; interval: MarketInterval }, key: string, fiveMinuteDefaultMs: number): number {
   const intervalKey = params.interval.toUpperCase().replace(/[^A-Z0-9]/g, '_');
   const assetIntervalKey = `${params.assetSymbol}_${intervalKey}_SINGLE_FILL_COOLDOWN_${key}_MS`;
   const intervalOnlyKey = `${intervalKey}_SINGLE_FILL_COOLDOWN_${key}_MS`;
-  const defaultMs = Math.round(fiveMinuteDefaultMs * (params.durationSeconds / 300));
-  return parsePositiveInteger(process.env[assetIntervalKey] || process.env[intervalOnlyKey], defaultMs);
+  return parsePositiveInteger(process.env[assetIntervalKey] || process.env[intervalOnlyKey], fiveMinuteDefaultMs);
 }
 
 function parseProfileStatus(value: string | undefined, fallback: MarketProfile['status']): MarketProfile['status'] {

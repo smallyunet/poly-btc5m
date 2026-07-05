@@ -542,7 +542,7 @@ export class InMemoryStore {
 
       const cooldownStartMs = finalSingleFillReviewMs(roundId, effectiveProfileId) ?? nowMs;
       for (const targetProfileId of this.sharedCooldownTargetProfileIds(effectiveProfileId)) {
-        const targetPolicy = this.cooldownPolicyForTarget(targetProfileId, effectiveProfileId, policy);
+        const targetPolicy = this.cooldownPolicyForTarget(targetProfileId, policy);
         const cooldownDecision = this.singleFillCooldownDecision(roundId, targetPolicy, cooldownStartMs, targetProfileId, effectiveProfileId);
         const record: SingleFillCooldownRecord = {
           profileId: targetProfileId,
@@ -844,19 +844,10 @@ export class InMemoryStore {
     return [...new Set(targets)];
   }
 
-  private cooldownPolicyForTarget(targetProfileId: MarketProfileId, sourceProfileId: MarketProfileId, sourcePolicy: SingleFillCooldownPolicy): SingleFillCooldownPolicy {
+  private cooldownPolicyForTarget(targetProfileId: MarketProfileId, sourcePolicy: SingleFillCooldownPolicy): SingleFillCooldownPolicy {
     const configured = this.profiles.find((profile) => profile.id === targetProfileId);
     if (configured) return configured.cooldown;
-    if (targetProfileId === sourceProfileId) return sourcePolicy;
-    const ratio = profileDurationSeconds(targetProfileId) / profileDurationSeconds(sourceProfileId);
-    return {
-      baseMs: Math.round(sourcePolicy.baseMs * ratio),
-      priceCapMs: Math.round(sourcePolicy.priceCapMs * ratio),
-      executionMs: Math.round(sourcePolicy.executionMs * ratio),
-      repeatWindowMs: Math.round(sourcePolicy.repeatWindowMs * ratio),
-      secondMs: Math.round(sourcePolicy.secondMs * ratio),
-      thirdMs: Math.round(sourcePolicy.thirdMs * ratio),
-    };
+    return sourcePolicy;
   }
 
   private entryCooldownReason(profileId: MarketProfileId): string | undefined {

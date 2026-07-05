@@ -259,7 +259,7 @@ test('clears persisted profile cooldown records that were not created from final
   assert.equal(store.getActiveEntryCooldown(PROFILE, nowMs), null);
 });
 
-test('single-fill cooldown is shared to sibling intervals with target profile duration', () => {
+test('single-fill cooldown is shared to sibling intervals and keeps each target policy length', () => {
   const nowMs = Date.now();
   const roundId = roundIdFromStart(nowMs - 7 * 60_000);
   const store = new InMemoryStore('live', 2_000, { persistencePath: false }, 'classic', undefined, [
@@ -281,6 +281,23 @@ test('single-fill cooldown is shared to sibling intervals with target profile du
   assert.equal(fifteenMinuteCooldown?.sourceRoundId, roundId);
   assert.equal(new Date(fifteenMinuteCooldown?.expiresAt || 0).getTime(), finalReviewMs(roundId) + 90 * 60_000);
   assert.equal(new Date(oneHourCooldown?.expiresAt || 0).getTime(), finalReviewMs(roundId) + 6 * 60 * 60_000);
+});
+
+test('single-fill cooldown shared without configured profiles uses the source policy for every interval', () => {
+  const nowMs = Date.now();
+  const roundId = roundIdFromStart(nowMs - 7 * 60_000);
+  const store = new InMemoryStore('live', 2_000, { persistencePath: false });
+
+  store.recordOrder(order(roundId, 'YES', { profileId: 'btc-5m' }));
+  store.recordFills([fill(roundId, 'YES', { profileId: 'btc-5m' })]);
+  store.maybeStartSingleFillCooldown([fill(roundId, 'YES', { profileId: 'btc-5m' })], policy(), nowMs - 2 * 60_000, 'UPDOWN_DUAL_ENTRY', 'btc-5m');
+  store.maybeStartSingleFillCooldown([], policy(), nowMs, 'UPDOWN_DUAL_ENTRY', 'btc-5m');
+
+  for (const profileId of ['btc-5m', 'btc-15m', 'btc-1h'] as const) {
+    const cooldown = store.getActiveEntryCooldown(profileId, nowMs);
+    assert.equal(cooldown?.sourceProfileId, 'btc-5m');
+    assert.equal(new Date(cooldown?.expiresAt || 0).getTime(), finalReviewMs(roundId) + policy().baseMs);
+  }
 });
 
 test('profile duration controls final single-fill review timing', () => {
