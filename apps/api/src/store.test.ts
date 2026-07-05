@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import type { FillRecord, OrderRecord } from '../../../packages/shared/src';
+import type { FillRecord, MarketProfile, OrderRecord } from '../../../packages/shared/src';
 import { InMemoryStore } from './store';
 
 const PROFILE = 'btc-5m';
@@ -259,18 +259,28 @@ test('clears persisted profile cooldown records that were not created from final
   assert.equal(store.getActiveEntryCooldown(PROFILE, nowMs), null);
 });
 
-test('profile cooldown does not block another interval', () => {
+test('single-fill cooldown is shared to sibling intervals with target profile duration', () => {
   const nowMs = Date.now();
   const roundId = roundIdFromStart(nowMs - 7 * 60_000);
-  const store = new InMemoryStore('live', 2_000, { persistencePath: false });
+  const store = new InMemoryStore('live', 2_000, { persistencePath: false }, 'classic', undefined, [
+    marketProfile('btc-5m', { baseMs: 30 * 60_000 }),
+    marketProfile('btc-15m', { baseMs: 90 * 60_000 }),
+    marketProfile('btc-1h', { baseMs: 6 * 60 * 60_000 }),
+  ]);
 
   store.recordOrder(order(roundId, 'YES', { profileId: 'btc-5m' }));
   store.recordFills([fill(roundId, 'YES', { profileId: 'btc-5m' })]);
   store.maybeStartSingleFillCooldown([fill(roundId, 'YES', { profileId: 'btc-5m' })], 4 * 60 * 60_000, nowMs - 2 * 60_000, 'UPDOWN_DUAL_ENTRY', 'btc-5m');
   store.maybeStartSingleFillCooldown([], 4 * 60 * 60_000, nowMs, 'UPDOWN_DUAL_ENTRY', 'btc-5m');
 
-  assert.equal(store.getActiveEntryCooldown('btc-5m', nowMs)?.roundId, roundId);
-  assert.equal(store.getActiveEntryCooldown('btc-15m', nowMs), null);
+  const fiveMinuteCooldown = store.getActiveEntryCooldown('btc-5m', nowMs);
+  const fifteenMinuteCooldown = store.getActiveEntryCooldown('btc-15m', nowMs);
+  const oneHourCooldown = store.getActiveEntryCooldown('btc-1h', nowMs);
+  assert.equal(fiveMinuteCooldown?.roundId, roundId);
+  assert.equal(fifteenMinuteCooldown?.sourceProfileId, 'btc-5m');
+  assert.equal(fifteenMinuteCooldown?.sourceRoundId, roundId);
+  assert.equal(new Date(fifteenMinuteCooldown?.expiresAt || 0).getTime(), finalReviewMs(roundId) + 90 * 60_000);
+  assert.equal(new Date(oneHourCooldown?.expiresAt || 0).getTime(), finalReviewMs(roundId) + 6 * 60 * 60_000);
 });
 
 test('profile duration controls final single-fill review timing', () => {
@@ -322,6 +332,28 @@ function policy() {
     repeatWindowMs: 2 * 60 * 60_000,
     secondMs: 2 * 60 * 60_000,
     thirdMs: 4 * 60 * 60_000,
+  };
+}
+
+function marketProfile(id: 'btc-5m' | 'btc-15m' | 'btc-1h', cooldownPatch: Partial<MarketProfile['cooldown']> = {}): MarketProfile {
+  const interval = id.endsWith('15m') ? '15m' : id.endsWith('1h') ? '1h' : '5m';
+  return {
+    id,
+    asset: 'btc',
+    assetSymbol: 'BTC',
+    interval,
+    label: id,
+    status: 'live',
+    seriesSlug: `btc-updown-${interval}`,
+    title: id,
+    roundDurationSeconds: interval === '15m' ? 900 : interval === '1h' ? 3600 : 300,
+    decisionLeadSeconds: 300,
+    avoidExpirySeconds: 0,
+    priceFeedSymbol: 'BTCUSDT',
+    entry: { enabled: true, limitPrice: 0.45, sharesPerSide: 5, minSecondsToStart: 15, confirmTicks: 3 },
+    profitExit: { enabled: true, minProfitRate: 0.05, minPnlUsd: 0.3, priceOffset: 0.01, maxOrderbookAgeMs: 5_000, minSecondsToEnd: 5, maxSecondsToEnd: 120 },
+    hedge: { enabled: true, earlyWindowSeconds: 60, earlyMaxPairCost: 1.02, emergencyWindowSeconds: 15, emergencyMaxPrice: 0.75, emergencyMaxPairCost: 1.2, finalWindowSeconds: 30, minSecondsToEnd: 5, maxPrice: 0.65, priceOffset: 0.01, maxPairCost: 1.1 },
+    cooldown: { ...policy(), ...cooldownPatch },
   };
 }
 

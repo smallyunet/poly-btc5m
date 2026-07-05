@@ -66,6 +66,8 @@ type PersistedRuntimeState = {
 type SingleFillCooldownRecord = {
   profileId: MarketProfileId;
   roundId: string;
+  sourceProfileId?: MarketProfileId;
+  sourceRoundId?: string;
   triggeredAt: string;
   finalizedAt?: string;
   expiresAt: string;
@@ -78,7 +80,9 @@ type SingleFillCooldownRecord = {
 
 type SingleFillCooldownEvent = {
   profileId: MarketProfileId;
+  sourceProfileId?: MarketProfileId;
   roundId: string;
+  sourceRoundId?: string;
   triggeredAt: string;
   category: string;
 };
@@ -435,11 +439,13 @@ export class InMemoryStore {
   getActiveEntryCooldown(profileId: MarketProfileId, nowMs = Date.now()): SingleFillCooldownRecord | null {
     const active = this.singleFillCooldowns.get(profileId) || null;
     if (!active) return null;
+    const sourceProfileId = active.sourceProfileId || active.profileId;
+    const sourceRoundId = active.sourceRoundId || active.roundId;
     if (!active.finalizedAt) {
       this.clearSingleFillCooldown(profileId);
       return null;
     }
-    if (!this.isFinalSingleSidedBuyRound(active.roundId, nowMs, profileId)) {
+    if (!this.isFinalSingleSidedBuyRound(sourceRoundId, nowMs, sourceProfileId)) {
       this.clearSingleFillCooldown(profileId);
       return null;
     }
@@ -514,7 +520,10 @@ export class InMemoryStore {
       dirty ||= this.pendingSingleFillReviewRoundIds.size !== before;
     }
 
-    const activeCooldown = this.getActiveEntryCooldown(profileId, nowMs);
+    const activeCooldowns = new Map<MarketProfileId, SingleFillCooldownRecord | null>();
+    for (const targetProfileId of this.sharedCooldownTargetProfileIds(profileId)) {
+      activeCooldowns.set(targetProfileId, this.getActiveEntryCooldown(targetProfileId, nowMs));
+    }
     const cooldownCandidates: SingleFillCooldownRecord[] = [];
 
     for (const key of this.pendingSingleFillReviewRoundIds) {
@@ -532,40 +541,49 @@ export class InMemoryStore {
       }
 
       const cooldownStartMs = finalSingleFillReviewMs(roundId, effectiveProfileId) ?? nowMs;
-      const cooldownDecision = this.singleFillCooldownDecision(roundId, policy, cooldownStartMs, effectiveProfileId);
-      const record: SingleFillCooldownRecord = {
-        profileId: effectiveProfileId,
-        roundId,
-        triggeredAt: new Date(cooldownStartMs).toISOString(),
-        finalizedAt: new Date(cooldownStartMs).toISOString(),
-        expiresAt: new Date(cooldownStartMs + cooldownDecision.cooldownMs).toISOString(),
-        yesShares: exposure.yesShares,
-        noShares: exposure.noShares,
-        category: cooldownDecision.category,
-        hedgeReason: cooldownDecision.hedgeReason,
-        recentSingleFillCount: cooldownDecision.recentCount,
-      };
-      this.singleFillCooldownEvents = [
-        { profileId: effectiveProfileId, roundId, triggeredAt: record.triggeredAt, category: cooldownDecision.category },
-        ...this.singleFillCooldownEvents.filter((event) => event.profileId === effectiveProfileId && nowMs - toTime(event.triggeredAt) <= policy.repeatWindowMs),
-      ].slice(0, 100);
-      cooldownCandidates.push(record);
+      for (const targetProfileId of this.sharedCooldownTargetProfileIds(effectiveProfileId)) {
+        const targetPolicy = this.cooldownPolicyForTarget(targetProfileId, effectiveProfileId, policy);
+        const cooldownDecision = this.singleFillCooldownDecision(roundId, targetPolicy, cooldownStartMs, targetProfileId, effectiveProfileId);
+        const record: SingleFillCooldownRecord = {
+          profileId: targetProfileId,
+          roundId,
+          sourceProfileId: effectiveProfileId,
+          sourceRoundId: roundId,
+          triggeredAt: new Date(cooldownStartMs).toISOString(),
+          finalizedAt: new Date(cooldownStartMs).toISOString(),
+          expiresAt: new Date(cooldownStartMs + cooldownDecision.cooldownMs).toISOString(),
+          yesShares: exposure.yesShares,
+          noShares: exposure.noShares,
+          category: cooldownDecision.category,
+          hedgeReason: cooldownDecision.hedgeReason,
+          recentSingleFillCount: cooldownDecision.recentCount,
+        };
+        this.singleFillCooldownEvents = [
+          { profileId: targetProfileId, sourceProfileId: effectiveProfileId, roundId, sourceRoundId: roundId, triggeredAt: record.triggeredAt, category: cooldownDecision.category },
+          ...this.singleFillCooldownEvents.filter((event) => event.profileId !== targetProfileId || nowMs - toTime(event.triggeredAt) <= targetPolicy.repeatWindowMs),
+        ].slice(0, 100);
+        cooldownCandidates.push(record);
+      }
     }
 
     if (cooldownCandidates.length > 0) {
-      const activeCandidates = cooldownCandidates.filter((record) => toTime(record.expiresAt) > nowMs);
-      const selectableCooldowns = [activeCooldown, ...activeCandidates].filter((record): record is SingleFillCooldownRecord => Boolean(record));
-      if (!selectableCooldowns.length) {
-        if (dirty) this.persistState();
-        return null;
+      let returnedCooldown: SingleFillCooldownRecord | null = null;
+      const targetProfileIds = new Set(cooldownCandidates.map((record) => record.profileId));
+      for (const targetProfileId of targetProfileIds) {
+        const activeCooldown = activeCooldowns.get(targetProfileId) || null;
+        const activeCandidates = cooldownCandidates.filter((record) => record.profileId === targetProfileId && toTime(record.expiresAt) > nowMs);
+        const selectableCooldowns = [activeCooldown, ...activeCandidates].filter((record): record is SingleFillCooldownRecord => Boolean(record));
+        if (!selectableCooldowns.length) continue;
+        const nextCooldown = maxCooldown(selectableCooldowns);
+        const changedActiveCooldown = !activeCooldown
+          || activeCooldown.roundId !== nextCooldown.roundId
+          || activeCooldown.sourceProfileId !== nextCooldown.sourceProfileId
+          || activeCooldown.expiresAt !== nextCooldown.expiresAt;
+        this.singleFillCooldowns.set(targetProfileId, nextCooldown);
+        if (changedActiveCooldown && targetProfileId === profileId) returnedCooldown = nextCooldown;
       }
-      const nextCooldown = maxCooldown(selectableCooldowns);
-      const changedActiveCooldown = !activeCooldown
-        || activeCooldown.roundId !== nextCooldown.roundId
-        || activeCooldown.expiresAt !== nextCooldown.expiresAt;
-      this.singleFillCooldowns.set(nextCooldown.profileId, nextCooldown);
       this.persistState();
-      return changedActiveCooldown ? nextCooldown : null;
+      return returnedCooldown;
     }
 
     if (dirty) this.persistState();
@@ -625,7 +643,7 @@ export class InMemoryStore {
       latestSnapshot: this.latestSnapshots.get(profile.id),
       strategyChecks: this.strategyChecksByProfile.get(profile.id) || [],
       entryCooldownUntil: this.singleFillCooldowns.get(profile.id)?.expiresAt,
-      entryCooldownReason: this.singleFillCooldowns.get(profile.id) ? `single fill on ${this.singleFillCooldowns.get(profile.id)?.roundId}` : undefined,
+      entryCooldownReason: this.entryCooldownReason(profile.id),
       stats: {
         orders: this.orders.filter((order) => order.profileId === profile.id).length,
         fills: this.fills.filter((fill) => fill.profileId === profile.id).length,
@@ -736,8 +754,8 @@ export class InMemoryStore {
     return { ...this.runtime, ...experimentFields };
   }
 
-  private singleFillCooldownDecision(roundId: string, policy: SingleFillCooldownPolicy, referenceMs: number, profileId: MarketProfileId): { cooldownMs: number; category: string; hedgeReason?: string; recentCount: number } {
-    const hedgeOutcome = this.singleFillHedgeOutcomes.get(profileRoundKey(profileId, roundId));
+  private singleFillCooldownDecision(roundId: string, policy: SingleFillCooldownPolicy, referenceMs: number, profileId: MarketProfileId, sourceProfileId = profileId): { cooldownMs: number; category: string; hedgeReason?: string; recentCount: number } {
+    const hedgeOutcome = this.singleFillHedgeOutcomes.get(profileRoundKey(sourceProfileId, roundId));
     const category = cooldownCategory(hedgeOutcome);
     const baseMs = category === 'price-cap'
       ? policy.priceCapMs
@@ -816,6 +834,39 @@ export class InMemoryStore {
     this.singleFillCooldowns.delete(profileId);
     this.persistState();
   }
+
+  private sharedCooldownTargetProfileIds(sourceProfileId: MarketProfileId): MarketProfileId[] {
+    const asset = profileAsset(sourceProfileId);
+    const configured = this.profiles
+      .filter((profile) => profile.asset === asset && profile.status !== 'disabled')
+      .map((profile) => profile.id);
+    const targets = configured.length ? configured : profileIntervals(asset).map((interval) => `${asset}-${interval}` as MarketProfileId);
+    return [...new Set(targets)];
+  }
+
+  private cooldownPolicyForTarget(targetProfileId: MarketProfileId, sourceProfileId: MarketProfileId, sourcePolicy: SingleFillCooldownPolicy): SingleFillCooldownPolicy {
+    const configured = this.profiles.find((profile) => profile.id === targetProfileId);
+    if (configured) return configured.cooldown;
+    if (targetProfileId === sourceProfileId) return sourcePolicy;
+    const ratio = profileDurationSeconds(targetProfileId) / profileDurationSeconds(sourceProfileId);
+    return {
+      baseMs: Math.round(sourcePolicy.baseMs * ratio),
+      priceCapMs: Math.round(sourcePolicy.priceCapMs * ratio),
+      executionMs: Math.round(sourcePolicy.executionMs * ratio),
+      repeatWindowMs: Math.round(sourcePolicy.repeatWindowMs * ratio),
+      secondMs: Math.round(sourcePolicy.secondMs * ratio),
+      thirdMs: Math.round(sourcePolicy.thirdMs * ratio),
+    };
+  }
+
+  private entryCooldownReason(profileId: MarketProfileId): string | undefined {
+    const cooldown = this.singleFillCooldowns.get(profileId);
+    if (!cooldown) return undefined;
+    const sourceProfileId = cooldown.sourceProfileId || cooldown.profileId;
+    const sourceRoundId = cooldown.sourceRoundId || cooldown.roundId;
+    if (sourceProfileId === profileId) return `single fill on ${sourceRoundId}`;
+    return `shared single fill from ${sourceProfileId} on ${sourceRoundId}`;
+  }
 }
 
 function isTradeIntentLike(value: unknown): value is TradeIntent {
@@ -893,6 +944,14 @@ function isTelegramNotificationStateLike(value: unknown): value is TelegramNotif
 
 function isMarketProfileId(value: unknown): value is MarketProfileId {
   return typeof value === 'string' && /^(btc|eth|sol)-(5m|15m|1h)$/.test(value);
+}
+
+function profileAsset(profileId: MarketProfileId): 'btc' | 'eth' | 'sol' {
+  return profileId.split('-')[0] as 'btc' | 'eth' | 'sol';
+}
+
+function profileIntervals(_asset: 'btc' | 'eth' | 'sol'): Array<'5m' | '15m' | '1h'> {
+  return ['5m', '15m', '1h'];
 }
 
 function normalizeCooldownPolicy(value: number | SingleFillCooldownPolicy): SingleFillCooldownPolicy {
