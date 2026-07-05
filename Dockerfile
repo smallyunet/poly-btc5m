@@ -21,6 +21,7 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/package.json ./package.json
 COPY --from=build /app/configs ./configs
+COPY --from=build /app/tools ./tools
 EXPOSE 8788
 CMD ["node", "dist/apps/api/src/main.js"]
 

@@ -22,13 +22,14 @@ remote_compose() {
 echo "[deploy] server=${SERVER} app_dir=${APP_DIR}"
 echo "[deploy] version=${APP_VERSION} git_sha=${GIT_SHA} build_time=${BUILD_TIME}"
 
-ssh "${SERVER}" "mkdir -p ${APP_DIR}/data"
+ssh "${SERVER}" "mkdir -p ${APP_DIR}/data ${APP_DIR}/data-lab"
 
 rsync -az --delete \
   --exclude '.git' \
   --exclude 'node_modules' \
   --exclude 'dist' \
   --exclude 'data' \
+  --exclude 'data-lab' \
   "${ROOT_DIR}/" "${SERVER}:${APP_DIR}/"
 
 ssh "${SERVER}" "cd ${APP_DIR} && if [ ! -f .env ]; then cp .env.example .env; echo '[deploy] created .env from .env.example; edit it before enabling real trading'; fi"

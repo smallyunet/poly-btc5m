@@ -60,7 +60,9 @@ The recorder only uses Gamma HTTP and the Polymarket CLOB market websocket. It
 does not import bot runtime code, does not place orders, and writes ignored
 research files under `data-lab/pm-5m-touch/`. The dashboard Simulation tab reads
 `data-lab/pm-5m-touch/summary.json` through a read-only API endpoint; set
-`PM5M_TOUCH_SUMMARY_PATH` if the summary file lives somewhere else.
+`PM5M_TOUCH_SUMMARY_PATH` if the summary file lives somewhere else. Production
+Docker Compose starts the recorder as a separate `pm5m-touch-recorder` service
+and shares `./data-lab` with the API container.
 
 ## Runtime Model
 
