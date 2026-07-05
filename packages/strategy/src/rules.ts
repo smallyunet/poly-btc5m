@@ -18,6 +18,7 @@ export const STRATEGY_RULES: StrategyRule[] = [
     exitRules: [
       'If both sides fill, hold paired exposure through settlement.',
       'If only one side fills and its live bid becomes profitable, a separate profit-exit rule may cancel the missing-side buy and sell the filled side with a capped FAK limit.',
+      'If the filled side is losing but still inside the configured loss budget, a separate loss-exit rule may cancel the missing-side buy and sell the filled side with a capped FAK limit.',
       'If only one side fills, a separate last-window hedge rule may buy the missing side with a capped aggressive FAK limit order.',
       'Final single-sided fills use adaptive cooldown: short for ordinary/price-cap misses, longer for execution failures, and escalating for repeats.',
       'Outside the configured single-fill hedge window, the bot does not add, sell, or rebalance after the round starts.',
@@ -76,6 +77,23 @@ export const STRATEGY_RULES: StrategyRule[] = [
     exitRules: [
       'The missing-side open BUY order is cancelled before the sell attempt.',
       'If the bid moves below the configured floor after cancellation, the sell is skipped and the single exposure remains managed by the hedge rule.',
+    ],
+  },
+  {
+    id: 'UPDOWN_SINGLE_FILL_LOSS_EXIT',
+    title: 'Up/Down Single-Fill Loss Exit',
+    allocationPct: 0,
+    summary: 'When a single filled side is losing but still inside the configured loss budget, cancel the stale missing-side buy order and exit the filled side using a capped FAK sell limit.',
+    entryRules: [
+      'Round must already be running and inside the configured loss-exit window.',
+      'Exactly one side must have net BUY exposure by at least the minimum order size.',
+      'The filled-side orderbook must be live, fresh under SINGLE_FILL_LOSS_EXIT_MAX_ORDERBOOK_AGE_MS, and have bestBid >= SINGLE_FILL_LOSS_EXIT_MIN_BID.',
+      'The capped sell limit must realize a loss no larger than SINGLE_FILL_LOSS_EXIT_MAX_LOSS_USD.',
+      'The exit is posted as a FAK SELL LIMIT, not an uncapped market order.',
+    ],
+    exitRules: [
+      'The missing-side open BUY order is cancelled before the sell attempt.',
+      'If the bid is below the configured floor or the loss is already above budget, the sell is skipped and the single exposure remains managed by the hedge rule.',
     ],
   },
 ];

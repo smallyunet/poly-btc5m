@@ -5,6 +5,7 @@ import type { AppConfig } from './config';
 import { activeHedgeWindowSeconds, buildSingleFillHedgeCheck, executeSingleFillHedges, hedgeExposureOrders, planSingleFillHedge } from './hedge';
 import { executeLiveIntents } from './execution';
 import { buildSingleFillProfitExitCheck, executeSingleFillProfitExits, planSingleFillProfitExit, profitExitExposureOrders } from './profitExit';
+import { buildSingleFillLossExitCheck, executeSingleFillLossExits, lossExitExposureOrders, planSingleFillLossExit } from './lossExit';
 import type { MarketDataService } from './marketData';
 import type { ParticipationService } from './participation';
 import type { RecurringCryptoRoundDiscovery } from './roundDiscovery';
@@ -36,7 +37,10 @@ export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, dat
   const profitExitWatchTokenIds = classicActive && appConfig.singleFillProfitExitEnabled
     ? store.profitExitWatchTokenIds(profile.id, appConfig.singleFillProfitExitMaxSecondsToEnd, appConfig.singleFillProfitExitMinSecondsToEnd)
     : [];
-  data.syncClobRound(round, [...hedgeWatchTokenIds, ...profitExitWatchTokenIds]);
+  const lossExitWatchTokenIds = classicActive && appConfig.singleFillLossExitEnabled
+    ? store.profitExitWatchTokenIds(profile.id, appConfig.singleFillLossExitMaxSecondsToEnd, appConfig.singleFillLossExitMinSecondsToEnd)
+    : [];
+  data.syncClobRound(round, [...hedgeWatchTokenIds, ...profitExitWatchTokenIds, ...lossExitWatchTokenIds]);
   const orderbooks = await data.refreshOrderbooks(round);
   const participation = await participationService.refresh(round);
   diagnostics.push(...participation.diagnostics);
@@ -108,22 +112,28 @@ export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, dat
   const profitExitCandidates = classicActive && appConfig.singleFillProfitExitEnabled
     ? store.singleFillProfitExitCandidates(profile.id, appConfig.singleFillProfitExitMaxSecondsToEnd, appConfig.singleFillProfitExitMinSecondsToEnd)
     : [];
+  const lossExitCandidates = classicActive && appConfig.singleFillLossExitEnabled
+    ? store.singleFillProfitExitCandidates(profile.id, appConfig.singleFillLossExitMaxSecondsToEnd, appConfig.singleFillLossExitMinSecondsToEnd)
+    : [];
   const hedgeOrderbooks = data.refreshOrderbooksForTokenIds([
     ...hedgeCandidates.flatMap((candidate) => [candidate.yesTokenId, candidate.noTokenId]),
     ...profitExitCandidates.flatMap((candidate) => [candidate.yesTokenId, candidate.noTokenId]),
+    ...lossExitCandidates.flatMap((candidate) => [candidate.yesTokenId, candidate.noTokenId]),
   ]);
   const profitExitDiagnostics = classicActive ? await executeSingleFillProfitExits({ appConfig, adapter, store, candidates: profitExitCandidates, orderbooks: hedgeOrderbooks }) : [];
+  const lossExitDiagnostics = classicActive ? await executeSingleFillLossExits({ appConfig, adapter, store, candidates: lossExitCandidates, orderbooks: hedgeOrderbooks }) : [];
   const hedgeDiagnostics = classicActive ? await executeSingleFillHedges({ appConfig, adapter, store, candidates: hedgeCandidates, orderbooks: hedgeOrderbooks }) : [];
   const exit = classicActive
     ? evaluateExit(snapshot, positions, risk, { orders: store.roundOrders(profile.id, snapshot.round.id, 'UPDOWN_DUAL_ENTRY'), fills: store.roundFillsByStrategy(profile.id, snapshot.round.id, 'UPDOWN_DUAL_ENTRY') })
     : disabledExperimentExitCheck(snapshot);
   const hedgeCheck = classicActive ? buildCurrentRoundHedgeCheck(appConfig, store, snapshot, [...orderbooks, ...hedgeOrderbooks]) : disabledClassicCheck(snapshot, 'UPDOWN_SINGLE_FILL_HEDGE', 'Up/Down Single-Fill Hedge', 'Disabled while experimental profile is active.');
   const profitExitCheck = classicActive ? buildCurrentRoundProfitExitCheck(appConfig, store, snapshot, [...orderbooks, ...hedgeOrderbooks]) : disabledClassicCheck(snapshot, 'UPDOWN_SINGLE_FILL_PROFIT_EXIT', 'Up/Down Single-Fill Profit Exit', 'Disabled while experimental profile is active.');
+  const lossExitCheck = classicActive ? buildCurrentRoundLossExitCheck(appConfig, store, snapshot, [...orderbooks, ...hedgeOrderbooks]) : disabledClassicCheck(snapshot, 'UPDOWN_SINGLE_FILL_LOSS_EXIT', 'Up/Down Single-Fill Loss Exit', 'Disabled while experimental profile is active.');
   await reconcileSettlements(appConfig, store, diagnostics, profile);
   maybeRecordEstimatedSettlement(store, snapshot, profile);
-  const finalSnapshot = { ...snapshot, diagnostics: [...diagnostics, ...entry.diagnostics, ...executionDiagnostics, ...crossProfileRiskDiagnostics, ...hedgeDiagnostics, ...profitExitDiagnostics] };
+  const finalSnapshot = { ...snapshot, diagnostics: [...diagnostics, ...entry.diagnostics, ...executionDiagnostics, ...crossProfileRiskDiagnostics, ...hedgeDiagnostics, ...profitExitDiagnostics, ...lossExitDiagnostics] };
   store.recordSnapshot(finalSnapshot, data.status(profile, [round.yesTokenId, round.noTokenId]));
-  store.recordStrategyChecks([...entry.checks, ...exit.checks, hedgeCheck, profitExitCheck].map((check) => withProfile(check, profile)), profile.id);
+  store.recordStrategyChecks([...entry.checks, ...exit.checks, hedgeCheck, profitExitCheck, lossExitCheck].map((check) => withProfile(check, profile)), profile.id);
   return finalSnapshot;
 }
 
@@ -503,6 +513,33 @@ function buildCurrentRoundProfitExitCheck(appConfig: AppConfig, store: InMemoryS
   });
 }
 
+function buildCurrentRoundLossExitCheck(appConfig: AppConfig, store: InMemoryStore, snapshot: StateSnapshot, orderbooks: StateSnapshot['orderbooks']) {
+  const candidate = {
+    profileId: snapshot.profileId,
+    roundId: snapshot.round.id,
+    eventSlug: snapshot.round.eventSlug,
+    marketTitle: snapshot.round.title,
+    imageUrl: snapshot.round.imageUrl,
+    startAt: snapshot.round.startAt,
+    endAt: snapshot.round.endAt,
+    secondsToEnd: snapshot.round.secondsToEnd,
+    yesTokenId: snapshot.round.yesTokenId,
+    noTokenId: snapshot.round.noTokenId,
+  };
+  const orders = lossExitExposureOrders(store.roundOrders(snapshot.profileId, snapshot.round.id));
+  const plan = planSingleFillLossExit({ candidate, orders, orderbooks, appConfig });
+  const executionKey = plan.ok ? [snapshot.profileId, plan.intent.roundId, plan.intent.strategy, plan.intent.tokenId, plan.intent.side].filter(Boolean).join(':') : undefined;
+  return buildSingleFillLossExitCheck({
+    candidate,
+    orders,
+    orderbooks,
+    appConfig,
+    runtimeStatus: store.getRuntime().status,
+    hasRecentExitOrder: executionKey ? store.hasRecentOrder(executionKey, 5_000) : false,
+    hasRecentFailedExitOrder: executionKey ? store.hasRecentFailedOrder(executionKey, 60_000) : false,
+  });
+}
+
 function captureOpeningStrike(round: BtcRoundConfig, store: InMemoryStore, latestPrice: number | null): BtcRoundConfig {
   const persisted = store.getRoundStrike(round.eventSlug);
   if (persisted) return { ...round, strike: persisted };
@@ -787,6 +824,20 @@ async function executeCrossProfileSingleFillRisk(appConfig: AppConfig, store: In
       const hasRecentProfitExit = store.roundOrders(candidate.profileId, candidate.roundId)
         .some((order) => order.side === 'SELL' && order.strategy === 'UPDOWN_SINGLE_FILL_PROFIT_EXIT' && ['local', 'posted', 'partially_filled', 'filled'].includes(order.status));
       if (hasRecentProfitExit) continue;
+
+      const lossExitDiagnostics = await executeSingleFillLossExits({
+        appConfig: targetConfig,
+        adapter,
+        store,
+        candidates: [candidate],
+        orderbooks,
+        ignoreTimeWindow: true,
+      });
+      diagnostics.push(...lossExitDiagnostics.map((message) => `Cross-profile risk ${candidate.profileId}: ${message}`));
+
+      const hasRecentLossExit = store.roundOrders(candidate.profileId, candidate.roundId)
+        .some((order) => order.side === 'SELL' && order.strategy === 'UPDOWN_SINGLE_FILL_LOSS_EXIT' && ['local', 'posted', 'partially_filled', 'filled'].includes(order.status));
+      if (hasRecentLossExit) continue;
 
       const hedgeDiagnostics = await executeSingleFillHedges({
         appConfig: targetConfig,

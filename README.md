@@ -57,6 +57,7 @@ The worker runs every `BOT_TICK_MS` and produces a multi-profile `DashboardState
 - Computes per-asset path features including `cross120s`, realized range bps, two-sided excursion bps, drift/momentum ratios, range percentile, and a `chopScore` for diagnostics.
 - Generates paired fixed-price entry intents during each enabled profile's pre-round decision window. With `BYPASS_ENTRY_SCORE_GATING=true`, entry no longer depends on CHOP classification.
 - Optionally performs a capped three-stage BUY hedge when one side filled and the other side did not.
+- Optionally performs a capped SELL loss exit before hedge when one side filled, moved against us, and is still inside the configured loss budget.
 - Reconciles recent fills and estimates settlement/PnL after a round has ended.
 
 ## Configuration
@@ -165,9 +166,16 @@ SINGLE_FILL_PROFIT_EXIT_PRICE_OFFSET=0.01
 SINGLE_FILL_PROFIT_EXIT_MAX_ORDERBOOK_AGE_MS=1000
 SINGLE_FILL_PROFIT_EXIT_MIN_SECONDS_TO_END=20
 SINGLE_FILL_PROFIT_EXIT_MAX_SECONDS_TO_END=240
+SINGLE_FILL_LOSS_EXIT_ENABLED=false
+SINGLE_FILL_LOSS_EXIT_MAX_LOSS_USD=0.75
+SINGLE_FILL_LOSS_EXIT_MIN_BID=0.30
+SINGLE_FILL_LOSS_EXIT_PRICE_OFFSET=0.01
+SINGLE_FILL_LOSS_EXIT_MAX_ORDERBOOK_AGE_MS=1000
+SINGLE_FILL_LOSS_EXIT_MIN_SECONDS_TO_END=20
+SINGLE_FILL_LOSS_EXIT_MAX_SECONDS_TO_END=180
 ```
 
-The worker targets the next round for each enabled profile. It posts paired BUY limit orders before round start as GTC orders because short GTD expirations can be rejected by CLOB. After start, it normally only reconciles fills and records settlement estimates unless an explicit single-fill risk path triggers: a profit exit can cancel the missing-side BUY and sell the filled side with a capped FAK SELL limit when the filled side is already profitable; the three-stage hedge can cancel stale missing-side BUY orders and submit a capped aggressive FAK BUY LIMIT for the missing side. It never sends uncapped market orders.
+The worker targets the next round for each enabled profile. It posts paired BUY limit orders before round start as GTC orders because short GTD expirations can be rejected by CLOB. After start, it normally only reconciles fills and records settlement estimates unless an explicit single-fill risk path triggers: a profit exit can cancel the missing-side BUY and sell the filled side with a capped FAK SELL limit when the filled side is already profitable; an optional loss exit can sell the filled side while the loss is still inside budget; the three-stage hedge can cancel stale missing-side BUY orders and submit a capped aggressive FAK BUY LIMIT for the missing side. It never sends uncapped market orders.
 
 Live entry orders are configured as CLOB limit order `price + size`:
 
@@ -186,7 +194,8 @@ Live entry orders are configured as CLOB limit order `price + size`:
 - `SINGLE_FILL_HEDGE_*` controls the 30s-to-15s final risk hedge. It can accept the wider final pair-cost cap to avoid carrying a single-sided exposure into settlement.
 - `SINGLE_FILL_EMERGENCY_HEDGE_*` controls the 15s-to-5s emergency hedge. It can accept a larger locked loss, up to the emergency missing-side price and pair-cost caps, only at the end of the round.
 - `SINGLE_FILL_PROFIT_EXIT_*` controls the single-fill take-profit exit. The capped FAK SELL limit must realize at least `SINGLE_FILL_PROFIT_EXIT_MIN_RATE` profit on the filled side and at least `SINGLE_FILL_PROFIT_EXIT_MIN_PNL_USD`; stale quotes above `SINGLE_FILL_PROFIT_EXIT_MAX_ORDERBOOK_AGE_MS` are rejected.
-- `CROSS_PROFILE_SINGLE_FILL_RISK_ENABLED=true` makes a finalized 5m single-fill event immediately re-check same-asset 15m/1h single-leg exposure. It tries an early profit exit first, then a strict capped hedge if the exit did not run. It does not perform automatic stop-loss selling.
+- `SINGLE_FILL_LOSS_EXIT_*` controls the single-fill stop-loss exit. When enabled, the capped FAK SELL limit can exit the filled side only while the expected loss is no larger than `SINGLE_FILL_LOSS_EXIT_MAX_LOSS_USD`, the filled-side bid is at least `SINGLE_FILL_LOSS_EXIT_MIN_BID`, and the quote is fresh under `SINGLE_FILL_LOSS_EXIT_MAX_ORDERBOOK_AGE_MS`.
+- `CROSS_PROFILE_SINGLE_FILL_RISK_ENABLED=true` makes a finalized 5m single-fill event immediately re-check same-asset 15m/1h single-leg exposure. It tries an early profit exit first, then loss exit if enabled, then a strict capped hedge if no sell exit ran.
 - Final single-fill cooldown is adaptive, profile-scoped, and only applies to rounds with tracked strategy BUY orders. External/manual fills without local strategy orders are ignored. Defaults use the BTC 5m baseline for every interval: 30m / 60m / 2h / 2h / 2h / 4h for base, price-cap, execution, repeat-window, second-repeat, and third-repeat. Same-asset cooldowns are shared across enabled intervals, and each target keeps the active record with the latest expiry. Override a profile with keys like `BTC_15M_SINGLE_FILL_COOLDOWN_BASE_MS`, or an interval with `15M_SINGLE_FILL_COOLDOWN_BASE_MS`.
 
 ## Docker

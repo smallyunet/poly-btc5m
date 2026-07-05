@@ -79,6 +79,13 @@ export type AppConfig = {
   singleFillProfitExitMaxOrderbookAgeMs: number;
   singleFillProfitExitMinSecondsToEnd: number;
   singleFillProfitExitMaxSecondsToEnd: number;
+  singleFillLossExitEnabled: boolean;
+  singleFillLossExitMaxLossUsd: number;
+  singleFillLossExitMinBid: number;
+  singleFillLossExitPriceOffset: number;
+  singleFillLossExitMaxOrderbookAgeMs: number;
+  singleFillLossExitMinSecondsToEnd: number;
+  singleFillLossExitMaxSecondsToEnd: number;
   crossProfileSingleFillRiskEnabled: boolean;
   experimentNextRoundUpLimitPrice: number;
   experimentNextRoundDownLimitPrice: number;
@@ -171,6 +178,13 @@ export function loadConfig(): AppConfig {
     singleFillProfitExitMaxOrderbookAgeMs: parsePositiveInteger(process.env.SINGLE_FILL_PROFIT_EXIT_MAX_ORDERBOOK_AGE_MS, 1_000),
     singleFillProfitExitMinSecondsToEnd: parsePositiveInteger(process.env.SINGLE_FILL_PROFIT_EXIT_MIN_SECONDS_TO_END, 20),
     singleFillProfitExitMaxSecondsToEnd: parsePositiveInteger(process.env.SINGLE_FILL_PROFIT_EXIT_MAX_SECONDS_TO_END, 240),
+    singleFillLossExitEnabled: booleanEnv('SINGLE_FILL_LOSS_EXIT_ENABLED', false),
+    singleFillLossExitMaxLossUsd: numberEnv('SINGLE_FILL_LOSS_EXIT_MAX_LOSS_USD', 0.75),
+    singleFillLossExitMinBid: numberEnv('SINGLE_FILL_LOSS_EXIT_MIN_BID', 0.3),
+    singleFillLossExitPriceOffset: numberEnv('SINGLE_FILL_LOSS_EXIT_PRICE_OFFSET', 0.01),
+    singleFillLossExitMaxOrderbookAgeMs: parsePositiveInteger(process.env.SINGLE_FILL_LOSS_EXIT_MAX_ORDERBOOK_AGE_MS, 1_000),
+    singleFillLossExitMinSecondsToEnd: parsePositiveInteger(process.env.SINGLE_FILL_LOSS_EXIT_MIN_SECONDS_TO_END, 20),
+    singleFillLossExitMaxSecondsToEnd: parsePositiveInteger(process.env.SINGLE_FILL_LOSS_EXIT_MAX_SECONDS_TO_END, 180),
     crossProfileSingleFillRiskEnabled: booleanEnv('CROSS_PROFILE_SINGLE_FILL_RISK_ENABLED', true),
     experimentNextRoundUpLimitPrice: numberEnv('EXPERIMENT_NEXT_ROUND_UP_LIMIT_PRICE', 0.5),
     experimentNextRoundDownLimitPrice: numberEnv('EXPERIMENT_NEXT_ROUND_DOWN_LIMIT_PRICE', 0.49),

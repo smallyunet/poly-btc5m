@@ -73,6 +73,7 @@ export type StrategyId =
   | 'UPDOWN_NEXT_ROUND_50_49_STOP_ON_SINGLE'
   | 'UPDOWN_SINGLE_FILL_HEDGE'
   | 'UPDOWN_SINGLE_FILL_PROFIT_EXIT'
+  | 'UPDOWN_SINGLE_FILL_LOSS_EXIT'
   | 'UPDOWN_SINGLE_EXIT';
 
 export type BotRuntimeStatus = {

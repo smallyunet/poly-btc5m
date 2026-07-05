@@ -21,6 +21,7 @@ type ExecuteHedgesParams = {
 const HEDGE_STRATEGY = 'UPDOWN_SINGLE_FILL_HEDGE';
 const CLASSIC_ENTRY_STRATEGY = 'UPDOWN_DUAL_ENTRY';
 const PROFIT_EXIT_STRATEGY = 'UPDOWN_SINGLE_FILL_PROFIT_EXIT';
+const LOSS_EXIT_STRATEGY = 'UPDOWN_SINGLE_FILL_LOSS_EXIT';
 const FAILED_HEDGE_COOLDOWN_MS = 60_000;
 const FAK_NO_MATCH_RETRY_LIMIT = 2;
 const FAK_NO_MATCH_RETRY_DELAY_MS = 750;
@@ -484,7 +485,7 @@ function netExposure(orders: OrderRecord[], label: 'YES' | 'NO'): { shares: numb
 
 export function hedgeExposureOrders(orders: OrderRecord[]): OrderRecord[] {
   return orders.filter((order) => {
-    if (order.strategy === HEDGE_STRATEGY || order.strategy === PROFIT_EXIT_STRATEGY) return true;
+    if (order.strategy === HEDGE_STRATEGY || order.strategy === PROFIT_EXIT_STRATEGY || order.strategy === LOSS_EXIT_STRATEGY) return true;
     if (order.strategy === CLASSIC_ENTRY_STRATEGY) return true;
     return !order.strategy && order.strategyProfile !== 'experiment_next_round';
   });
