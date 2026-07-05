@@ -282,6 +282,12 @@ function derivedRoundTitle(roundId: string, profileId?: string): string {
   return `${asset} Up or Down - ${formatEtRange(startMs, roundDurationMsForProfile(profileId))}`;
 }
 
+function marketFallbackIcon(profileId?: string): string {
+  if (profileId?.startsWith('eth-')) return 'Ξ';
+  if (profileId?.startsWith('sol-')) return '◎';
+  return '₿';
+}
+
 function toSortTime(value: string): number {
   const time = new Date(value).getTime();
   return Number.isFinite(time) ? time : 0;
@@ -1364,7 +1370,7 @@ export function App() {
                                       {round.imageUrl ? (
                                         <img src={round.imageUrl} alt="" className="marketThumb" />
                                       ) : (
-                                        <span className="marketThumb marketThumbFallback">₿</span>
+                                        <span className="marketThumb marketThumbFallback">{marketFallbackIcon(round.profileId)}</span>
                                       )}
                                       <span className="marketTitle">{round.title}</span>
                                     </div>
@@ -1441,7 +1447,7 @@ export function App() {
                                 {round.imageUrl ? (
                                   <img src={round.imageUrl} alt="" className="marketThumb" />
                                 ) : (
-                                  <span className="marketThumb marketThumbFallback">₿</span>
+                                  <span className="marketThumb marketThumbFallback">{marketFallbackIcon(round.profileId)}</span>
                                 )}
                                 <span className="marketTitle">{round.title}</span>
                               </div>

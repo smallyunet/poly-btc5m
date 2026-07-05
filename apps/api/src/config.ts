@@ -107,7 +107,7 @@ export function loadConfig(): AppConfig {
     tickIntervalMs: parsePositiveInteger(process.env.BOT_TICK_MS, 2_000),
     runtimeStatePath: process.env.RUNTIME_STATE_PATH || path.resolve(process.cwd(), 'data/runtime-state.json'),
     runtimeMaxRecords: parsePositiveInteger(process.env.RUNTIME_MAX_RECORDS, 1_000),
-    binanceWsUrl: binanceWsUrl(process.env.BINANCE_BTC_WS_URL),
+    binanceWsUrl: binanceWsUrl(process.env.BINANCE_WS_URL || process.env.BINANCE_BTC_WS_URL),
     binancePriceSampleMs: parsePositiveInteger(process.env.BINANCE_PRICE_SAMPLE_MS, 1_000),
     clobWsUrl: clobWsUrl(process.env.POLYMARKET_CLOB_WS_URL),
     dualLimitPrice: numberEnv('DUAL_LIMIT_PRICE', 0.45),
@@ -201,6 +201,11 @@ function loadMarketProfiles(orderSharesPerSide: number): MarketProfile[] {
     '15m': parseProfileStatus(process.env.BTC_15M_PROFILE_STATUS, 'monitor'),
     '1h': parseProfileStatus(process.env.BTC_1H_PROFILE_STATUS, 'monitor'),
   };
+  const ethStatuses: Record<MarketInterval, MarketProfile['status']> = {
+    '5m': parseProfileStatus(process.env.ETH_5M_PROFILE_STATUS, 'disabled'),
+    '15m': parseProfileStatus(process.env.ETH_15M_PROFILE_STATUS, 'disabled'),
+    '1h': parseProfileStatus(process.env.ETH_1H_PROFILE_STATUS, 'disabled'),
+  };
   const profiles: MarketProfile[] = [
     makeProfile({ id: 'btc-5m', assetSymbol: 'BTC', interval: '5m', status: btcStatuses['5m'], durationSeconds: 300, decisionLeadSeconds: 30, orderSharesPerSide, limitPrice: baseLimitPrice, minSecondsToStart: baseMinSecondsToStart, confirmTicks: baseConfirmTicks, hedgeWindows: [60, 30, 15], priceFeedSymbol: 'btcusdt' }),
     makeProfile({ id: 'btc-15m', assetSymbol: 'BTC', interval: '15m', status: btcStatuses['15m'], durationSeconds: 900, decisionLeadSeconds: 90, orderSharesPerSide, limitPrice: baseLimitPrice, minSecondsToStart: baseMinSecondsToStart, confirmTicks: baseConfirmTicks, hedgeWindows: [180, 90, 30], priceFeedSymbol: 'btcusdt' }),
@@ -216,7 +221,7 @@ function loadMarketProfiles(orderSharesPerSide: number): MarketProfile[] {
         id: `${assetSymbol.toLowerCase()}-${interval}` as MarketProfileId,
         assetSymbol,
         interval,
-        status: 'disabled',
+        status: assetSymbol === 'ETH' ? ethStatuses[interval] : 'disabled',
         durationSeconds,
         decisionLeadSeconds,
         orderSharesPerSide,
@@ -344,8 +349,8 @@ function booleanEnv(name: string, fallback: boolean): boolean {
 }
 
 function binanceWsUrl(value: string | undefined): string {
-  const url = value?.trim() || 'wss://stream.binance.com:9443/ws/btcusdt@aggTrade';
-  if (!url.startsWith('wss://')) throw new Error('BINANCE_BTC_WS_URL must be a wss:// URL.');
+  const url = value?.trim() || 'wss://stream.binance.com:9443/stream?streams=btcusdt@aggTrade/ethusdt@aggTrade';
+  if (!url.startsWith('wss://')) throw new Error('BINANCE_WS_URL must be a wss:// URL.');
   return url;
 }
 

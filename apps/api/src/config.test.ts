@@ -13,6 +13,10 @@ const COOLDOWN_ENV_KEYS = [
   'BTC_5M_SINGLE_FILL_COOLDOWN_BASE_MS',
   'BTC_15M_SINGLE_FILL_COOLDOWN_BASE_MS',
   'BTC_1H_SINGLE_FILL_COOLDOWN_BASE_MS',
+  'ETH_5M_PROFILE_STATUS',
+  'ETH_15M_PROFILE_STATUS',
+  'ETH_1H_PROFILE_STATUS',
+  'ETH_15M_SINGLE_FILL_COOLDOWN_BASE_MS',
   '5M_SINGLE_FILL_COOLDOWN_BASE_MS',
   '15M_SINGLE_FILL_COOLDOWN_BASE_MS',
   '1H_SINGLE_FILL_COOLDOWN_BASE_MS',
@@ -43,6 +47,26 @@ test('market profile cooldown supports profile-specific env override', () => {
     assert.equal(byId.get('btc-5m')?.cooldown.baseMs, 30 * 60_000);
     assert.equal(byId.get('btc-15m')?.cooldown.baseMs, 22 * 60_000);
     assert.equal(byId.get('btc-1h')?.cooldown.baseMs, 360 * 60_000);
+  });
+});
+
+test('ETH recurring profiles can be enabled independently from BTC profiles', () => {
+  withEnv(COOLDOWN_ENV_KEYS, {
+    ETH_5M_PROFILE_STATUS: 'monitor',
+    ETH_15M_PROFILE_STATUS: 'live',
+    ETH_1H_PROFILE_STATUS: 'disabled',
+    ETH_15M_SINGLE_FILL_COOLDOWN_BASE_MS: String(44 * 60_000),
+  }, () => {
+    const config = loadConfig();
+    const byId = new Map(config.marketProfiles.map((profile) => [profile.id, profile]));
+
+    assert.equal(byId.get('eth-5m')?.status, 'monitor');
+    assert.equal(byId.get('eth-15m')?.status, 'live');
+    assert.equal(byId.get('eth-1h')?.status, 'disabled');
+    assert.equal(byId.get('eth-5m')?.seriesSlug, 'eth-updown-5m');
+    assert.equal(byId.get('eth-15m')?.priceFeedSymbol, 'ethusdt');
+    assert.equal(byId.get('eth-15m')?.cooldown.baseMs, 44 * 60_000);
+    assert.equal(byId.get('sol-5m')?.status, 'disabled');
   });
 });
 

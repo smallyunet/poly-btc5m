@@ -5,7 +5,7 @@ import type { AppConfig } from './config';
 import type { InMemoryStore } from './store';
 
 export class MarketDataService {
-  private readonly priceTicks: PriceTick[] = [];
+  private readonly priceTicksBySymbol = new Map<string, PriceTick[]>();
   private readonly orderbooks = new Map<string, OrderBookQuote>();
   private binance?: WebSocket;
   private clob?: WebSocket;
@@ -13,7 +13,7 @@ export class MarketDataService {
   private clobReconnect?: NodeJS.Timeout;
   private binanceConnected = false;
   private clobConnected = false;
-  private lastBinanceSampleAt = 0;
+  private readonly lastBinanceSampleAtBySymbol = new Map<string, number>();
 
   constructor(
     private readonly config: AppConfig,
@@ -50,10 +50,11 @@ export class MarketDataService {
     return dedupe(tokenIds.filter(Boolean)).map((tokenId) => this.orderbooks.get(tokenId)).filter((item): item is OrderBookQuote => Boolean(item));
   }
 
-  features(round: BtcRoundConfig, _profile?: MarketProfile): BtcFeatureSnapshot {
+  features(round: BtcRoundConfig, profile?: MarketProfile): BtcFeatureSnapshot {
     const now = Date.now();
-    const ticks = this.binanceConnected ? this.priceTicks.filter((tick) => now - new Date(tick.receivedAt).getTime() <= 120_000) : [];
-    const ticks300s = this.binanceConnected ? this.priceTicks.filter((tick) => now - new Date(tick.receivedAt).getTime() <= 300_000) : [];
+    const profileTicks = this.ticksForProfile(profile);
+    const ticks = this.binanceConnected ? profileTicks.filter((tick) => now - new Date(tick.receivedAt).getTime() <= 120_000) : [];
+    const ticks300s = this.binanceConnected ? profileTicks.filter((tick) => now - new Date(tick.receivedAt).getTime() <= 300_000) : [];
     const latest = ticks.at(-1);
     const samples120s = ticks.length;
     let cross120s = 0;
@@ -100,7 +101,7 @@ export class MarketDataService {
     const centerExcursionBalance120s = centerMaxBiExcursionBps120s > 0 ? centerMinBiExcursionBps120s / centerMaxBiExcursionBps120s : 0;
     const driftRatio120s = range120s > 0 ? Math.abs(drift120s) / range120s : 1;
     const momentumRatio30s = range120s > 0 ? Math.abs(momentum30s) / range120s : 1;
-    const rangePercentile120s = rollingRangePercentile(this.priceTicks, now, 120_000);
+    const rangePercentile120s = rollingRangePercentile(profileTicks, now, 120_000);
     const chopScore = scoreChop({
       cross120s: centerCross120s,
       rangeBps120s,
@@ -145,21 +146,25 @@ export class MarketDataService {
     };
   }
 
-  status(_profile?: MarketProfile): DataFeedStatus {
-    const latestPrice = this.priceTicks.at(-1);
-    const latestBook = [...this.orderbooks.values()].sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())[0];
+  status(profile?: MarketProfile, tokenIds: string[] = []): DataFeedStatus {
+    const latestPrice = this.ticksForProfile(profile).at(-1);
+    const tokenIdSet = new Set(tokenIds.filter(Boolean));
+    const orderbooks = tokenIdSet.size
+      ? [...tokenIdSet].map((tokenId) => this.orderbooks.get(tokenId)).filter((item): item is OrderBookQuote => Boolean(item))
+      : [...this.orderbooks.values()];
+    const latestBook = orderbooks.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())[0];
     return {
       binanceConnected: this.binanceConnected,
       clobConnected: this.clobConnected,
       lastPriceAt: latestPrice?.receivedAt,
       lastOrderbookAt: latestBook?.updatedAt,
-      priceSamples: this.priceTicks.length,
+      priceSamples: this.ticksForProfile(profile).length,
       source: this.binanceConnected ? 'live' : 'unavailable',
     };
   }
 
-  latestPrice(_profile?: MarketProfile): number | null {
-    return this.priceTicks.at(-1)?.price ?? null;
+  latestPrice(profile?: MarketProfile): number | null {
+    return this.ticksForProfile(profile).at(-1)?.price ?? null;
   }
 
   private connectBinance(): void {
@@ -169,7 +174,7 @@ export class MarketDataService {
       this.binance = ws;
       ws.on('open', () => {
         this.binanceConnected = true;
-        this.store.recordRuntimeLog({ level: 'info', source: 'market-data', message: 'Binance BTC websocket connected.' });
+        this.store.recordRuntimeLog({ level: 'info', source: 'market-data', message: 'Binance crypto websocket connected.' });
       });
       ws.on('message', (data) => this.handleBinancePriceMessage(data.toString()));
       ws.on('close', () => {
@@ -179,10 +184,10 @@ export class MarketDataService {
       });
       ws.on('error', (error) => {
         this.binanceConnected = false;
-        this.store.recordRuntimeLog({ level: 'warn', source: 'market-data', message: `Binance BTC websocket error: ${error.message}` });
+        this.store.recordRuntimeLog({ level: 'warn', source: 'market-data', message: `Binance crypto websocket error: ${error.message}` });
       });
     } catch (error) {
-      this.store.recordRuntimeLog({ level: 'warn', source: 'market-data', message: `Binance BTC websocket failed: ${error instanceof Error ? error.message : String(error)}` });
+      this.store.recordRuntimeLog({ level: 'warn', source: 'market-data', message: `Binance crypto websocket failed: ${error instanceof Error ? error.message : String(error)}` });
     }
   }
 
@@ -245,20 +250,21 @@ export class MarketDataService {
       const parsed = JSON.parse(String(data));
       const streamPayload = parsed?.data && typeof parsed.data === 'object' ? parsed.data : parsed;
       const symbol = String(streamPayload?.s || streamPayload?.symbol || '').toLowerCase();
-      if (symbol && symbol !== 'btcusdt') return;
+      if (!symbol) return;
       const price = finiteNumber(streamPayload?.p ?? streamPayload?.c ?? streamPayload?.price);
-      if (price != null) this.recordSampledBinancePrice(price);
+      if (price != null) this.recordSampledBinancePrice(symbol, price);
     } catch {
       // Ignore malformed websocket frames; missing price samples block strategy entry.
     }
   }
 
-  private recordSampledBinancePrice(price: number): void {
+  private recordSampledBinancePrice(symbol: string, price: number): void {
     if (!Number.isFinite(price) || price <= 0) return;
     const now = Date.now();
-    if (now - this.lastBinanceSampleAt < this.config.binancePriceSampleMs) return;
-    this.lastBinanceSampleAt = now;
-    this.recordPrice(price, 'binance', new Date(now).toISOString());
+    const lastSampleAt = this.lastBinanceSampleAtBySymbol.get(symbol) || 0;
+    if (now - lastSampleAt < this.config.binancePriceSampleMs) return;
+    this.lastBinanceSampleAtBySymbol.set(symbol, now);
+    this.recordPrice(symbol, price, 'binance', new Date(now).toISOString());
   }
 
   private handleOrderbookMessage(data: unknown): void {
@@ -308,13 +314,20 @@ export class MarketDataService {
     });
   }
 
-  private recordPrice(price: number, source: PriceTick['source'], receivedAt = new Date().toISOString()): void {
+  private recordPrice(symbol: string, price: number, source: PriceTick['source'], receivedAt = new Date().toISOString()): void {
     if (!Number.isFinite(price) || price <= 0) return;
     const cutoff = Date.now() - 10 * 60_000;
-    this.priceTicks.push({ price, source, receivedAt });
-    while (this.priceTicks.length && new Date(this.priceTicks[0].receivedAt).getTime() < cutoff) {
-      this.priceTicks.shift();
+    const normalizedSymbol = symbol.toLowerCase();
+    const ticks = this.priceTicksBySymbol.get(normalizedSymbol) || [];
+    ticks.push({ price, source, receivedAt });
+    while (ticks.length && new Date(ticks[0].receivedAt).getTime() < cutoff) {
+      ticks.shift();
     }
+    this.priceTicksBySymbol.set(normalizedSymbol, ticks);
+  }
+
+  private ticksForProfile(profile?: MarketProfile): PriceTick[] {
+    return this.priceTicksBySymbol.get((profile?.priceFeedSymbol || 'btcusdt').toLowerCase()) || [];
   }
 
 }

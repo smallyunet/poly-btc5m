@@ -119,7 +119,7 @@ export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, dat
   await reconcileSettlements(appConfig, store, diagnostics, profile);
   maybeRecordEstimatedSettlement(store, snapshot, profile);
   const finalSnapshot = { ...snapshot, diagnostics: [...diagnostics, ...entry.diagnostics, ...executionDiagnostics, ...hedgeDiagnostics, ...profitExitDiagnostics] };
-  store.recordSnapshot(finalSnapshot, data.status(profile));
+  store.recordSnapshot(finalSnapshot, data.status(profile, [round.yesTokenId, round.noTokenId]));
   store.recordStrategyChecks([...entry.checks, ...exit.checks, hedgeCheck, profitExitCheck].map((check) => withProfile(check, profile)), profile.id);
   return finalSnapshot;
 }

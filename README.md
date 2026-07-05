@@ -2,7 +2,7 @@
 
 Deployable Polymarket recurring crypto Up/Down strategy worker and operator dashboard.
 
-The current production path runs BTC recurring Up/Down markets. It supports BTC 5m, 15m, and 1h profiles with isolated state, orders, fills, settlements, cooldowns, and dashboard views. ETH/SOL profiles are reserved in code but disabled by default.
+The current production path runs recurring crypto Up/Down markets. It supports BTC 5m, 15m, and 1h profiles, plus opt-in ETH 5m, 15m, and 1h profiles, with isolated state, orders, fills, settlements, cooldowns, price samples, and dashboard views. SOL profiles are reserved in code but disabled by default.
 
 ## Structure
 
@@ -51,10 +51,10 @@ The production default mode is `EXECUTION_MODE=live`. In monitor mode the worker
 
 The worker runs every `BOT_TICK_MS` and produces a multi-profile `DashboardState`:
 
-- Discovers the next BTC 5m/15m/1h rounds from deterministic `btc-updown-<interval>-<roundStartSec>` slugs and Gamma `/markets/slug/:slug`.
-- Maintains recent BTC price samples only from Binance public BTCUSDT aggTrade websocket over `wss://stream.binance.com:9443/ws/btcusdt@aggTrade`.
+- Discovers the next BTC/ETH 5m/15m/1h rounds from deterministic `<asset>-updown-<interval>-<roundStartSec>` slugs and Gamma `/markets/slug/:slug`.
+- Maintains recent per-asset price samples only from Binance public aggTrade websockets.
 - Maintains YES/NO CLOB orderbooks only from the Polymarket CLOB market websocket.
-- Computes BTC path features including `cross120s`, realized range bps, two-sided excursion bps, drift/momentum ratios, range percentile, and a `chopScore` for diagnostics.
+- Computes per-asset path features including `cross120s`, realized range bps, two-sided excursion bps, drift/momentum ratios, range percentile, and a `chopScore` for diagnostics.
 - Generates paired fixed-price entry intents during each enabled profile's pre-round decision window. With `BYPASS_ENTRY_SCORE_GATING=true`, entry no longer depends on CHOP classification.
 - Optionally performs a capped three-stage BUY hedge when one side filled and the other side did not.
 - Reconciles recent fills and estimates settlement/PnL after a round has ended.
@@ -79,12 +79,15 @@ Profile status controls:
 BTC_5M_PROFILE_STATUS=live
 BTC_15M_PROFILE_STATUS=monitor
 BTC_1H_PROFILE_STATUS=monitor
+ETH_5M_PROFILE_STATUS=disabled
+ETH_15M_PROFILE_STATUS=disabled
+ETH_1H_PROFILE_STATUS=disabled
 ```
 
 Recommended live feed settings:
 
 ```dotenv
-BINANCE_BTC_WS_URL=wss://stream.binance.com:9443/ws/btcusdt@aggTrade
+BINANCE_WS_URL=wss://stream.binance.com:9443/stream?streams=btcusdt@aggTrade/ethusdt@aggTrade
 BINANCE_PRICE_SAMPLE_MS=1000
 POLYMARKET_CLOB_WS_URL=wss://ws-subscriptions-clob.polymarket.com/ws/market
 POLYMARKET_GAMMA_API_URL=https://gamma-api.polymarket.com
@@ -94,10 +97,10 @@ MAX_ORDERBOOK_AGE_SECONDS=5
 RUNTIME_MAX_RECORDS=1000
 ```
 
-BTC price has no HTTP/manual/simulated fallback. The worker subscribes to the Binance `btcusdt@aggTrade` stream and only accepts `btcusdt` updates. It samples the latest trade into the strategy path every `BINANCE_PRICE_SAMPLE_MS` milliseconds by default, so the CHOP thresholds keep a stable seconds-level meaning instead of scaling with raw trade count. If Binance is not connected or no `btcusdt` trade has arrived, the regime remains `UNKNOWN` and entry orders are blocked.
-Orderbook price also has no REST fallback. For each enabled BTC profile, the worker discovers the next recurring Up/Down market from Gamma, maps `Up` to the local `YES` side and `Down` to the local `NO` side, then subscribes to both token IDs over the CLOB market websocket. If discovery fails, the CLOB websocket is not connected, or books are missing/stale, entry orders are blocked.
+Crypto price has no HTTP/manual/simulated fallback. The worker subscribes to the configured Binance stream and records samples by symbol, so BTC profiles read `btcusdt` and ETH profiles read `ethusdt`. It samples the latest trade into the strategy path every `BINANCE_PRICE_SAMPLE_MS` milliseconds by default, so the CHOP thresholds keep a stable seconds-level meaning instead of scaling with raw trade count. If Binance is not connected or no matching trade has arrived for a profile, the regime remains `UNKNOWN` and entry orders are blocked.
+Orderbook price also has no REST fallback. For each enabled profile, the worker discovers the next recurring Up/Down market from Gamma, maps `Up` to the local `YES` side and `Down` to the local `NO` side, then subscribes to both token IDs over the CLOB market websocket. If discovery fails, the CLOB websocket is not connected, or books are missing/stale, entry orders are blocked.
 
-The round strike is the BTC price at the beginning of the profile's Polymarket range. Before the next round starts, the dashboard shows the latest Binance BTC price as an estimate. Once the round starts, the first available sampled Binance BTC price is persisted as that round's opening strike.
+The round strike is the asset price at the beginning of the profile's Polymarket range. Before the next round starts, the dashboard shows the latest matching Binance price as an estimate. Once the round starts, the first available sampled Binance price for that profile is persisted as that round's opening strike.
 
 The current dynamic BTC path thresholds are intentionally kept unchanged after the Binance switch because the runtime feeds the strategy with sampled Binance prices, not every raw trade. `rangeBps`, two-sided excursion, drift ratio, and momentum ratio are price-path measures and remain comparable. `cross120s` also remains comparable because the 1s sampling prevents high-frequency trade noise from multiplying strike crosses.
 
