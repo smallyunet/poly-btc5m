@@ -1093,6 +1093,7 @@ export function App() {
   const touchCommand = 'npm run research:pm5m-touch -- --assets btc,eth,sol,doge,xrp,hype --min-price 0.29 --max-price 0.49';
   const touchGeneratedAtMs = touchSim?.generatedAt ? new Date(touchSim.generatedAt).getTime() : 0;
   const touchGeneratedLabel = touchGeneratedAtMs ? formatRelativeAge(touchGeneratedAtMs, nowMs) : 'not generated';
+  const isResearchTab = activeTab === 'simulation';
 
   return (
     <Shell>
@@ -1134,7 +1135,10 @@ export function App() {
           <button
             type="button"
             className="refreshControl"
-            onClick={() => load()}
+            onClick={() => {
+              void load();
+              void loadTouchSim();
+            }}
             disabled={refreshing}
             title="All dashboard panels refresh from /api/state on the same polling cycle."
             aria-label={`Refresh dashboard. ${refreshAriaStatus}. Last refresh ${lastRefreshLabel}.`}
@@ -1151,81 +1155,85 @@ export function App() {
         </div>
       </section>
 
-      <section className="profileSwitcher" aria-label="Market profiles">
-        <button type="button" className={`profilePill ${selectedProfileId === 'all' ? 'active' : ''}`} onClick={() => setSelectedProfileId('all')}>
-          All
-        </button>
-        {state.profiles.map((item) => (
-          <button
-            key={item.profile.id}
-            type="button"
-            className={`profilePill ${selectedProfileId === item.profile.id ? 'active' : ''}`}
-            onClick={() => setSelectedProfileId(item.profile.id)}
-          >
-            <AssetLabel profileId={item.profile.id} label={item.profile.label} />
-            <em>{item.profile.status}</em>
-          </button>
-        ))}
-      </section>
+      {!isResearchTab && (
+        <>
+          <section className="profileSwitcher" aria-label="Market profiles">
+            <button type="button" className={`profilePill ${selectedProfileId === 'all' ? 'active' : ''}`} onClick={() => setSelectedProfileId('all')}>
+              All
+            </button>
+            {state.profiles.map((item) => (
+              <button
+                key={item.profile.id}
+                type="button"
+                className={`profilePill ${selectedProfileId === item.profile.id ? 'active' : ''}`}
+                onClick={() => setSelectedProfileId(item.profile.id)}
+              >
+                <AssetLabel profileId={item.profile.id} label={item.profile.label} />
+                <em>{item.profile.status}</em>
+              </button>
+            ))}
+          </section>
 
-      <section className="scopeSummary" aria-label="Current data scope">
-        <div>
-          <span className="sectionKicker">Data Scope</span>
-          <strong>{scopeLabel}</strong>
-        </div>
-        <div className="scopeSummaryStats">
-          <span>{viewState.orders.length} orders</span>
-          <span>{viewState.fills.length} fills</span>
-          <span>{viewState.settlements.length} settlements</span>
-          <span>{filteredLogs.length} logs</span>
-          {isAllProfiles ? <span>{enabledProfileCount} enabled profiles</span> : <span>{viewState.profileState.profile.status}</span>}
-        </div>
-      </section>
+          <section className="scopeSummary" aria-label="Current data scope">
+            <div>
+              <span className="sectionKicker">Data Scope</span>
+              <strong>{scopeLabel}</strong>
+            </div>
+            <div className="scopeSummaryStats">
+              <span>{viewState.orders.length} orders</span>
+              <span>{viewState.fills.length} fills</span>
+              <span>{viewState.settlements.length} settlements</span>
+              <span>{filteredLogs.length} logs</span>
+              {isAllProfiles ? <span>{enabledProfileCount} enabled profiles</span> : <span>{viewState.profileState.profile.status}</span>}
+            </div>
+          </section>
 
-      <section className={`terminalCommandBar ${scopedDecisionState.tone}`} aria-label="Current terminal state">
-        <div className="terminalCommandPrimary">
-          <div className="terminalCommandIcon">
-            {scopedDecisionState.tone === 'good' ? <CheckCircle2 size={20} /> : <AlertTriangle size={20} />}
-          </div>
-          <div>
-            <span className="decisionKicker">{scopeLabel}</span>
-            <strong>{scopedDecisionState.label}</strong>
-            <p>{scopedDecisionState.detail}</p>
-          </div>
-        </div>
-        <div className="terminalCommandStats">
-          <div className="terminalStat">
-            <span>{isAllProfiles ? 'Profiles' : 'Round'}</span>
-            <strong>{isAllProfiles ? `${enabledProfileCount}/${state.profiles.length}` : snapshot.round.phase.toUpperCase()}</strong>
-            <em>{isAllProfiles ? `${liveProfileCount} live / ${state.profiles.length - enabledProfileCount} disabled` : roundPhaseDetail}</em>
-          </div>
-          <div className="terminalStat">
-            <span>Execution</span>
-            <strong>{executionLabel}</strong>
-            <em>{state.runtime.status.toUpperCase()} / {runtimeBuildLabel(state.runtime)}</em>
-          </div>
-          <div className="terminalStat">
-            <span>{isAllProfiles ? 'Orders' : 'Risk Gate'}</span>
-            <strong>{isAllProfiles ? String(viewState.orders.length) : entryCooldownActive ? 'COOLDOWN' : cooldownGateLabel}</strong>
-            <em>{isAllProfiles ? `${Math.max(...profileOrderCounts, 0)} max per profile` : cooldownDetail}</em>
-          </div>
-          <div className="terminalStat">
-            <span>Entry Plan</span>
-            <strong>FIXED {entryPriceDisplay}</strong>
-            <em>{fixedSharesLabel} shares per side</em>
-          </div>
-          <div className="terminalStat">
-            <span>Feeds</span>
-            <strong>{isAllProfiles ? `${state.profiles.filter((item) => item.feed.clobConnected).length}/${state.profiles.length} CLOB` : feedLabel}</strong>
-            <em>{isAllProfiles ? `${state.profiles.filter((item) => item.feed.binanceConnected).length}/${state.profiles.length} Binance` : `Binance ${viewState.feed.binanceConnected ? 'on' : 'off'}`}</em>
-          </div>
-	          <div className={`terminalStat pnl ${portfolioPnl > 0 ? 'good' : portfolioPnl < 0 ? 'bad' : 'neutral'}`}>
-	            <span>Portfolio</span>
-	            <strong>{formatSignedMoney(portfolioPnl)}</strong>
-	            <em>{portfolio ? `${portfolio.positionCount} positions / ${portfolioStatusLabel(portfolio.status)}` : `${activeOrders} open / ${viewState.settlements.length} settled`}</em>
-	          </div>
-        </div>
-      </section>
+          <section className={`terminalCommandBar ${scopedDecisionState.tone}`} aria-label="Current terminal state">
+            <div className="terminalCommandPrimary">
+              <div className="terminalCommandIcon">
+                {scopedDecisionState.tone === 'good' ? <CheckCircle2 size={20} /> : <AlertTriangle size={20} />}
+              </div>
+              <div>
+                <span className="decisionKicker">{scopeLabel}</span>
+                <strong>{scopedDecisionState.label}</strong>
+                <p>{scopedDecisionState.detail}</p>
+              </div>
+            </div>
+            <div className="terminalCommandStats">
+              <div className="terminalStat">
+                <span>{isAllProfiles ? 'Profiles' : 'Round'}</span>
+                <strong>{isAllProfiles ? `${enabledProfileCount}/${state.profiles.length}` : snapshot.round.phase.toUpperCase()}</strong>
+                <em>{isAllProfiles ? `${liveProfileCount} live / ${state.profiles.length - enabledProfileCount} disabled` : roundPhaseDetail}</em>
+              </div>
+              <div className="terminalStat">
+                <span>Execution</span>
+                <strong>{executionLabel}</strong>
+                <em>{state.runtime.status.toUpperCase()} / {runtimeBuildLabel(state.runtime)}</em>
+              </div>
+              <div className="terminalStat">
+                <span>{isAllProfiles ? 'Orders' : 'Risk Gate'}</span>
+                <strong>{isAllProfiles ? String(viewState.orders.length) : entryCooldownActive ? 'COOLDOWN' : cooldownGateLabel}</strong>
+                <em>{isAllProfiles ? `${Math.max(...profileOrderCounts, 0)} max per profile` : cooldownDetail}</em>
+              </div>
+              <div className="terminalStat">
+                <span>Entry Plan</span>
+                <strong>FIXED {entryPriceDisplay}</strong>
+                <em>{fixedSharesLabel} shares per side</em>
+              </div>
+              <div className="terminalStat">
+                <span>Feeds</span>
+                <strong>{isAllProfiles ? `${state.profiles.filter((item) => item.feed.clobConnected).length}/${state.profiles.length} CLOB` : feedLabel}</strong>
+                <em>{isAllProfiles ? `${state.profiles.filter((item) => item.feed.binanceConnected).length}/${state.profiles.length} Binance` : `Binance ${viewState.feed.binanceConnected ? 'on' : 'off'}`}</em>
+              </div>
+              <div className={`terminalStat pnl ${portfolioPnl > 0 ? 'good' : portfolioPnl < 0 ? 'bad' : 'neutral'}`}>
+                <span>Portfolio</span>
+                <strong>{formatSignedMoney(portfolioPnl)}</strong>
+                <em>{portfolio ? `${portfolio.positionCount} positions / ${portfolioStatusLabel(portfolio.status)}` : `${activeOrders} open / ${viewState.settlements.length} settled`}</em>
+              </div>
+            </div>
+          </section>
+        </>
+      )}
 
       {/* Main Tabbed Area */}
       <main>
