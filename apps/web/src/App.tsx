@@ -290,18 +290,18 @@ function assetKeyForProfile(profileId?: string): AssetKey {
   return 'btc';
 }
 
-function assetIconSymbol(profileId?: string): string {
+function assetNameForProfile(profileId?: string): string {
   const asset = assetKeyForProfile(profileId);
-  if (asset === 'eth') return 'Ξ';
-  if (asset === 'sol') return '◎';
-  return '₿';
+  if (asset === 'eth') return 'Ethereum';
+  if (asset === 'sol') return 'Solana';
+  return 'Bitcoin';
 }
 
 function AssetIcon({ profileId, size = 'sm' }: { profileId?: string; size?: 'xs' | 'sm' | 'md' }) {
   const asset = assetKeyForProfile(profileId);
   return (
-    <span className={`assetIcon assetIcon-${asset} assetIcon-${size}`} aria-hidden="true">
-      {assetIconSymbol(profileId)}
+    <span className={`assetIcon assetIcon-${asset} assetIcon-${size}`} title={assetNameForProfile(profileId)} aria-hidden="true">
+      <img src={`/token-icons/${asset}.png`} alt="" loading="lazy" />
     </span>
   );
 }

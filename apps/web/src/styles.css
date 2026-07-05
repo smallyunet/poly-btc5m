@@ -1363,25 +1363,30 @@ td.mono {
   font-family: var(--font-mono);
   font-weight: 800;
   line-height: 1;
+  overflow: hidden;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5);
+}
+
+.assetIcon img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
 }
 
 .assetIcon.assetIcon-xs {
   width: 18px;
   height: 18px;
-  font-size: 11px;
 }
 
 .assetIcon.assetIcon-sm {
   width: 22px;
   height: 22px;
-  font-size: 13px;
 }
 
 .assetIcon.assetIcon-md {
   width: 34px;
   height: 34px;
-  font-size: 20px;
 }
 
 .assetIcon.assetIcon-btc {
@@ -1455,11 +1460,96 @@ td.mono {
   gap: 10px;
 }
 
+.orderbookHero {
+  display: grid;
+  grid-template-columns: minmax(280px, 0.85fr) minmax(0, 1.7fr);
+  gap: 12px;
+  align-items: stretch;
+}
+
+.orderbookHeroPrimary {
+  min-width: 0;
+  padding: 16px;
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.orderbookHeroPrimary.good {
+  border-color: rgba(16, 185, 129, 0.32);
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(255, 255, 255, 0.82));
+}
+
+.orderbookHeroPrimary.warn {
+  border-color: rgba(245, 158, 11, 0.34);
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.12), rgba(255, 255, 255, 0.84));
+}
+
+.orderbookHeroPrimary.bad {
+  border-color: rgba(244, 63, 94, 0.32);
+  background: linear-gradient(135deg, rgba(244, 63, 94, 0.1), rgba(255, 255, 255, 0.84));
+}
+
+.orderbookHeroPrimary > span,
+.capacityTier > span {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.orderbookHeroPrimary strong {
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 30px;
+  line-height: 1;
+}
+
+.orderbookHeroPrimary p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.quotePairStrip {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.quotePairStrip span {
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.7);
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.quotePairStrip strong {
+  display: block;
+  margin-top: 2px;
+  color: var(--text-primary);
+  font-size: 15px;
+}
+
+.orderbookHeroMetrics {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
 .orderbookCapacityBlock {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  margin-top: 14px;
+  margin-top: 16px;
 }
 
 .capacityHeader {
@@ -1467,10 +1557,10 @@ td.mono {
   justify-content: space-between;
   align-items: flex-start;
   gap: 16px;
-  padding: 12px;
+  padding: 14px 16px;
   border: 1px solid var(--border-color);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.42);
+  background: rgba(255, 255, 255, 0.64);
 }
 
 .capacityHeader h3 {
@@ -1510,12 +1600,134 @@ td.mono {
   grid-template-columns: repeat(4, minmax(140px, 1fr));
 }
 
+.capacityTier {
+  min-width: 0;
+  padding: 13px 14px;
+  display: grid;
+  gap: 6px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.56);
+}
+
+.capacityTier.good {
+  color: var(--color-success);
+  border-color: rgba(16, 185, 129, 0.28);
+}
+
+.capacityTier.warn {
+  color: var(--color-warning);
+  border-color: rgba(245, 158, 11, 0.3);
+}
+
+.capacityTier.bad {
+  color: var(--color-danger);
+  border-color: rgba(244, 63, 94, 0.3);
+}
+
+.capacityTier strong {
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 20px;
+  line-height: 1;
+}
+
+.capacityTier.good strong {
+  color: var(--color-success);
+}
+
+.capacityTier.warn strong {
+  color: var(--color-warning);
+}
+
+.capacityTier.bad strong {
+  color: var(--color-danger);
+}
+
+.capacityTier em,
+.capacityTier small {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-style: normal;
+}
+
+.capacityMeter {
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(100, 116, 139, 0.14);
+}
+
+.capacityMeter span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: currentColor;
+  opacity: 0.55;
+}
+
 .capacityFocus {
   grid-template-columns: repeat(3, minmax(150px, 1fr));
 }
 
 .activeDepthRow td {
-  background: rgba(16, 185, 129, 0.06);
+  background: rgba(37, 99, 235, 0.06);
+  box-shadow: inset 3px 0 0 var(--color-primary);
+}
+
+.capacityDepthTable {
+  min-width: 900px;
+}
+
+.capacityDepthTable th,
+.capacityDepthTable td,
+.quoteTable th,
+.quoteTable td {
+  white-space: nowrap;
+}
+
+.quoteMatrix {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.quoteMatrixHeader {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.quoteMatrixHeader h3 {
+  margin: 2px 0 0;
+  color: var(--text-primary);
+  font-size: 14px;
+}
+
+.quoteMatrixHeader > span {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.quoteTable {
+  min-width: 980px;
+}
+
+.quoteTable th:nth-child(1),
+.quoteTable td:nth-child(1) {
+  width: 92px;
+}
+
+.quoteTable th:nth-child(2),
+.quoteTable td:nth-child(2) {
+  width: 150px;
+}
+
+.quoteTable th:nth-child(3),
+.quoteTable td:nth-child(3) {
+  width: 92px;
 }
 
 .fail {
@@ -2279,8 +2491,14 @@ td.mono {
     font-size: 21px;
   }
 
-  .orderbookSummary {
+  .orderbookSummary,
+  .orderbookHero {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .orderbookHeroPrimary,
+  .orderbookHeroMetrics {
+    grid-column: 1 / -1;
   }
 
   .capacityTierGrid,
@@ -2468,7 +2686,10 @@ td.mono {
   }
 
   .digestGroup,
-  .orderbookSummary {
+  .orderbookSummary,
+  .orderbookHero,
+  .orderbookHeroMetrics,
+  .quotePairStrip {
     grid-template-columns: 1fr;
   }
 
