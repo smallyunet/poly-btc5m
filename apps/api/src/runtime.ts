@@ -561,15 +561,23 @@ async function loadPortfolio(appConfig: AppConfig, adapter: PolymarketAdapter, t
     });
   }
 
-  const [positionsResult, balanceResult] = await Promise.allSettled([
+  const [positionsResult, balanceResult, profileResult] = await Promise.allSettled([
     adapter.getPortfolioPositions(tokenLabels),
     hasOwnerPrivateKey ? adapter.getCollateralBalanceAllowance() : Promise.resolve(null),
+    adapter.getUserProfile?.() ?? Promise.resolve(undefined),
   ]);
 
   const positionsLoaded = positionsResult.status === 'fulfilled';
   const positions = positionsLoaded ? positionsResult.value : [];
   if (positionsResult.status === 'rejected') {
     const message = `Portfolio positions load failed: ${errorMessage(positionsResult.reason)}`;
+    portfolioDiagnostics.push(message);
+    diagnostics.push(message);
+  }
+
+  const profile = profileResult.status === 'fulfilled' ? profileResult.value : undefined;
+  if (profileResult.status === 'rejected') {
+    const message = `Portfolio profile load failed: ${errorMessage(profileResult.reason)}`;
     portfolioDiagnostics.push(message);
     diagnostics.push(message);
   }
@@ -597,6 +605,7 @@ async function loadPortfolio(appConfig: AppConfig, adapter: PolymarketAdapter, t
     status: portfolioDiagnostics.length ? (positionsLoaded || collateralBalance != null ? 'partial' : 'unavailable') : 'enabled',
     updatedAt,
     accountAddress,
+    profile,
     hasOwnerPrivateKey,
     hasDepositWallet,
     collateralBalance,

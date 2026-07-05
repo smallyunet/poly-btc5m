@@ -261,6 +261,13 @@ export type PortfolioSnapshot = {
   status: 'enabled' | 'disabled' | 'partial' | 'unavailable';
   updatedAt: string;
   accountAddress?: string;
+  profile?: {
+    name?: string;
+    pseudonym?: string;
+    bio?: string;
+    profileImage?: string;
+    profileImageOptimized?: string;
+  };
   hasOwnerPrivateKey: boolean;
   hasDepositWallet: boolean;
   collateralBalance?: number;

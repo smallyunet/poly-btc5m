@@ -282,10 +282,37 @@ function derivedRoundTitle(roundId: string, profileId?: string): string {
   return `${asset} Up or Down - ${formatEtRange(startMs, roundDurationMsForProfile(profileId))}`;
 }
 
-function marketFallbackIcon(profileId?: string): string {
-  if (profileId?.startsWith('eth-')) return 'Ξ';
-  if (profileId?.startsWith('sol-')) return '◎';
+type AssetKey = 'btc' | 'eth' | 'sol';
+
+function assetKeyForProfile(profileId?: string): AssetKey {
+  if (profileId?.startsWith('eth-')) return 'eth';
+  if (profileId?.startsWith('sol-')) return 'sol';
+  return 'btc';
+}
+
+function assetIconSymbol(profileId?: string): string {
+  const asset = assetKeyForProfile(profileId);
+  if (asset === 'eth') return 'Ξ';
+  if (asset === 'sol') return '◎';
   return '₿';
+}
+
+function AssetIcon({ profileId, size = 'sm' }: { profileId?: string; size?: 'xs' | 'sm' | 'md' }) {
+  const asset = assetKeyForProfile(profileId);
+  return (
+    <span className={`assetIcon assetIcon-${asset} assetIcon-${size}`} aria-hidden="true">
+      {assetIconSymbol(profileId)}
+    </span>
+  );
+}
+
+function AssetLabel({ profileId, label, size = 'xs' }: { profileId?: string; label: string; size?: 'xs' | 'sm' }) {
+  return (
+    <span className="assetLabel">
+      <AssetIcon profileId={profileId} size={size} />
+      <span>{label}</span>
+    </span>
+  );
 }
 
 function toSortTime(value: string): number {
@@ -718,6 +745,12 @@ export function App() {
   const displayedPositionCost = displayedPositions.reduce((sum, position) => sum + positionCost(position), 0);
   const displayedUnrealizedPnl = displayedPositions.reduce((sum, position) => sum + positionPnl(position), 0);
   const displayedRoiPct = displayedPositionCost > 0 ? (displayedUnrealizedPnl / displayedPositionCost) * 100 : null;
+  const portfolioProfileName = portfolio?.profile?.name || portfolio?.profile?.pseudonym;
+  const portfolioProfileHandle = portfolio?.profile?.pseudonym && portfolio?.profile?.pseudonym !== portfolioProfileName
+    ? portfolio.profile.pseudonym
+    : undefined;
+  const portfolioAvatarUrl = portfolio?.profile?.profileImageOptimized || portfolio?.profile?.profileImage;
+  const portfolioInitial = (portfolioProfileName || portfolio?.accountAddress || '?').trim().slice(0, 1).toUpperCase();
 
   // Time progress bar calculation
   const secondsToEnd = snapshot.round.secondsToEnd;
@@ -853,14 +886,22 @@ export function App() {
         </nav>
 
         <div className="actions">
-          <div className="refreshStatus" title="All dashboard panels refresh from /api/state on the same polling cycle.">
-            <RefreshCw size={13} className={autoRefreshing ? 'spin' : ''} />
-            <span>{autoRefreshing ? 'Updating' : `Auto ${Math.round(DASHBOARD_REFRESH_MS / 1000)}s`}</span>
-            <strong>{lastRefreshAt ? formatEtTime(lastRefreshAt) : 'pending'}</strong>
-          </div>
-          <button type="button" onClick={() => load()} disabled={refreshing}>
-            <RefreshCw size={14} className={refreshing ? 'spin' : ''} />
-            {refreshing ? 'Refreshing' : 'Refresh'}
+          <button
+            type="button"
+            className="refreshControl"
+            onClick={() => load()}
+            disabled={refreshing}
+            title="All dashboard panels refresh from /api/state on the same polling cycle."
+            aria-label={`Refresh dashboard. ${autoRefreshing ? 'Updating now' : `Auto refresh every ${Math.round(DASHBOARD_REFRESH_MS / 1000)} seconds`}. Last refresh ${lastRefreshAt ? formatEtTime(lastRefreshAt) : 'pending'}.`}
+          >
+            <span className="refreshControlStatus">
+              <RefreshCw size={13} className={(autoRefreshing || refreshing) ? 'spin' : ''} />
+              <span>{autoRefreshing || refreshing ? 'Updating' : `Auto ${Math.round(DASHBOARD_REFRESH_MS / 1000)}s`}</span>
+              <strong>{lastRefreshAt ? formatEtTime(lastRefreshAt) : 'pending'}</strong>
+            </span>
+            <span className="refreshControlAction">
+              {refreshing ? 'Refreshing' : 'Refresh'}
+            </span>
           </button>
         </div>
       </section>
@@ -876,7 +917,7 @@ export function App() {
             className={`profilePill ${selectedProfileId === item.profile.id ? 'active' : ''}`}
             onClick={() => setSelectedProfileId(item.profile.id)}
           >
-            <span>{item.profile.label}</span>
+            <AssetLabel profileId={item.profile.id} label={item.profile.label} />
             <em>{item.profile.status}</em>
           </button>
         ))}
@@ -966,7 +1007,7 @@ export function App() {
                 <button key={item.profile.id} type="button" className="profileRuntimeCard" onClick={() => setSelectedProfileId(item.profile.id)}>
                   <div className="profileRuntimeHeader">
                     <div>
-                      <strong>{item.profile.label}</strong>
+                      <strong><AssetLabel profileId={item.profile.id} label={item.profile.label} size="sm" /></strong>
                       <span>{item.profile.status} · {item.latestSnapshot?.round.phase || 'pending'}</span>
                     </div>
                     <Badge tone={item.profile.status === 'live' ? 'warn' : item.profile.status === 'monitor' ? 'neutral' : 'bad'}>{item.profile.status}</Badge>
@@ -991,7 +1032,9 @@ export function App() {
             <section className="opsPrimary">
               <div className={`opsHero ${decisionState.tone}`}>
                 <div className="opsHeroMain">
-                  <span className="decisionKicker">{viewState.profileState.profile.label} Runtime</span>
+                  <span className="decisionKicker">
+                    <AssetLabel profileId={viewState.profileState.profile.id} label={`${viewState.profileState.profile.label} Runtime`} />
+                  </span>
                   <h2>{decisionState.label}</h2>
                   <p>{decisionState.detail}</p>
                 </div>
@@ -1113,7 +1156,7 @@ export function App() {
                   {profileStatusRows.map(({ item, entryCheck: itemEntryCheck, hedgeCheck: itemHedgeCheck, profitExitCheck: itemProfitExitCheck, cooldownActive: itemCooldownActive }) => (
                     <button key={item.profile.id} type="button" className={`opsProfileRow ${selectedProfileId === item.profile.id ? 'active' : ''}`} onClick={() => setSelectedProfileId(item.profile.id)}>
                       <div>
-                        <strong>{item.profile.label}</strong>
+                        <strong><AssetLabel profileId={item.profile.id} label={item.profile.label} size="sm" /></strong>
                         <span>{item.latestSnapshot?.round.phase || 'pending'} · {item.profile.status}</span>
                       </div>
                       <div className="opsProfileBadges">
@@ -1169,16 +1212,25 @@ export function App() {
 	                <>
 	                  <div className="portfolioHero">
 	                    <div className="portfolioIdentity">
-	                      <span className="decisionKicker">Configured Account</span>
-	                      <strong title={portfolio.accountAddress || ''}>{portfolio.accountAddress ? shortenTokenId(portfolio.accountAddress) : 'not configured'}</strong>
-	                      <p>{portfolio.hasOwnerPrivateKey ? 'CLOB balance reads enabled' : 'OWNER_PRIVATE_KEY missing; positions only'}</p>
+                        <div className="portfolioAvatar" aria-hidden="true">
+                          {portfolioAvatarUrl ? (
+                            <img src={portfolioAvatarUrl} alt="" loading="lazy" referrerPolicy="no-referrer" />
+                          ) : (
+                            <span>{portfolioInitial}</span>
+                          )}
+                        </div>
+                        <div className="portfolioIdentityText">
+	                        <span className="decisionKicker">Configured Account</span>
+	                        <strong title={portfolioProfileName || portfolio.accountAddress || ''}>{portfolioProfileName || (portfolio.accountAddress ? shortenTokenId(portfolio.accountAddress) : 'not configured')}</strong>
+                          {portfolioProfileHandle && <em>{portfolioProfileHandle}</em>}
+	                        <p title={portfolio.accountAddress || ''}>{portfolio.accountAddress ? shortenTokenId(portfolio.accountAddress) : 'not configured'} · {portfolio.hasOwnerPrivateKey ? 'CLOB balance reads enabled' : 'OWNER_PRIVATE_KEY missing; positions only'}</p>
+                        </div>
 	                    </div>
 	                    <Badge tone={portfolioStatusTone(portfolio.status)}>{portfolioStatusLabel(portfolio.status)}</Badge>
 	                  </div>
 
 	                  <div className="portfolioMetricGrid">
 		                    <DecisionMetric label="Collateral Balance" value={portfolio.collateralBalance == null ? 'n/a' : formatMoney(portfolio.collateralBalance)} detail="CLOB collateral" tone={portfolio.collateralBalance == null ? 'neutral' : 'good'} />
-		                    <DecisionMetric label="Allowance" value={portfolio.collateralAllowance == null ? 'n/a' : formatMoney(portfolio.collateralAllowance)} detail="CLOB allowance" tone={portfolio.collateralAllowance == null ? 'neutral' : 'good'} />
 		                    <DecisionMetric label="Position Value" value={formatMoney(displayedPositionValue)} detail={`${displayedPositions.length} scoped positions`} tone={displayedPositionValue > 0 ? 'good' : 'neutral'} />
 		                    <DecisionMetric label="Open Cost" value={formatMoney(displayedPositionCost)} detail="scoped entry basis" tone="neutral" />
 		                    <DecisionMetric label="Unrealized PnL" value={formatSignedMoney(displayedUnrealizedPnl)} detail="scoped positions" tone={displayedUnrealizedPnl > 0 ? 'good' : displayedUnrealizedPnl < 0 ? 'bad' : 'neutral'} />
@@ -1217,10 +1269,15 @@ export function App() {
 	                    const roi = cost > 0 ? (pnlValue / cost) * 100 : null;
 	                    return (
 	                      <tr key={`${position.profileId}:${position.tokenId}`}>
-	                        {isAllProfiles && <td><Badge tone="neutral">{position.profileLabel}</Badge></td>}
+	                        {isAllProfiles && <td><Badge tone="neutral"><AssetLabel profileId={position.profileId} label={position.profileLabel} /></Badge></td>}
 	                        <td>
-	                          <span className="marketTitle">{position.title || 'Polymarket position'}</span>
-	                          <span className="mutedBlock mono">{shortenTokenId(position.tokenId)}</span>
+	                          <div className="marketCell compact">
+	                            <AssetIcon profileId={position.profileId} size="sm" />
+	                            <div>
+	                              <span className="marketTitle">{position.title || 'Polymarket position'}</span>
+	                              <span className="mutedBlock mono">{shortenTokenId(position.tokenId)}</span>
+	                            </div>
+	                          </div>
 	                        </td>
 	                        <td><Badge tone={outcomeTone(position.label)}>{outcomeLabel(position.label)}</Badge></td>
 	                        <td className="mono">{formatNumber(position.shares, 2)}</td>
@@ -1256,7 +1313,7 @@ export function App() {
                   <button key={item.profile.id} type="button" className="profileRuntimeCard" onClick={() => setSelectedProfileId(item.profile.id)}>
                     <div className="profileRuntimeHeader">
                       <div>
-                        <strong>{item.profile.label}</strong>
+                        <strong><AssetLabel profileId={item.profile.id} label={item.profile.label} size="sm" /></strong>
                         <span>{item.latestSnapshot?.round.id || 'waiting for round'}</span>
                       </div>
                       <Badge tone={item.feed.clobConnected ? 'good' : 'bad'}>CLOB {item.feed.clobConnected ? 'on' : 'off'}</Badge>
@@ -1362,7 +1419,7 @@ export function App() {
                               const status = roundStatusSummary(round);
                               return (
                                 <tr key={round.key}>
-                                  {isAllProfiles && <td><Badge tone="neutral">{round.profileLabel}</Badge></td>}
+                                  {isAllProfiles && <td><Badge tone="neutral"><AssetLabel profileId={round.profileId} label={round.profileLabel} /></Badge></td>}
                                   <td className="mono timeCell">{round.timeLabel}</td>
                                   <td className="ageCell"><span>{formatRelativeAge(round.startTime)}</span></td>
                                   <td>
@@ -1370,7 +1427,7 @@ export function App() {
                                       {round.imageUrl ? (
                                         <img src={round.imageUrl} alt="" className="marketThumb" />
                                       ) : (
-                                        <span className="marketThumb marketThumbFallback">{marketFallbackIcon(round.profileId)}</span>
+                                        <AssetIcon profileId={round.profileId} size="md" />
                                       )}
                                       <span className="marketTitle">{round.title}</span>
                                     </div>
@@ -1440,14 +1497,14 @@ export function App() {
                         const status = roundStatusSummary(round);
                         return (
                           <tr key={round.key}>
-                            {isAllProfiles && <td><Badge tone="neutral">{round.profileLabel}</Badge></td>}
+                            {isAllProfiles && <td><Badge tone="neutral"><AssetLabel profileId={round.profileId} label={round.profileLabel} /></Badge></td>}
                             <td className="ageCell"><span>{formatRelativeAge(round.startTime)}</span></td>
                             <td>
                               <div className="marketCell">
                                 {round.imageUrl ? (
                                   <img src={round.imageUrl} alt="" className="marketThumb" />
                                 ) : (
-                                  <span className="marketThumb marketThumbFallback">{marketFallbackIcon(round.profileId)}</span>
+                                  <AssetIcon profileId={round.profileId} size="md" />
                                 )}
                                 <span className="marketTitle">{round.title}</span>
                               </div>
@@ -1510,11 +1567,14 @@ export function App() {
                       : ['Time (ET)', 'Strategy', 'Market', 'Round ID', 'Outcome', 'Side', 'Price', 'Size', 'Status', 'Reason', 'Polymarket CLOB Order ID']}>
                       {ordersPagination.pageRows.map((order) => (
                         <tr key={order.id}>
-                          {isAllProfiles && <td><Badge tone="neutral">{profileLabelFor(state.profiles, order.profileId)}</Badge></td>}
+                          {isAllProfiles && <td><Badge tone="neutral"><AssetLabel profileId={order.profileId} label={profileLabelFor(state.profiles, order.profileId)} /></Badge></td>}
                           <td className="mono">{formatEtTime(order.createdAt)}</td>
                           <td className="mono" style={{ fontSize: '11px' }}>{strategySourceLabel(order)}</td>
                           <td>
-                            <span className="marketTitle">{orderMarketTitle(order)}</span>
+                            <div className="marketCell compact">
+                              <AssetIcon profileId={order.profileId} size="sm" />
+                              <span className="marketTitle">{orderMarketTitle(order)}</span>
+                            </div>
                           </td>
                           <td className="mono" style={{ fontSize: '11px' }}>{order.roundId}</td>
                           <td><Badge tone={outcomeTone(order.label)}>{outcomeLabel(order.label)}</Badge></td>

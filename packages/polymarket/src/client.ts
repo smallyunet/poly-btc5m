@@ -1,5 +1,5 @@
 import { Wallet } from '@ethersproject/wallet';
-import type { FillRecord, MarketAsset, MarketInterval, MarketProfileId, OrderBookLevel, OrderBookQuote, OrderRecord, PositionSnapshot, TradeIntent } from '../../shared/src';
+import type { FillRecord, MarketAsset, MarketInterval, MarketProfileId, OrderBookLevel, OrderBookQuote, OrderRecord, PortfolioSnapshot, PositionSnapshot, TradeIntent } from '../../shared/src';
 
 const POLYMARKET_DATA_API_URL = 'https://data-api.polymarket.com';
 
@@ -35,6 +35,8 @@ export type CollateralBalanceAllowance = {
   balance: number;
   allowance: number | null;
 };
+
+export type PolymarketUserProfile = NonNullable<PortfolioSnapshot['profile']>;
 
 export type FillTarget = Pick<OrderRecord, 'profileId' | 'asset' | 'interval' | 'roundId' | 'eventSlug' | 'marketTitle' | 'imageUrl' | 'tokenId' | 'label' | 'clobOrderId'>;
 
@@ -308,6 +310,29 @@ export class PolymarketAdapter {
     return (await this.getPortfolioPositions(tokenLabels)).filter((position) => position.label !== 'UNKNOWN');
   }
 
+  async getUserProfile(): Promise<PolymarketUserProfile | undefined> {
+    const address = this.config.depositWallet?.trim();
+    if (!address) throw new Error('POLYMARKET_DEPOSIT_WALLET is required for profile reads.');
+
+    const dataApiUrl = this.config.dataApiUrl?.trim() || POLYMARKET_DATA_API_URL;
+    const url = new URL('/activity', dataApiUrl);
+    url.searchParams.set('user', address);
+    url.searchParams.set('limit', '1');
+    const response = await fetch(url, { headers: { accept: 'application/json', 'user-agent': 'poly-btc5m/0.1.0' } });
+    if (!response.ok) throw new Error(`Polymarket Data API profile activity returned ${response.status}`);
+    const page = await response.json();
+    const item = Array.isArray(page) ? page[0] : null;
+    if (!item || typeof item !== 'object') return undefined;
+    const profile = {
+      name: stringField(item.name),
+      pseudonym: stringField(item.pseudonym),
+      bio: stringField(item.bio),
+      profileImage: stringField(item.profileImage),
+      profileImageOptimized: stringField(item.profileImageOptimized),
+    };
+    return Object.values(profile).some(Boolean) ? profile : undefined;
+  }
+
   private async authenticatedClient(): Promise<any> {
     const ownerPrivateKey = this.config.ownerPrivateKey?.trim();
     const depositWallet = this.config.depositWallet?.trim();
@@ -398,6 +423,10 @@ function roundShares(value: number): number {
 function finiteNumber(value: unknown): number | null {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function stringField(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
 }
 
 function dedupeTargets(targets: FillTarget[]): FillTarget[] {
