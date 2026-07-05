@@ -296,6 +296,26 @@ test('profile duration controls final single-fill review timing', () => {
   assert.equal(store.getActiveEntryCooldown('btc-15m', nowMs), null);
 });
 
+test('BTC 1h human-readable round slugs are eligible for settlement after expiry', () => {
+  const store = new InMemoryStore('live', 2_000, { persistencePath: false });
+  const roundId = 'bitcoin-up-or-down-july-4-2026-11pm-et';
+
+  store.recordFills([fill(roundId, 'YES', {
+    profileId: 'btc-1h',
+    interval: '1h',
+    eventSlug: roundId,
+    marketTitle: 'Bitcoin Up or Down - July 4, 11PM ET',
+  })]);
+
+  assert.deepEqual(store.roundsNeedingSettlement('btc-1h', 3600), [{
+    roundId,
+    eventSlug: roundId,
+    marketTitle: 'Bitcoin Up or Down - July 4, 11PM ET',
+    imageUrl: undefined,
+    strike: undefined,
+  }]);
+});
+
 test('open-order reconciliation only cancels orders for the requested profile', () => {
   const nowMs = Date.now();
   const fiveMinuteRound = roundIdFromStart(nowMs - 7 * 60_000);

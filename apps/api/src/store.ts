@@ -1051,8 +1051,44 @@ function finalSingleFillReviewMs(roundId: string, profileId?: MarketProfileId): 
 function roundStartMs(roundId: string): number | null {
   const match = roundId.match(/[a-z]+-updown-(?:5m|15m|1h)-(\d+)$/);
   const parsed = Number(match?.[1]);
-  if (!Number.isFinite(parsed) || parsed <= 0) return null;
-  return parsed * 1000;
+  if (Number.isFinite(parsed) && parsed > 0) return parsed * 1000;
+  return humanHourlyRoundStartMs(roundId);
+}
+
+function humanHourlyRoundStartMs(roundId: string): number | null {
+  const match = roundId.match(/^(?:bitcoin|ethereum|solana)-up-or-down-([a-z]+)-(\d{1,2})-(\d{4})-(\d{1,2})(am|pm)-et$/);
+  if (!match) return null;
+  const [, monthName, dayRaw, yearRaw, hourRaw, period] = match;
+  const month = MONTH_INDEX[monthName];
+  const day = Number(dayRaw);
+  const year = Number(yearRaw);
+  const hour12 = Number(hourRaw);
+  if (month == null || !Number.isInteger(day) || !Number.isInteger(year) || !Number.isInteger(hour12) || hour12 < 1 || hour12 > 12) return null;
+  const hour = period === 'pm' ? (hour12 % 12) + 12 : hour12 % 12;
+  return zonedTimeToUtcMs(year, month, day, hour, 'America/New_York');
+}
+
+function zonedTimeToUtcMs(year: number, month: number, day: number, hour: number, timeZone: string): number {
+  let utcMs = Date.UTC(year, month, day, hour, 0, 0);
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    utcMs = Date.UTC(year, month, day, hour, 0, 0) - timeZoneOffsetMs(timeZone, new Date(utcMs));
+  }
+  return utcMs;
+}
+
+function timeZoneOffsetMs(timeZone: string, date: Date): number {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).formatToParts(date);
+  const value = (type: string) => Number(parts.find((part) => part.type === type)?.value);
+  return Date.UTC(value('year'), value('month') - 1, value('day'), value('hour'), value('minute'), value('second')) - date.getTime();
 }
 
 function profileDurationSeconds(profileId?: MarketProfileId): number {
@@ -1064,6 +1100,21 @@ function profileDurationSeconds(profileId?: MarketProfileId): number {
 function profileDurationMs(profileId?: MarketProfileId): number {
   return profileDurationSeconds(profileId) * 1000;
 }
+
+const MONTH_INDEX: Record<string, number> = {
+  january: 0,
+  february: 1,
+  march: 2,
+  april: 3,
+  may: 4,
+  june: 5,
+  july: 6,
+  august: 7,
+  september: 8,
+  october: 9,
+  november: 10,
+  december: 11,
+};
 
 function profileRoundKey(profileId: MarketProfileId | undefined, roundId: string): string {
   return profileId ? `${profileId}:${roundId}` : roundId;
