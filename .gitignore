@@ -7,6 +7,7 @@ coverage/
 !.env.example
 runs/
 data/
+data-lab/
 certs/*.key
 certs/*.pem
 certs/*.crt

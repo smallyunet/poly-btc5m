@@ -44,6 +44,27 @@ export function createServer(appConfig: AppConfig, store: InMemoryStore, manualT
   app.get('/api/fills', (_req, res) => res.json(store.dashboardState().fills));
   app.get('/api/settlements', (_req, res) => res.json(store.dashboardState().settlements));
   app.get('/api/rules', (_req, res) => res.json(store.dashboardState().rules));
+  app.get('/api/research/pm5m-touch/summary', (_req, res) => {
+    const summaryPath = path.resolve(process.cwd(), process.env.PM5M_TOUCH_SUMMARY_PATH || 'data-lab/pm-5m-touch/summary.json');
+    try {
+      if (!fs.existsSync(summaryPath)) {
+        return res.json({
+          ok: false,
+          status: 'unavailable',
+          message: 'PM 5m touch simulator summary not found. Start npm run research:pm5m-touch to generate data.',
+          summaryPath,
+        });
+      }
+      return res.json(JSON.parse(fs.readFileSync(summaryPath, 'utf8')));
+    } catch (error) {
+      return res.status(500).json({
+        ok: false,
+        status: 'error',
+        message: error instanceof Error ? error.message : String(error),
+        summaryPath,
+      });
+    }
+  });
 
   app.post('/api/tick', async (_req, res, next) => {
     try {

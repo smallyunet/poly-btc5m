@@ -11,7 +11,8 @@ import {
   Info,
   WalletCards,
   PieChart,
-  Target
+  Target,
+  BarChart3
 } from 'lucide-react';
 
 import type { BotRuntimeStatus, DashboardState, RuntimeLogRecord, StrategyCheck } from '../../../packages/shared/src';
@@ -23,7 +24,7 @@ import { RoundTimelinePipeline } from './components/RoundTimelinePipeline';
 import { OrderbookCapacityPanel, OrderbookExecutionSummary, OrderbookTable } from './components/dashboard/OrderbookPanels';
 import { Badge, DataTable, DecisionMetric, PaginationControls, Shell } from './components/dashboard/Ui';
 
-type TabType = 'terminal' | 'portfolio' | 'orderbooks' | 'activity' | 'strategy' | 'logs';
+type TabType = 'terminal' | 'portfolio' | 'orderbooks' | 'activity' | 'simulation' | 'strategy' | 'logs';
 type ActivitySubTab = 'daily' | 'rounds' | 'orders';
 type DashboardOrder = DashboardState['orders'][number];
 type DashboardFill = DashboardState['fills'][number];
@@ -99,7 +100,7 @@ const ROUND_PAGE_SIZE = 20;
 const ORDER_PAGE_SIZE = 25;
 const DAILY_PAGE_SIZE = 1;
 const LOG_PAGE_SIZE = 75;
-const TAB_TYPES: TabType[] = ['terminal', 'portfolio', 'orderbooks', 'activity', 'strategy', 'logs'];
+const TAB_TYPES: TabType[] = ['terminal', 'portfolio', 'orderbooks', 'activity', 'simulation', 'strategy', 'logs'];
 const STATS_WINDOW_MS = 24 * 60 * 60 * 1000;
 const SINGLE_FILL_TARGET_RATE = 0.18;
 const SINGLE_FILL_EXPOSURE_EPSILON = 0.01;
@@ -125,6 +126,65 @@ type ExecutionStats = {
   singleWinRate: number | null;
   targetRate: number;
 };
+
+type TouchSimAggregateRow = {
+  asset?: string;
+  price: number;
+  rounds: number;
+  paired: number;
+  single: number;
+  none: number;
+  pairedRate: number | null;
+  singleRate: number | null;
+  noneRate: number | null;
+  breakevenSingleRate: number | null;
+  estimatedEvPerShare: number;
+};
+
+type TouchSimSummary = {
+  ok: boolean;
+  message?: string;
+  model?: string;
+  generatedAt?: string;
+  summaryPath?: string;
+  config?: {
+    assets: string[];
+    interval: string;
+    minPrice: number;
+    maxPrice: number;
+    step: number;
+    priceLevels: number[];
+  };
+  status?: {
+    websocketConnected?: boolean;
+    subscribedTokens?: number;
+    activeRounds?: number;
+    completedRounds?: number;
+  } | string;
+  active?: {
+    rounds: number;
+    rows: number;
+    byPrice: TouchSimAggregateRow[];
+    byAssetPrice: TouchSimAggregateRow[];
+  };
+  completed?: {
+    rounds: number;
+    rows: number;
+    byPrice: TouchSimAggregateRow[];
+    byAssetPrice: TouchSimAggregateRow[];
+  };
+  recentRounds?: Array<{
+    asset: string;
+    slug: string;
+    title: string;
+    startAt: string;
+    endAt: string;
+    finalized: boolean;
+    levels: Array<{ price: number; outcome: 'paired' | 'single' | 'none'; yesTouched: boolean; noTouched: boolean }>;
+  }>;
+};
+
+type TouchOutcome = 'paired' | 'single' | 'none';
 
 function isTabType(value: string | null): value is TabType {
   return TAB_TYPES.includes(value as TabType);
@@ -183,6 +243,24 @@ function formatSignedMoney(value: number): string {
 
 function formatPercentValue(value: number | null | undefined): string {
   return value == null || !Number.isFinite(value) ? 'n/a' : `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`;
+}
+
+function formatRate(value: number | null | undefined): string {
+  return value == null || !Number.isFinite(value) ? 'n/a' : `${(value * 100).toFixed(1)}%`;
+}
+
+function formatPriceCents(value: number | null | undefined): string {
+  return value == null || !Number.isFinite(value) ? 'n/a' : `${Math.round(value * 100)}c`;
+}
+
+function formatEv(value: number | null | undefined): string {
+  return value == null || !Number.isFinite(value) ? 'n/a' : `${value >= 0 ? '+' : ''}${value.toFixed(3)}`;
+}
+
+function touchOutcomeTone(outcome: TouchOutcome): 'good' | 'warn' | 'neutral' {
+  if (outcome === 'paired') return 'good';
+  if (outcome === 'single') return 'warn';
+  return 'neutral';
 }
 
 function positionValue(position: DashboardSnapshot['positions'][number]): number {
@@ -306,15 +384,18 @@ function roundDurationMsForProfile(profileId: string | undefined): number {
 function derivedRoundTitle(roundId: string, profileId?: string): string {
   const startMs = roundStartTime(roundId);
   if (!startMs) return roundId;
-  const asset = profileId?.startsWith('eth-') ? 'Ethereum' : profileId?.startsWith('sol-') ? 'Solana' : 'Bitcoin';
+  const asset = assetNameForProfile(profileId);
   return `${asset} Up or Down - ${formatEtRange(startMs, roundDurationMsForProfile(profileId))}`;
 }
 
-type AssetKey = 'btc' | 'eth' | 'sol';
+type AssetKey = 'btc' | 'eth' | 'sol' | 'doge' | 'xrp' | 'hype';
 
 function assetKeyForProfile(profileId?: string): AssetKey {
   if (profileId?.startsWith('eth-')) return 'eth';
   if (profileId?.startsWith('sol-')) return 'sol';
+  if (profileId?.startsWith('doge-')) return 'doge';
+  if (profileId?.startsWith('xrp-')) return 'xrp';
+  if (profileId?.startsWith('hype-')) return 'hype';
   return 'btc';
 }
 
@@ -322,6 +403,9 @@ function assetNameForProfile(profileId?: string): string {
   const asset = assetKeyForProfile(profileId);
   if (asset === 'eth') return 'Ethereum';
   if (asset === 'sol') return 'Solana';
+  if (asset === 'doge') return 'Dogecoin';
+  if (asset === 'xrp') return 'XRP';
+  if (asset === 'hype') return 'Hyperliquid';
   return 'Bitcoin';
 }
 
@@ -668,6 +752,8 @@ export function App() {
   const [autoRefreshing, setAutoRefreshing] = React.useState(false);
   const [lastRefreshAt, setLastRefreshAt] = React.useState<string | null>(null);
   const [nowMs, setNowMs] = React.useState(() => Date.now());
+  const [touchSim, setTouchSim] = React.useState<TouchSimSummary | null>(null);
+  const [touchSimError, setTouchSimError] = React.useState<string | null>(null);
   
   // Navigation Tab State
   const [activeTab, setActiveTab] = React.useState<TabType>(() => tabFromUrl());
@@ -698,11 +784,26 @@ export function App() {
     }
   }, []);
 
+  const loadTouchSim = React.useCallback(async () => {
+    try {
+      setTouchSim(await api<TouchSimSummary>('/api/research/pm5m-touch/summary'));
+      setTouchSimError(null);
+    } catch (err) {
+      setTouchSimError(err instanceof Error ? err.message : String(err));
+    }
+  }, []);
+
   React.useEffect(() => {
     void load();
     const timer = setInterval(() => void load(true), DASHBOARD_REFRESH_MS);
     return () => clearInterval(timer);
   }, [load]);
+
+  React.useEffect(() => {
+    void loadTouchSim();
+    const timer = setInterval(() => void loadTouchSim(), DASHBOARD_REFRESH_MS);
+    return () => clearInterval(timer);
+  }, [loadTouchSim]);
 
   React.useEffect(() => {
     const timer = setInterval(() => setNowMs(Date.now()), 1000);
@@ -978,6 +1079,20 @@ export function App() {
       cooldownActive: itemCooldownActive,
     };
   });
+  const touchSimStatus = typeof touchSim?.status === 'object' ? touchSim.status : undefined;
+  const touchSimStatusLabel = typeof touchSim?.status === 'string'
+    ? touchSim.status
+    : touchSimStatus?.websocketConnected
+      ? 'recording'
+      : touchSim?.ok
+        ? 'waiting'
+        : 'unavailable';
+  const touchCompletedByPrice = touchSim?.completed?.byPrice ?? [];
+  const touchCompletedByAssetPrice = touchSim?.completed?.byAssetPrice ?? [];
+  const touchRecentRounds = touchSim?.recentRounds ?? [];
+  const touchCommand = 'npm run research:pm5m-touch -- --assets btc,eth,sol,doge,xrp,hype --min-price 0.29 --max-price 0.49';
+  const touchGeneratedAtMs = touchSim?.generatedAt ? new Date(touchSim.generatedAt).getTime() : 0;
+  const touchGeneratedLabel = touchGeneratedAtMs ? formatRelativeAge(touchGeneratedAtMs, nowMs) : 'not generated';
 
   return (
     <Shell>
@@ -1003,6 +1118,9 @@ export function App() {
 	          </button>
           <button className={`tabBtn ${activeTab === 'activity' ? 'active' : ''}`} onClick={() => setActiveTab('activity')}>
             <History size={14} /> Activity & PnL
+          </button>
+          <button className={`tabBtn ${activeTab === 'simulation' ? 'active' : ''}`} onClick={() => setActiveTab('simulation')}>
+            <BarChart3 size={14} /> Simulation
           </button>
           <button className={`tabBtn ${activeTab === 'strategy' ? 'active' : ''}`} onClick={() => setActiveTab('strategy')}>
             <Cpu size={14} /> Strategy Rules
@@ -1810,6 +1928,159 @@ export function App() {
               )}
             </div>
 
+          </div>
+        )}
+
+        {activeTab === 'simulation' && (
+          <div className="simulationWorkspace">
+            <section className="panel simulationPanel">
+              <div className="sectionHeader">
+                <div>
+                  <span className="sectionKicker">Research Recorder</span>
+                  <h2>5m Touch-Fill Simulation</h2>
+                </div>
+                <Badge tone={touchSim?.ok ? (touchSimStatus?.websocketConnected ? 'good' : 'warn') : 'neutral'}>
+                  {touchSimStatusLabel}
+                </Badge>
+              </div>
+
+              <div className="listScopeBar">
+                <span>{touchSim?.model || 'ask-touch-fill: best ask <= target price means simulated fill'}</span>
+                <strong>{touchSim?.config?.assets?.join(', ') || 'btc, eth, sol, doge, xrp, hype'}</strong>
+                <strong>{touchSim?.config ? `${formatPriceCents(touchSim.config.minPrice)}-${formatPriceCents(touchSim.config.maxPrice)}` : '29c-49c'}</strong>
+                <strong>updated {touchGeneratedLabel}</strong>
+              </div>
+
+              {touchSimError ? (
+                <div className="empty simulationEmpty">
+                  <AlertTriangle size={22} className="fail" />
+                  <p className="emptyText">{touchSimError}</p>
+                </div>
+              ) : !touchSim?.ok ? (
+                <div className="simulationStartState">
+                  <div>
+                    <span className="sectionKicker">No summary file</span>
+                    <strong>{touchSim?.message || 'Start the independent recorder to populate this tab.'}</strong>
+                    <p>The recorder writes ignored files under data-lab and does not import or mutate bot runtime state.</p>
+                  </div>
+                  <code>{touchCommand}</code>
+                </div>
+              ) : (
+                <>
+                  <div className="simulationMetricGrid">
+                    <DecisionMetric
+                      label="WebSocket"
+                      value={touchSimStatus?.websocketConnected ? 'CONNECTED' : 'WAITING'}
+                      detail={`${touchSimStatus?.subscribedTokens ?? 0} subscribed token ids`}
+                      tone={touchSimStatus?.websocketConnected ? 'good' : 'warn'}
+                    />
+                    <DecisionMetric
+                      label="Active rounds"
+                      value={String(touchSimStatus?.activeRounds ?? touchSim.active?.rounds ?? 0)}
+                      detail={`${touchSim.active?.rows ?? 0} active price rows`}
+                      tone={(touchSimStatus?.activeRounds ?? touchSim.active?.rounds ?? 0) > 0 ? 'good' : 'neutral'}
+                    />
+                    <DecisionMetric
+                      label="Completed rounds"
+                      value={String(touchSimStatus?.completedRounds ?? touchSim.completed?.rounds ?? 0)}
+                      detail={`${touchCompletedByPrice.length} price levels`}
+                      tone={(touchSimStatus?.completedRounds ?? touchSim.completed?.rounds ?? 0) > 0 ? 'good' : 'warn'}
+                    />
+                    <DecisionMetric
+                      label="Sample scope"
+                      value={`${touchSim.config?.assets.length ?? 0} assets`}
+                      detail={`${touchSim.config?.priceLevels.length ?? 0} levels / ${touchSim.config?.interval ?? '5m'}`}
+                      tone="neutral"
+                    />
+                  </div>
+
+                  <section className="simulationSection">
+                    <div className="sectionHeader compact">
+                      <div>
+                        <span className="sectionKicker">Completed rounds</span>
+                        <h3>Price-Level Outcome Rates</h3>
+                      </div>
+                      <span className="panelSubTitle">{touchSim.completed?.rows ?? 0} finalized rows</span>
+                    </div>
+                    {touchCompletedByPrice.length > 0 ? (
+                      <DataTable headers={['Price', 'Rounds', 'Paired', 'Single', 'None', 'Break-even single', 'EV/share']}>
+                        {touchCompletedByPrice.map((row) => (
+                          <tr key={`price-${row.price}`}>
+                            <td className="mono">{formatPriceCents(row.price)}</td>
+                            <td className="mono">{row.rounds}</td>
+                            <td><Badge tone="good">{row.paired} / {formatRate(row.pairedRate)}</Badge></td>
+                            <td><Badge tone={row.singleRate != null && row.breakevenSingleRate != null && row.singleRate <= row.breakevenSingleRate ? 'good' : 'warn'}>{row.single} / {formatRate(row.singleRate)}</Badge></td>
+                            <td className="mono">{row.none} / {formatRate(row.noneRate)}</td>
+                            <td className="mono">{formatRate(row.breakevenSingleRate)}</td>
+                            <td className={`mono ${row.estimatedEvPerShare >= 0 ? 'pass' : 'fail'}`}>{formatEv(row.estimatedEvPerShare)}</td>
+                          </tr>
+                        ))}
+                      </DataTable>
+                    ) : (
+                      <div className="opsEmptyState">Waiting for at least one completed 5m round.</div>
+                    )}
+                  </section>
+
+                  <section className="simulationSection">
+                    <div className="sectionHeader compact">
+                      <div>
+                        <span className="sectionKicker">Asset split</span>
+                        <h3>Asset x Price Matrix</h3>
+                      </div>
+                      <span className="panelSubTitle">{touchCompletedByAssetPrice.length} rows</span>
+                    </div>
+                    {touchCompletedByAssetPrice.length > 0 ? (
+                      <DataTable headers={['Asset', 'Price', 'Rounds', 'Paired rate', 'Single rate', 'Break-even', 'EV/share']}>
+                        {touchCompletedByAssetPrice.slice(0, 80).map((row) => (
+                          <tr key={`${row.asset}-${row.price}`}>
+                            <td><AssetLabel profileId={`${row.asset || 'btc'}-5m`} label={(row.asset || 'unknown').toUpperCase()} /></td>
+                            <td className="mono">{formatPriceCents(row.price)}</td>
+                            <td className="mono">{row.rounds}</td>
+                            <td><Badge tone="good">{formatRate(row.pairedRate)}</Badge></td>
+                            <td><Badge tone={row.singleRate != null && row.breakevenSingleRate != null && row.singleRate <= row.breakevenSingleRate ? 'good' : 'warn'}>{formatRate(row.singleRate)}</Badge></td>
+                            <td className="mono">{formatRate(row.breakevenSingleRate)}</td>
+                            <td className={`mono ${row.estimatedEvPerShare >= 0 ? 'pass' : 'fail'}`}>{formatEv(row.estimatedEvPerShare)}</td>
+                          </tr>
+                        ))}
+                      </DataTable>
+                    ) : (
+                      <div className="opsEmptyState">Asset-level rows will appear after completed rounds are finalized.</div>
+                    )}
+                  </section>
+
+                  {touchRecentRounds.length > 0 && (
+                    <section className="simulationSection">
+                      <div className="sectionHeader compact">
+                        <div>
+                          <span className="sectionKicker">Recent markets</span>
+                          <h3>Round Outcome Strip</h3>
+                        </div>
+                      </div>
+                      <div className="touchRecentGrid">
+                        {touchRecentRounds.slice(0, 8).map((round) => (
+                          <div key={round.slug} className="touchRoundCard">
+                            <div className="touchRoundHeader">
+                              <AssetLabel profileId={`${round.asset}-5m`} label={round.asset.toUpperCase()} size="sm" />
+                              <Badge tone={round.finalized ? 'neutral' : 'warn'}>{round.finalized ? 'final' : 'active'}</Badge>
+                            </div>
+                            <strong>{round.title || round.slug}</strong>
+                            <span className="mutedBlock">{formatEtTime(round.startAt)} - {formatEtTime(round.endAt)}</span>
+                            <div className="touchOutcomeStrip">
+                              {round.levels.map((level) => (
+                                <span key={`${round.slug}-${level.price}`} className={`touchOutcomePill ${level.outcome}`} title={`YES ${level.yesTouched ? 'touched' : 'missed'} / NO ${level.noTouched ? 'touched' : 'missed'}`}>
+                                  <em>{formatPriceCents(level.price)}</em>
+                                  <Badge tone={touchOutcomeTone(level.outcome)}>{level.outcome}</Badge>
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+                  )}
+                </>
+              )}
+            </section>
           </div>
         )}
 

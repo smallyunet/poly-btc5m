@@ -47,6 +47,21 @@ Open the dashboard at http://localhost:8788.
 
 The production default mode is `EXECUTION_MODE=live`. In monitor mode the worker records local order intents but does not post CLOB orders.
 
+## Independent 5m Touch Simulator
+
+Run the standalone recorder in a separate shell when you want fresh paired/single
+touch-fill statistics without changing bot execution:
+
+```bash
+npm run research:pm5m-touch -- --assets btc,eth,sol,doge,xrp,hype --min-price 0.29 --max-price 0.49
+```
+
+The recorder only uses Gamma HTTP and the Polymarket CLOB market websocket. It
+does not import bot runtime code, does not place orders, and writes ignored
+research files under `data-lab/pm-5m-touch/`. The dashboard Simulation tab reads
+`data-lab/pm-5m-touch/summary.json` through a read-only API endpoint; set
+`PM5M_TOUCH_SUMMARY_PATH` if the summary file lives somewhere else.
+
 ## Runtime Model
 
 The worker runs every `BOT_TICK_MS` and produces a multi-profile `DashboardState`:

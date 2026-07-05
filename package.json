@@ -8,6 +8,7 @@
     "build": "npm run build:server && npm run build:web",
     "build:server": "tsc -p tsconfig.json",
     "build:web": "vite build --config apps/web/vite.config.ts",
+    "research:pm5m-touch": "node tools/research/pm5m-touch-recorder.mjs",
     "docker:build:prod": "sh -c 'SHA=$(git rev-parse --short HEAD); if ! git diff --quiet || ! git diff --cached --quiet; then SHA=$SHA-dirty; fi; APP_VERSION=$npm_package_version GIT_SHA=$SHA BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ) docker compose -f docker-compose.prod.yml build'",
     "start:api": "node dist/apps/api/src/main.js",
     "test": "node --import tsx --test \"packages/strategy/src/**/*.test.ts\" \"apps/api/src/**/*.test.ts\"",
