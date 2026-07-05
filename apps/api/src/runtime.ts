@@ -8,7 +8,7 @@ import { buildSingleFillProfitExitCheck, executeSingleFillProfitExits, planSingl
 import type { MarketDataService } from './marketData';
 import type { ParticipationService } from './participation';
 import type { RecurringCryptoRoundDiscovery } from './roundDiscovery';
-import type { InMemoryStore } from './store';
+import type { InMemoryStore, SingleFillCooldownRecord } from './store';
 
 export async function runAllProfilesTick(appConfig: AppConfig, store: InMemoryStore, data: MarketDataService, adapter: PolymarketAdapter, discovery: RecurringCryptoRoundDiscovery, participationService: ParticipationService): Promise<StateSnapshot[]> {
   const enabledProfiles = appConfig.marketProfiles.filter((profile) => profile.status !== 'disabled');
@@ -88,8 +88,11 @@ export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, dat
     risk,
     experimentRunStartedAt: classicActive ? undefined : store.getExperimentRunStartedAt(),
   });
-  await reconcileFills(appConfig, adapter, store, roundSnapshot, tokenLabels, diagnostics, profile);
-  await reconcileTrackedOrders(appConfig, adapter, store, diagnostics, profile);
+  const fillCooldowns = await reconcileFills(appConfig, adapter, store, roundSnapshot, tokenLabels, diagnostics, profile);
+  const orderCooldowns = await reconcileTrackedOrders(appConfig, adapter, store, diagnostics, profile);
+  const crossProfileRiskDiagnostics = classicActive
+    ? await executeCrossProfileSingleFillRisk(appConfig, store, data, adapter, [...fillCooldowns, ...orderCooldowns])
+    : [];
   const maturedExperimentStop = appConfig.experimentStopOnSingle ? store.maybeStopExperimentOnSingle([]) : null;
   if (maturedExperimentStop) {
     store.recordRuntimeLog({
@@ -118,7 +121,7 @@ export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, dat
   const profitExitCheck = classicActive ? buildCurrentRoundProfitExitCheck(appConfig, store, snapshot, [...orderbooks, ...hedgeOrderbooks]) : disabledClassicCheck(snapshot, 'UPDOWN_SINGLE_FILL_PROFIT_EXIT', 'Up/Down Single-Fill Profit Exit', 'Disabled while experimental profile is active.');
   await reconcileSettlements(appConfig, store, diagnostics, profile);
   maybeRecordEstimatedSettlement(store, snapshot, profile);
-  const finalSnapshot = { ...snapshot, diagnostics: [...diagnostics, ...entry.diagnostics, ...executionDiagnostics, ...hedgeDiagnostics, ...profitExitDiagnostics] };
+  const finalSnapshot = { ...snapshot, diagnostics: [...diagnostics, ...entry.diagnostics, ...executionDiagnostics, ...crossProfileRiskDiagnostics, ...hedgeDiagnostics, ...profitExitDiagnostics] };
   store.recordSnapshot(finalSnapshot, data.status(profile, [round.yesTokenId, round.noTokenId]));
   store.recordStrategyChecks([...entry.checks, ...exit.checks, hedgeCheck, profitExitCheck].map((check) => withProfile(check, profile)), profile.id);
   return finalSnapshot;
@@ -653,8 +656,8 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-async function reconcileFills(appConfig: AppConfig, adapter: PolymarketAdapter, store: InMemoryStore, round: RoundSnapshot, tokenLabels: Map<string, 'YES' | 'NO'>, diagnostics: string[], profile: MarketProfile): Promise<void> {
-  if (!tokenLabels.size) return;
+async function reconcileFills(appConfig: AppConfig, adapter: PolymarketAdapter, store: InMemoryStore, round: RoundSnapshot, tokenLabels: Map<string, 'YES' | 'NO'>, diagnostics: string[], profile: MarketProfile): Promise<SingleFillCooldownRecord[]> {
+  if (!tokenLabels.size) return [];
   try {
     const fills = await adapter.getRecentFills({
       profileId: profile.id,
@@ -666,15 +669,16 @@ async function reconcileFills(appConfig: AppConfig, adapter: PolymarketAdapter, 
       marketTitle: round.title,
       imageUrl: round.imageUrl,
     });
-    recordFillsAndMaybeCooldown(appConfig, store, fills, profile);
+    return recordFillsAndMaybeCooldown(appConfig, store, fills, profile);
   } catch (error) {
     if (store.getRuntime().executionMode === 'live') diagnostics.push(`Fill reconciliation failed: ${error instanceof Error ? error.message : String(error)}`);
   }
+  return [];
 }
 
-async function reconcileTrackedOrders(appConfig: AppConfig, adapter: PolymarketAdapter, store: InMemoryStore, diagnostics: string[], profile: MarketProfile): Promise<void> {
+async function reconcileTrackedOrders(appConfig: AppConfig, adapter: PolymarketAdapter, store: InMemoryStore, diagnostics: string[], profile: MarketProfile): Promise<SingleFillCooldownRecord[]> {
   const orders = store.ordersNeedingReconciliation(profile.id);
-  if (!orders.length) return;
+  if (!orders.length) return [];
   try {
     const targets: FillTarget[] = orders.map((order) => ({
       profileId: order.profileId,
@@ -689,7 +693,7 @@ async function reconcileTrackedOrders(appConfig: AppConfig, adapter: PolymarketA
       clobOrderId: order.clobOrderId,
     }));
     const fills = await adapter.getRecentFillsForTargets(targets);
-    recordFillsAndMaybeCooldown(appConfig, store, fills, profile);
+    const cooldowns = recordFillsAndMaybeCooldown(appConfig, store, fills, profile);
 
     const openOrders = await adapter.getOpenOrders();
     const cancelled = store.reconcileOpenOrderStatuses(profile.id, openOrders);
@@ -700,12 +704,14 @@ async function reconcileTrackedOrders(appConfig: AppConfig, adapter: PolymarketA
         message: `Reconciled ${cancelled} stale Polymarket orders as no longer open.`,
       });
     }
+    return cooldowns;
   } catch (error) {
     if (store.getRuntime().executionMode === 'live') diagnostics.push(`Order reconciliation failed: ${error instanceof Error ? error.message : String(error)}`);
   }
+  return [];
 }
 
-function recordFillsAndMaybeCooldown(appConfig: AppConfig, store: InMemoryStore, fills: FillRecord[], profile: MarketProfile): void {
+function recordFillsAndMaybeCooldown(appConfig: AppConfig, store: InMemoryStore, fills: FillRecord[], profile: MarketProfile): SingleFillCooldownRecord[] {
   const newFills = store.recordFills(fills);
   const experimentStop = appConfig.experimentStopOnSingle ? store.maybeStopExperimentOnSingle(newFills) : null;
   if (experimentStop) {
@@ -716,7 +722,7 @@ function recordFillsAndMaybeCooldown(appConfig: AppConfig, store: InMemoryStore,
       details: experimentStop,
     });
   }
-  if (appConfig.activeStrategyProfile !== 'classic') return;
+  if (appConfig.activeStrategyProfile !== 'classic') return [];
   const cooldown = store.maybeStartSingleFillCooldown(newFills, {
     baseMs: appConfig.singleFillCooldownBaseMs,
     priceCapMs: appConfig.singleFillCooldownPriceCapMs,
@@ -725,13 +731,75 @@ function recordFillsAndMaybeCooldown(appConfig: AppConfig, store: InMemoryStore,
     secondMs: appConfig.singleFillCooldownSecondMs,
     thirdMs: appConfig.singleFillCooldownThirdMs,
   }, Date.now(), 'UPDOWN_DUAL_ENTRY', profile.id);
-  if (!cooldown) return;
+  if (!cooldown) return [];
   store.recordRuntimeLog({
     level: 'warn',
     source: 'execution',
     message: `Final single-sided fill detected on ${cooldown.roundId}; entry cooldown active until ${cooldown.expiresAt}.`,
     details: cooldown,
   });
+  return [cooldown];
+}
+
+async function executeCrossProfileSingleFillRisk(appConfig: AppConfig, store: InMemoryStore, data: MarketDataService, adapter: PolymarketAdapter, cooldowns: SingleFillCooldownRecord[]): Promise<string[]> {
+  if (!appConfig.crossProfileSingleFillRiskEnabled || !cooldowns.length) return [];
+  const sourceCooldowns = cooldowns.filter((cooldown) => {
+    const sourceProfileId = cooldown.sourceProfileId || cooldown.profileId;
+    return sourceProfileId.endsWith('-5m');
+  });
+  if (!sourceCooldowns.length) return [];
+
+  const diagnostics: string[] = [];
+  const seen = new Set<string>();
+  for (const cooldown of sourceCooldowns) {
+    const sourceProfileId = cooldown.sourceProfileId || cooldown.profileId;
+    const candidates = store.crossProfileSingleFillRiskCandidates(sourceProfileId)
+      .filter((candidate) => {
+        const key = `${candidate.profileId}:${candidate.roundId}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    if (!candidates.length) continue;
+
+    store.recordRuntimeLog({
+      level: 'warn',
+      source: 'execution',
+      message: `Cross-profile single-fill risk check triggered by ${sourceProfileId} on ${cooldown.roundId}.`,
+      details: { sourceCooldown: cooldown, candidateCount: candidates.length, candidates: candidates.map((candidate) => ({ profileId: candidate.profileId, roundId: candidate.roundId, secondsToEnd: candidate.secondsToEnd })) },
+    });
+
+    for (const candidate of candidates) {
+      const targetProfile = appConfig.marketProfiles.find((profile) => profile.id === candidate.profileId);
+      if (!targetProfile) continue;
+      const targetConfig = appConfigForProfile(appConfig, targetProfile);
+      const orderbooks = data.refreshOrderbooksForTokenIds([candidate.yesTokenId, candidate.noTokenId]);
+      const profitExitDiagnostics = await executeSingleFillProfitExits({
+        appConfig: targetConfig,
+        adapter,
+        store,
+        candidates: [candidate],
+        orderbooks,
+        ignoreTimeWindow: true,
+      });
+      diagnostics.push(...profitExitDiagnostics.map((message) => `Cross-profile risk ${candidate.profileId}: ${message}`));
+
+      const hasRecentProfitExit = store.roundOrders(candidate.profileId, candidate.roundId)
+        .some((order) => order.side === 'SELL' && order.strategy === 'UPDOWN_SINGLE_FILL_PROFIT_EXIT' && ['local', 'posted', 'partially_filled', 'filled'].includes(order.status));
+      if (hasRecentProfitExit) continue;
+
+      const hedgeDiagnostics = await executeSingleFillHedges({
+        appConfig: targetConfig,
+        adapter,
+        store,
+        candidates: [candidate],
+        orderbooks,
+        ignoreTimeWindow: true,
+      });
+      diagnostics.push(...hedgeDiagnostics.map((message) => `Cross-profile risk ${candidate.profileId}: ${message}`));
+    }
+  }
+  return diagnostics;
 }
 
 async function reconcileSettlements(appConfig: AppConfig, store: InMemoryStore, diagnostics: string[], profile: MarketProfile): Promise<void> {

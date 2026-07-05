@@ -63,7 +63,7 @@ type PersistedRuntimeState = {
   experimentStop?: ExperimentStopRecord | null;
 };
 
-type SingleFillCooldownRecord = {
+export type SingleFillCooldownRecord = {
   profileId: MarketProfileId;
   roundId: string;
   sourceProfileId?: MarketProfileId;
@@ -359,6 +359,46 @@ export class InMemoryStore {
       if (order.label === 'YES') candidate.yesTokenId = order.tokenId;
       if (order.label === 'NO') candidate.noTokenId = order.tokenId;
       byRound.set(order.roundId, candidate);
+    }
+    return [...byRound.values()].filter((candidate) => candidate.yesTokenId && candidate.noTokenId);
+  }
+
+  crossProfileSingleFillRiskCandidates(sourceProfileId: MarketProfileId, nowMs = Date.now(), strategy: StrategyId = CLASSIC_ENTRY_STRATEGY): SingleFillHedgeCandidate[] {
+    const sourceAsset = profileAsset(sourceProfileId);
+    const targetProfileIds = this.profiles
+      .filter((profile) => profile.asset === sourceAsset && profile.status !== 'disabled' && profile.id !== sourceProfileId && profile.interval !== '5m')
+      .map((profile) => profile.id);
+    if (!targetProfileIds.length) return [];
+
+    const targets = new Set(targetProfileIds);
+    const byRound = new Map<string, SingleFillHedgeCandidate>();
+    for (const order of this.orders) {
+      if (order.side !== 'BUY') continue;
+      if (!targets.has(order.profileId)) continue;
+      if (orderStrategy(order) !== strategy) continue;
+      const startMs = roundStartMs(order.roundId);
+      if (startMs == null) continue;
+      const endMs = startMs + profileDurationMs(order.profileId);
+      const secondsToEnd = (endMs - nowMs) / 1000;
+      if (nowMs < startMs || secondsToEnd <= 0) continue;
+
+      const key = profileRoundKey(order.profileId, order.roundId);
+      const existing = byRound.get(key);
+      const candidate: SingleFillHedgeCandidate = existing || {
+        roundId: order.roundId,
+        profileId: order.profileId,
+        eventSlug: order.eventSlug,
+        marketTitle: order.marketTitle,
+        imageUrl: order.imageUrl,
+        startAt: new Date(startMs).toISOString(),
+        endAt: new Date(endMs).toISOString(),
+        secondsToEnd,
+        yesTokenId: '',
+        noTokenId: '',
+      };
+      if (order.label === 'YES') candidate.yesTokenId = order.tokenId;
+      if (order.label === 'NO') candidate.noTokenId = order.tokenId;
+      byRound.set(key, candidate);
     }
     return [...byRound.values()].filter((candidate) => candidate.yesTokenId && candidate.noTokenId);
   }

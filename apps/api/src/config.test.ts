@@ -20,6 +20,7 @@ const COOLDOWN_ENV_KEYS = [
   '5M_SINGLE_FILL_COOLDOWN_BASE_MS',
   '15M_SINGLE_FILL_COOLDOWN_BASE_MS',
   '1H_SINGLE_FILL_COOLDOWN_BASE_MS',
+  'CROSS_PROFILE_SINGLE_FILL_RISK_ENABLED',
 ];
 
 test('market profile cooldown defaults use the five-minute baseline for every interval', () => {
@@ -32,6 +33,17 @@ test('market profile cooldown defaults use the five-minute baseline for every in
     assert.equal(byId.get('btc-1h')?.cooldown.baseMs, 30 * 60_000);
     assert.equal(byId.get('btc-15m')?.cooldown.priceCapMs, 60 * 60_000);
     assert.equal(byId.get('btc-1h')?.cooldown.executionMs, 2 * 60 * 60_000);
+    assert.equal(config.crossProfileSingleFillRiskEnabled, true);
+  });
+});
+
+test('cross-profile single-fill risk can be disabled by env override', () => {
+  withEnv(COOLDOWN_ENV_KEYS, {
+    CROSS_PROFILE_SINGLE_FILL_RISK_ENABLED: 'false',
+  }, () => {
+    const config = loadConfig();
+
+    assert.equal(config.crossProfileSingleFillRiskEnabled, false);
   });
 });
 

@@ -300,6 +300,31 @@ test('single-fill cooldown shared without configured profiles uses the source po
   }
 });
 
+test('cross-profile single-fill risk candidates include active same-asset long intervals only', () => {
+  const nowMs = Date.now();
+  const fifteenMinuteRound = `btc-updown-15m-${Math.floor((nowMs - 5 * 60_000) / 1000)}`;
+  const oneHourRound = `btc-updown-1h-${Math.floor((nowMs - 10 * 60_000) / 1000)}`;
+  const ethRound = `eth-updown-15m-${Math.floor((nowMs - 5 * 60_000) / 1000)}`;
+  const store = new InMemoryStore('live', 2_000, { persistencePath: false }, 'classic', undefined, [
+    marketProfile('btc-5m'),
+    marketProfile('btc-15m'),
+    marketProfile('btc-1h'),
+    { ...marketProfile('btc-15m'), id: 'eth-15m', asset: 'eth', assetSymbol: 'ETH', label: 'eth-15m', seriesSlug: 'eth-updown-15m', priceFeedSymbol: 'ETHUSDT' },
+  ]);
+
+  store.recordOrder(order(fifteenMinuteRound, 'YES', { profileId: 'btc-15m', interval: '15m' }));
+  store.recordOrder(order(fifteenMinuteRound, 'NO', { profileId: 'btc-15m', interval: '15m' }));
+  store.recordOrder(order(oneHourRound, 'YES', { profileId: 'btc-1h', interval: '1h' }));
+  store.recordOrder(order(oneHourRound, 'NO', { profileId: 'btc-1h', interval: '1h' }));
+  store.recordOrder(order(ethRound, 'YES', { profileId: 'eth-15m', asset: 'eth', interval: '15m' }));
+  store.recordOrder(order(ethRound, 'NO', { profileId: 'eth-15m', asset: 'eth', interval: '15m' }));
+
+  const candidates = store.crossProfileSingleFillRiskCandidates('btc-5m', nowMs);
+
+  assert.deepEqual(candidates.map((candidate) => candidate.profileId).sort(), ['btc-15m', 'btc-1h']);
+  assert.deepEqual(candidates.map((candidate) => candidate.roundId).sort(), [fifteenMinuteRound, oneHourRound].sort());
+});
+
 test('profile duration controls final single-fill review timing', () => {
   const nowMs = Date.now();
   const roundId = `btc-updown-15m-${Math.floor((nowMs - 7 * 60_000) / 1000)}`;

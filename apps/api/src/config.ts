@@ -78,6 +78,7 @@ export type AppConfig = {
   singleFillProfitExitMaxOrderbookAgeMs: number;
   singleFillProfitExitMinSecondsToEnd: number;
   singleFillProfitExitMaxSecondsToEnd: number;
+  crossProfileSingleFillRiskEnabled: boolean;
   experimentNextRoundUpLimitPrice: number;
   experimentNextRoundDownLimitPrice: number;
   experimentNextRoundSharesPerSide: number;
@@ -168,6 +169,7 @@ export function loadConfig(): AppConfig {
     singleFillProfitExitMaxOrderbookAgeMs: parsePositiveInteger(process.env.SINGLE_FILL_PROFIT_EXIT_MAX_ORDERBOOK_AGE_MS, 1_000),
     singleFillProfitExitMinSecondsToEnd: parsePositiveInteger(process.env.SINGLE_FILL_PROFIT_EXIT_MIN_SECONDS_TO_END, 20),
     singleFillProfitExitMaxSecondsToEnd: parsePositiveInteger(process.env.SINGLE_FILL_PROFIT_EXIT_MAX_SECONDS_TO_END, 240),
+    crossProfileSingleFillRiskEnabled: booleanEnv('CROSS_PROFILE_SINGLE_FILL_RISK_ENABLED', true),
     experimentNextRoundUpLimitPrice: numberEnv('EXPERIMENT_NEXT_ROUND_UP_LIMIT_PRICE', 0.5),
     experimentNextRoundDownLimitPrice: numberEnv('EXPERIMENT_NEXT_ROUND_DOWN_LIMIT_PRICE', 0.49),
     experimentNextRoundSharesPerSide: numberEnv('EXPERIMENT_NEXT_ROUND_SHARES_PER_SIDE', orderSharesPerSide),

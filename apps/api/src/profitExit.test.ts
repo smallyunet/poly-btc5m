@@ -47,6 +47,29 @@ test('blocks profit exit when the live bid is below the configured profit rate',
   assert.deepEqual(plan, { ok: false, reason: 'EXIT_PROFIT_RATE_BELOW_MIN' });
 });
 
+test('cross-profile risk trigger can evaluate profit exit before the normal exit window', () => {
+  const plan = planSingleFillProfitExit({
+    candidate: {
+      ...candidate(),
+      endAt: '2026-06-26T00:15:00.000Z',
+      secondsToEnd: 780,
+    },
+    orders: [
+      order('YES', 'BUY', { filledSize: 10, avgFillPrice: 0.45, status: 'filled' }),
+      order('NO', 'BUY', { filledSize: 0, status: 'posted', clobOrderId: 'no-open' }),
+    ],
+    orderbooks: [quote('yes-token', 0.5)],
+    appConfig: config(),
+    nowMs,
+    ignoreTimeWindow: true,
+  });
+
+  assert.equal(plan.ok, true);
+  if (!plan.ok) return;
+  assert.equal(plan.intent.side, 'SELL');
+  assert.match(plan.intent.reason, /Cross-profile single-fill risk exit/);
+});
+
 test('blocks profit exit after the filled side has already been sold', () => {
   const plan = planSingleFillProfitExit({
     candidate: candidate(),
@@ -148,6 +171,98 @@ test('does not execute another profit exit after a prior exit sell fill', async 
 
   assert.deepEqual(diagnostics, []);
   assert.equal(balanceReads, 0);
+});
+
+test('does not execute another profit exit while a prior exit order is still non-failed', async () => {
+  const now = Date.now();
+  const activeCandidate = {
+    ...candidate(),
+    startAt: new Date(now - 3 * 60_000).toISOString(),
+    endAt: new Date(now + 90_000).toISOString(),
+    secondsToEnd: 90,
+  };
+  const store = new InMemoryStore('live', 2_000, { persistencePath: false });
+  store.recordOrder(order('YES', 'BUY', { filledSize: 10, avgFillPrice: 0.45, status: 'filled' }));
+  store.recordOrder(order('YES', 'SELL', {
+    filledSize: 0,
+    status: 'posted',
+    strategy: 'UPDOWN_SINGLE_FILL_PROFIT_EXIT',
+    createdAt: new Date(now - 30_000).toISOString(),
+  }));
+  store.recordOrder(order('NO', 'BUY', { filledSize: 0, status: 'posted', clobOrderId: 'no-open' }));
+  let postAttempts = 0;
+  const adapter = {
+    async getRecentFillsForTargets() {
+      return [];
+    },
+    async cancelOrders() {
+      return {};
+    },
+    async getAvailableShares() {
+      return 10;
+    },
+    async executeLimitIntent() {
+      postAttempts += 1;
+      throw new Error('should not post duplicate profit exit');
+    },
+  } as unknown as PolymarketAdapter;
+
+  const diagnostics = await executeSingleFillProfitExits({
+    appConfig: { ...config(), executionMode: 'live', ownerPrivateKey: '0xabc', depositWallet: '0xwallet' },
+    adapter,
+    store,
+    candidates: [activeCandidate],
+    orderbooks: [{ ...quote('yes-token', 0.6), updatedAt: new Date().toISOString() }],
+  });
+
+  assert.deepEqual(diagnostics, []);
+  assert.equal(postAttempts, 0);
+});
+
+test('does not execute profit exit while a hedge buy order is still non-failed', async () => {
+  const now = Date.now();
+  const activeCandidate = {
+    ...candidate(),
+    startAt: new Date(now - 3 * 60_000).toISOString(),
+    endAt: new Date(now + 90_000).toISOString(),
+    secondsToEnd: 90,
+  };
+  const store = new InMemoryStore('live', 2_000, { persistencePath: false });
+  store.recordOrder(order('YES', 'BUY', { filledSize: 10, avgFillPrice: 0.45, status: 'filled' }));
+  store.recordOrder(order('NO', 'BUY', { filledSize: 0, status: 'posted', clobOrderId: 'no-open' }));
+  store.recordOrder(order('NO', 'BUY', {
+    filledSize: 0,
+    status: 'posted',
+    strategy: 'UPDOWN_SINGLE_FILL_HEDGE',
+    createdAt: new Date(now - 30_000).toISOString(),
+  }));
+  let postAttempts = 0;
+  const adapter = {
+    async getRecentFillsForTargets() {
+      return [];
+    },
+    async cancelOrders() {
+      return {};
+    },
+    async getAvailableShares() {
+      return 10;
+    },
+    async executeLimitIntent() {
+      postAttempts += 1;
+      throw new Error('should not sell while hedge is pending');
+    },
+  } as unknown as PolymarketAdapter;
+
+  const diagnostics = await executeSingleFillProfitExits({
+    appConfig: { ...config(), executionMode: 'live', ownerPrivateKey: '0xabc', depositWallet: '0xwallet' },
+    adapter,
+    store,
+    candidates: [activeCandidate],
+    orderbooks: [{ ...quote('yes-token', 0.6), updatedAt: new Date().toISOString() }],
+  });
+
+  assert.deepEqual(diagnostics, []);
+  assert.equal(postAttempts, 0);
 });
 
 function config(): AppConfig {

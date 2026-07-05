@@ -128,6 +128,28 @@ test('blocks early hedge when pair cost is above the tighter early cap', () => {
   assert.deepEqual(plan, { ok: false, reason: 'EARLY_HEDGE_PAIR_COST_ABOVE_CAP' });
 });
 
+test('cross-profile risk trigger can evaluate strict hedge before the normal hedge window', () => {
+  const plan = planSingleFillHedge({
+    candidate: candidate({
+      endAt: '2026-06-26T00:15:00.000Z',
+      secondsToEnd: 780,
+    }),
+    orders: [
+      order('YES', { filledSize: 10, avgFillPrice: 0.44, status: 'filled' }),
+      order('NO', { filledSize: 0, status: 'posted', clobOrderId: 'no-open' }),
+    ],
+    orderbooks: [quote('no-token', 0.57)],
+    appConfig: config(),
+    nowMs,
+    ignoreTimeWindow: true,
+  });
+
+  assert.equal(plan.ok, true);
+  if (!plan.ok) return;
+  assert.equal(plan.hedgeMode, 'early');
+  assert.match(plan.intent.reason, /Cross-profile single-fill risk hedge/);
+});
+
 test('allows early hedge only when it can lock near breakeven', () => {
   const plan = planSingleFillHedge({
     candidate: candidate(),
@@ -243,6 +265,69 @@ test('pauses hedge while a profit-exit sell order is awaiting reconciliation', (
   });
 
   assert.deepEqual(plan, { ok: false, reason: 'PROFIT_EXIT_ORDER_ACTIVE' });
+});
+
+test('does not execute another hedge while a prior hedge order is still non-failed', async () => {
+  const now = Date.now();
+  const activeCandidate = candidate({
+    startAt: new Date(now - 4 * 60_000).toISOString(),
+    endAt: new Date(now + 25_000).toISOString(),
+    secondsToEnd: 25,
+  });
+  const store = new InMemoryStore('live', 2_000, { persistencePath: false });
+  store.recordOrder(order('YES', {
+    id: 'classic-yes-buy',
+    roundId: activeCandidate.roundId,
+    eventSlug: activeCandidate.eventSlug,
+    strategy: 'UPDOWN_DUAL_ENTRY',
+    filledSize: 10,
+    avgFillPrice: 0.44,
+    status: 'filled',
+  }));
+  store.recordOrder(order('NO', {
+    id: 'classic-no-buy',
+    roundId: activeCandidate.roundId,
+    eventSlug: activeCandidate.eventSlug,
+    strategy: 'UPDOWN_DUAL_ENTRY',
+    filledSize: 0,
+    status: 'cancelled',
+    clobOrderId: 'no-cancelled',
+  }));
+  store.recordOrder(order('NO', {
+    id: 'hedge-no-buy',
+    intentId: 'hedge-intent',
+    roundId: activeCandidate.roundId,
+    eventSlug: activeCandidate.eventSlug,
+    strategy: 'UPDOWN_SINGLE_FILL_HEDGE',
+    filledSize: 0,
+    status: 'posted',
+    createdAt: new Date(now - 2 * 60_000).toISOString(),
+  }));
+  let postAttempts = 0;
+  const adapter = {
+    async getRecentFillsForTargets() {
+      return [];
+    },
+    async cancelOrders() {
+      return {};
+    },
+    async executeLimitIntent() {
+      postAttempts += 1;
+      throw new Error('should not post duplicate hedge');
+    },
+  } as unknown as PolymarketAdapter;
+
+  const diagnostics = await executeSingleFillHedges({
+    appConfig: { ...config(), executionMode: 'live', ownerPrivateKey: '0xabc', depositWallet: '0xwallet' },
+    adapter,
+    store,
+    candidates: [activeCandidate],
+    orderbooks: [{ ...quote('no-token', 0.59), updatedAt: new Date().toISOString() }],
+  });
+
+  assert.deepEqual(diagnostics, []);
+  assert.equal(postAttempts, 0);
+  assert.equal(store.getSingleFillHedgeOutcome(activeCandidate.profileId, activeCandidate.roundId)?.reason, 'HEDGE_ORDER_EXISTS');
 });
 
 test('blocks a marketable hedge below the Polymarket minimum notional', () => {
@@ -411,6 +496,7 @@ function config(): AppConfig {
     singleFillProfitExitMaxOrderbookAgeMs: 1_000,
     singleFillProfitExitMinSecondsToEnd: 20,
     singleFillProfitExitMaxSecondsToEnd: 240,
+    crossProfileSingleFillRiskEnabled: true,
     marketConfig: {
       seriesSlug: 'btc-updown-5m',
       title: 'Polymarket BTC 5m',

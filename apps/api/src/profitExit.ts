@@ -13,6 +13,7 @@ type ExecuteProfitExitParams = {
   store: InMemoryStore;
   candidates: SingleFillProfitExitCandidate[];
   orderbooks: OrderBookQuote[];
+  ignoreTimeWindow?: boolean;
 };
 
 const PROFIT_EXIT_STRATEGY = 'UPDOWN_SINGLE_FILL_PROFIT_EXIT';
@@ -40,11 +41,12 @@ export function planSingleFillProfitExit(params: {
   orderbooks: OrderBookQuote[];
   appConfig: AppConfig;
   nowMs?: number;
+  ignoreTimeWindow?: boolean;
 }): ProfitExitPlan {
   const nowMs = params.nowMs ?? Date.now();
   const secondsToEnd = (new Date(params.candidate.endAt).getTime() - nowMs) / 1000;
   if (!params.appConfig.singleFillProfitExitEnabled) return { ok: false, reason: 'PROFIT_EXIT_DISABLED' };
-  if (secondsToEnd > params.appConfig.singleFillProfitExitMaxSecondsToEnd) return { ok: false, reason: 'NOT_IN_PROFIT_EXIT_WINDOW' };
+  if (!params.ignoreTimeWindow && secondsToEnd > params.appConfig.singleFillProfitExitMaxSecondsToEnd) return { ok: false, reason: 'NOT_IN_PROFIT_EXIT_WINDOW' };
   if (secondsToEnd <= params.appConfig.singleFillProfitExitMinSecondsToEnd) return { ok: false, reason: 'PROFIT_EXIT_TOO_CLOSE_TO_EXPIRY' };
 
   const yes = netExposure(params.orders, 'YES');
@@ -86,7 +88,9 @@ export function planSingleFillProfitExit(params: {
     orderType: 'LIMIT',
     limitPrice,
     shares: roundShares(exit.netShares),
-    reason: `Single-fill profit exit for ${params.candidate.roundId}: sell filled ${exitLabel} side with capped FAK limit.`,
+    reason: params.ignoreTimeWindow
+      ? `Cross-profile single-fill risk exit for ${params.candidate.roundId}: sell filled ${exitLabel} side with capped FAK limit.`
+      : `Single-fill profit exit for ${params.candidate.roundId}: sell filled ${exitLabel} side with capped FAK limit.`,
     status: 'generated',
     ttlSeconds: 5,
     createdAt: new Date(nowMs).toISOString(),
@@ -153,7 +157,7 @@ export function buildSingleFillProfitExitCheck(params: {
 async function executeOneProfitExit(params: ExecuteProfitExitParams, candidate: SingleFillProfitExitCandidate): Promise<string | null> {
   const entryOrders = params.store.roundOrders(candidate.profileId, candidate.roundId, CLASSIC_ENTRY_STRATEGY);
   await reconcileCandidateFills(params, entryOrders);
-  const plan = planSingleFillProfitExit({ candidate, orders: profitExitExposureOrders(params.store.roundOrders(candidate.profileId, candidate.roundId)), orderbooks: params.orderbooks, appConfig: params.appConfig });
+  const plan = planSingleFillProfitExit({ candidate, orders: profitExitExposureOrders(params.store.roundOrders(candidate.profileId, candidate.roundId)), orderbooks: params.orderbooks, appConfig: params.appConfig, ignoreTimeWindow: params.ignoreTimeWindow });
   if (!plan.ok) {
     if (!benignProfitExitReason(plan.reason)) {
       params.store.recordRuntimeLog({ level: 'warn', source: 'execution', message: `Single-fill profit exit skipped for ${candidate.roundId}: ${plan.reason}.` });
@@ -162,6 +166,9 @@ async function executeOneProfitExit(params: ExecuteProfitExitParams, candidate: 
   }
 
   const executionKey = [plan.intent.profileId, plan.intent.roundId, plan.intent.strategy, plan.intent.tokenId, plan.intent.side].filter(Boolean).join(':');
+  const currentRoundOrders = params.store.roundOrders(candidate.profileId, candidate.roundId);
+  if (hasExistingProfitExitOrder(currentRoundOrders, plan.intent.tokenId, plan.intent.side)) return null;
+  if (hasExistingHedgeOrder(currentRoundOrders)) return null;
   if (params.store.hasRecentOrder(executionKey, plan.intent.ttlSeconds * 1000)) return null;
   if (params.store.hasRecentFailedOrder(executionKey, FAILED_EXIT_COOLDOWN_MS)) return null;
 
@@ -169,8 +176,11 @@ async function executeOneProfitExit(params: ExecuteProfitExitParams, candidate: 
   if (!cancelResult.ok) return `Single-fill profit exit blocked for ${plan.exitLabel}: ${cancelResult.reason}.`;
 
   await reconcileCandidateFills(params, entryOrders);
-  const finalPlan = planSingleFillProfitExit({ candidate, orders: profitExitExposureOrders(params.store.roundOrders(candidate.profileId, candidate.roundId)), orderbooks: params.orderbooks, appConfig: params.appConfig });
+  const finalPlan = planSingleFillProfitExit({ candidate, orders: profitExitExposureOrders(params.store.roundOrders(candidate.profileId, candidate.roundId)), orderbooks: params.orderbooks, appConfig: params.appConfig, ignoreTimeWindow: params.ignoreTimeWindow });
   if (!finalPlan.ok) return null;
+  const finalRoundOrders = params.store.roundOrders(candidate.profileId, candidate.roundId);
+  if (hasExistingProfitExitOrder(finalRoundOrders, finalPlan.intent.tokenId, finalPlan.intent.side)) return null;
+  if (hasExistingHedgeOrder(finalRoundOrders)) return null;
   params.store.recordIntents([finalPlan.intent]);
 
   if (params.store.getRuntime().executionMode !== 'live') {
@@ -370,6 +380,25 @@ function localExitOrder(candidate: SingleFillProfitExitCandidate, intent: TradeI
     createdAt: new Date().toISOString(),
     rawResponse: { monitor: true },
   };
+}
+
+function hasExistingProfitExitOrder(orders: OrderRecord[], tokenId: string, side: TradeIntent['side']): boolean {
+  return orders.some((order) => (
+    order.strategy === PROFIT_EXIT_STRATEGY
+    && order.tokenId === tokenId
+    && order.side === side
+    && order.status !== 'failed'
+    && order.status !== 'cancelled'
+  ));
+}
+
+function hasExistingHedgeOrder(orders: OrderRecord[]): boolean {
+  return orders.some((order) => (
+    order.strategy === HEDGE_STRATEGY
+    && order.side === 'BUY'
+    && order.status !== 'failed'
+    && order.status !== 'cancelled'
+  ));
 }
 
 function condition(label: string, passed: boolean, actual: string) {
