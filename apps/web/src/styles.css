@@ -1792,6 +1792,140 @@ td.mono {
   white-space: nowrap;
 }
 
+.executionStatsPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--border-color);
+  border-left: 4px solid var(--color-success);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.62);
+  box-shadow: 0 4px 18px rgba(15, 23, 42, 0.035);
+}
+
+.executionStatsPanel.warn {
+  border-left-color: var(--color-danger);
+}
+
+.executionStatsPanel.good {
+  border-left-color: var(--color-success);
+}
+
+.executionStatsHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 14px;
+}
+
+.executionStatsHeader h3 {
+  margin: 2px 0 0;
+  color: var(--text-primary);
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+.executionStatsHeader p {
+  margin-top: 4px;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.singleRateTarget {
+  min-height: 42px;
+  padding: 7px 10px;
+  border: 1px solid rgba(37, 99, 235, 0.18);
+  border-radius: 8px;
+  background: rgba(37, 99, 235, 0.065);
+  color: var(--color-primary);
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+}
+
+.singleRateTarget span {
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.singleRateTarget strong {
+  font-family: var(--font-mono);
+  font-size: 14px;
+}
+
+.executionStatsGrid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.singleRateMeter {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.singleRateMeterTrack {
+  position: relative;
+  height: 12px;
+  overflow: hidden;
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(16, 185, 129, 0.16) 0%, rgba(16, 185, 129, 0.16) 18%, rgba(225, 29, 72, 0.1) 18%, rgba(225, 29, 72, 0.1) 100%);
+}
+
+.singleRateTargetLine {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  width: 2px;
+  background: var(--color-primary);
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.12);
+  z-index: 2;
+}
+
+.singleRateActual {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  min-width: 2px;
+  border-radius: 999px;
+  transition: width 0.2s ease-out;
+}
+
+.singleRateActual.good {
+  background: var(--color-success);
+}
+
+.singleRateActual.bad {
+  background: var(--color-danger);
+}
+
+.singleRateMeterLabels {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 8px;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.singleRateMeterLabels strong {
+  color: var(--color-primary);
+  font-weight: 800;
+}
+
+.singleRateMeterLabels span:last-child {
+  text-align: right;
+}
+
 .paginationBar {
   display: flex;
   justify-content: space-between;
@@ -2343,6 +2477,10 @@ td.mono {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
+  .executionStatsGrid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
   .terminalWorkspace {
     grid-template-columns: 1fr;
   }
@@ -2431,6 +2569,19 @@ td.mono {
   }
 
   .terminalCommandStats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .executionStatsHeader {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .singleRateTarget {
+    width: fit-content;
+  }
+
+  .executionStatsGrid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 

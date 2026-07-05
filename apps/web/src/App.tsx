@@ -10,7 +10,8 @@ import {
   Search,
   Info,
   WalletCards,
-  PieChart
+  PieChart,
+  Target
 } from 'lucide-react';
 
 import type { BotRuntimeStatus, DashboardState, RuntimeLogRecord, StrategyCheck } from '../../../packages/shared/src';
@@ -99,6 +100,31 @@ const ORDER_PAGE_SIZE = 25;
 const DAILY_PAGE_SIZE = 1;
 const LOG_PAGE_SIZE = 75;
 const TAB_TYPES: TabType[] = ['terminal', 'portfolio', 'orderbooks', 'activity', 'strategy', 'logs'];
+const STATS_WINDOW_MS = 24 * 60 * 60 * 1000;
+const SINGLE_FILL_TARGET_RATE = 0.18;
+const SINGLE_FILL_EXPOSURE_EPSILON = 0.01;
+
+type ExecutionStats = {
+  windowStart: number;
+  windowEnd: number;
+  orders: number;
+  fills: number;
+  settlements: number;
+  orderRounds: number;
+  paired: number;
+  single: number;
+  none: number;
+  pairedRate: number | null;
+  singleRate: number | null;
+  singleRateDelta: number | null;
+  pairedPnl: number;
+  singlePnl: number;
+  totalPnl: number;
+  singleWins: number;
+  singleLosses: number;
+  singleWinRate: number | null;
+  targetRate: number;
+};
 
 function isTabType(value: string | null): value is TabType {
   return TAB_TYPES.includes(value as TabType);
@@ -119,14 +145,14 @@ function syncTabToUrl(tab: TabType): void {
 }
 
 function fillStateTone(yesShares: number, noShares: number): 'good' | 'warn' | 'neutral' {
-  if (yesShares > 0 && noShares > 0) return 'good';
-  if (yesShares > 0 || noShares > 0) return 'warn';
+  if (yesShares > SINGLE_FILL_EXPOSURE_EPSILON && noShares > SINGLE_FILL_EXPOSURE_EPSILON) return 'good';
+  if (yesShares > SINGLE_FILL_EXPOSURE_EPSILON || noShares > SINGLE_FILL_EXPOSURE_EPSILON) return 'warn';
   return 'neutral';
 }
 
 function fillStateLabel(yesShares: number, noShares: number): 'paired' | 'single' | 'none' {
-  if (yesShares > 0 && noShares > 0) return 'paired';
-  if (yesShares > 0 || noShares > 0) return 'single';
+  if (yesShares > SINGLE_FILL_EXPOSURE_EPSILON && noShares > SINGLE_FILL_EXPOSURE_EPSILON) return 'paired';
+  if (yesShares > SINGLE_FILL_EXPOSURE_EPSILON || noShares > SINGLE_FILL_EXPOSURE_EPSILON) return 'single';
   return 'none';
 }
 
@@ -317,8 +343,15 @@ function AssetLabel({ profileId, label, size = 'xs' }: { profileId?: string; lab
   );
 }
 
-function toSortTime(value: string): number {
-  const time = new Date(value).getTime();
+function toSortTime(value: string | number | undefined): number {
+  if (value == null) return 0;
+  if (typeof value === 'number') return value < 1e12 ? value * 1000 : value;
+  const normalized = value.trim();
+  if (/^\d+(\.\d+)?$/.test(normalized)) {
+    const numeric = Number(normalized);
+    return numeric < 1e12 ? numeric * 1000 : numeric;
+  }
+  const time = new Date(normalized).getTime();
   return Number.isFinite(time) ? time : 0;
 }
 
@@ -375,6 +408,21 @@ function orderMarketTitle(order: DashboardOrder): string {
 function profileLabelFor(profiles: DashboardState['profiles'], profileId: string | undefined): string {
   if (!profileId) return 'Unknown';
   return profiles.find((item) => item.profile.id === profileId)?.profile.label || profileId;
+}
+
+function inferProfileIdFromRound(roundId?: string): string | undefined {
+  if (!roundId) return undefined;
+  if (roundId.includes('eth-updown-5m')) return 'eth-5m';
+  if (roundId.includes('eth-updown-15m')) return 'eth-15m';
+  if (roundId.includes('eth-updown-1h') || roundId.includes('ethereum-up-or-down')) return 'eth-1h';
+  if (roundId.includes('btc-updown-5m')) return 'btc-5m';
+  if (roundId.includes('btc-updown-15m')) return 'btc-15m';
+  if (roundId.includes('btc-updown-1h') || roundId.includes('bitcoin-up-or-down')) return 'btc-1h';
+  return undefined;
+}
+
+function recordProfileId(record: { profileId?: string; roundId?: string; eventSlug?: string }): string | undefined {
+  return record.profileId || inferProfileIdFromRound(record.roundId) || inferProfileIdFromRound(record.eventSlug);
 }
 
 function strategySourceLabel(order: DashboardOrder): string {
@@ -531,6 +579,71 @@ function buildDailyExecutionSummaries(rounds: RoundExecutionSummary[]): DailyExe
   }).sort((a, b) => b.latestTime - a.latestTime);
 }
 
+function buildExecutionStats(state: Pick<DashboardState, 'orders' | 'fills' | 'settlements'>, windowEnd: number): ExecutionStats {
+  const windowStart = windowEnd - STATS_WINDOW_MS;
+  const inWindow = (value: string | number | undefined) => {
+    const time = toSortTime(value);
+    return time >= windowStart && time <= windowEnd;
+  };
+  const orders = state.orders.filter((order) => inWindow(order.createdAt));
+  const fills = state.fills.filter((fill) => inWindow(fill.matchedAt));
+  const settlements = state.settlements.filter((settlement) => inWindow(settlement.resolvedAt));
+  const orderRounds = new Set(orders.map((order) => `${recordProfileId(order) || 'unknown'}:${order.roundId}:${order.strategy || 'UPDOWN_DUAL_ENTRY'}`));
+
+  let paired = 0;
+  let single = 0;
+  let none = 0;
+  let pairedPnl = 0;
+  let singlePnl = 0;
+  let totalPnl = 0;
+  let singleWins = 0;
+  let singleLosses = 0;
+
+  settlements.forEach((settlement) => {
+    const label = fillStateLabel(settlement.yesShares, settlement.noShares);
+    totalPnl += settlement.pnl;
+    if (label === 'paired') {
+      paired += 1;
+      pairedPnl += settlement.pnl;
+      return;
+    }
+    if (label === 'single') {
+      single += 1;
+      singlePnl += settlement.pnl;
+      const singleSide = settlement.yesShares > SINGLE_FILL_EXPOSURE_EPSILON ? 'YES' : 'NO';
+      if (settlement.winningLabel === singleSide) singleWins += 1;
+      else singleLosses += 1;
+      return;
+    }
+    none += 1;
+  });
+
+  const settledWithExposure = paired + single + none;
+  const singleRate = settledWithExposure > 0 ? single / settledWithExposure : null;
+  const pairedRate = settledWithExposure > 0 ? paired / settledWithExposure : null;
+  return {
+    windowStart,
+    windowEnd,
+    orders: orders.length,
+    fills: fills.length,
+    settlements: settlements.length,
+    orderRounds: orderRounds.size,
+    paired,
+    single,
+    none,
+    pairedRate,
+    singleRate,
+    singleRateDelta: singleRate == null ? null : singleRate - SINGLE_FILL_TARGET_RATE,
+    pairedPnl,
+    singlePnl,
+    totalPnl,
+    singleWins,
+    singleLosses,
+    singleWinRate: single > 0 ? singleWins / single : null,
+    targetRate: SINGLE_FILL_TARGET_RATE,
+  };
+}
+
 function usePaginatedRows<T>(rows: T[], pageSize: number) {
   const [page, setPage] = React.useState(1);
   const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
@@ -648,6 +761,7 @@ export function App() {
 
   const roundSummaries = React.useMemo(() => visibleState ? buildRoundExecutionSummaries(visibleState) : [], [visibleState]);
   const dailySummaries = React.useMemo(() => buildDailyExecutionSummaries(roundSummaries), [roundSummaries]);
+  const executionStats = React.useMemo(() => visibleState ? buildExecutionStats(visibleState, nowMs) : null, [visibleState, nowMs]);
 
   const dailyPagination = usePaginatedRows(dailySummaries, DAILY_PAGE_SIZE);
   const roundPagination = usePaginatedRows(roundSummaries, ROUND_PAGE_SIZE);
@@ -711,6 +825,7 @@ export function App() {
   }
 
   const viewState = visibleState;
+  const stats = executionStats;
   const isAllProfiles = selectedProfileId === 'all';
   const scopeLabel = isAllProfiles ? 'All profiles' : viewState.profileState.profile.label;
   const enabledProfileCount = state.profiles.filter((item) => item.profile.status !== 'disabled').length;
@@ -1365,6 +1480,74 @@ export function App() {
                 <strong>{viewState.fills.length} fills</strong>
                 <strong>{viewState.settlements.length} settlements</strong>
               </div>
+
+              {stats && (
+                <section className={`executionStatsPanel ${stats.singleRate != null && stats.singleRate > stats.targetRate ? 'warn' : 'good'}`} aria-label="Last 24 hours execution statistics">
+                  <div className="executionStatsHeader">
+                    <div>
+                      <span className="sectionKicker">Last 24 hours</span>
+                      <h3>Paired vs Single Fill Rate</h3>
+                      <p>
+                        {formatEtRange(stats.windowStart, STATS_WINDOW_MS)}
+                        <span className="mutedInline"> refreshed from live state</span>
+                      </p>
+                    </div>
+                    <div className="singleRateTarget">
+                      <Target size={16} />
+                      <span>single target</span>
+                      <strong>&lt; {(stats.targetRate * 100).toFixed(0)}%</strong>
+                    </div>
+                  </div>
+
+                  <div className="executionStatsGrid">
+                    <DecisionMetric
+                      label="Settled rounds"
+                      value={String(stats.settlements)}
+                      detail={`${stats.orderRounds} order rounds / ${stats.orders} orders`}
+                      tone={stats.settlements > 0 ? 'neutral' : 'warn'}
+                    />
+                    <DecisionMetric
+                      label="Paired rate"
+                      value={stats.pairedRate == null ? 'n/a' : `${(stats.pairedRate * 100).toFixed(1)}%`}
+                      detail={`${stats.paired} paired / ${formatSignedMoney(stats.pairedPnl)}`}
+                      tone={stats.paired > 0 ? 'good' : 'neutral'}
+                    />
+                    <DecisionMetric
+                      label="Single rate"
+                      value={stats.singleRate == null ? 'n/a' : `${(stats.singleRate * 100).toFixed(1)}%`}
+                      detail={stats.singleRateDelta == null ? '< 18% target' : `${stats.singleRateDelta >= 0 ? '+' : ''}${(stats.singleRateDelta * 100).toFixed(1)} pts vs target`}
+                      tone={stats.singleRate == null ? 'neutral' : stats.singleRate <= stats.targetRate ? 'good' : 'bad'}
+                    />
+                    <DecisionMetric
+                      label="Single PnL"
+                      value={formatSignedMoney(stats.singlePnl)}
+                      detail={`${stats.singleWins} won / ${stats.singleLosses} lost`}
+                      tone={stats.singlePnl >= 0 ? 'good' : 'bad'}
+                    />
+                    <DecisionMetric
+                      label="Total PnL"
+                      value={formatSignedMoney(stats.totalPnl)}
+                      detail={`${stats.fills} fills / ${stats.none} no-fill settled`}
+                      tone={stats.totalPnl > 0 ? 'good' : stats.totalPnl < 0 ? 'bad' : 'neutral'}
+                    />
+                  </div>
+
+                  <div className="singleRateMeter" aria-label="Single fill rate threshold meter">
+                    <div className="singleRateMeterTrack">
+                      <span className="singleRateTargetLine" style={{ left: `${stats.targetRate * 100}%` }} />
+                      <span
+                        className={`singleRateActual ${stats.singleRate != null && stats.singleRate <= stats.targetRate ? 'good' : 'bad'}`}
+                        style={{ width: `${Math.min(100, Math.max(0, (stats.singleRate ?? 0) * 100))}%` }}
+                      />
+                    </div>
+                    <div className="singleRateMeterLabels">
+                      <span>0%</span>
+                      <strong>target {(stats.targetRate * 100).toFixed(0)}%</strong>
+                      <span>{stats.singleRate == null ? 'actual n/a' : `actual ${(stats.singleRate * 100).toFixed(1)}%`}</span>
+                    </div>
+                  </div>
+                </section>
+              )}
 
               <div className="subTabBar">
                 <button
