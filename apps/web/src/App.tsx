@@ -205,8 +205,10 @@ function roundStatusSummary(round: RoundExecutionSummary): RoundStatusSummary {
 function formatRelativeAge(ms: number, nowMs = Date.now()): string {
   if (!Number.isFinite(ms) || ms <= 0) return 'n/a';
   const diffMs = Math.max(0, nowMs - ms);
+  const seconds = Math.floor(diffMs / 1000);
+  if (seconds < 1) return 'now';
+  if (seconds < 60) return `${seconds}s ago`;
   const minutes = Math.floor(diffMs / 60_000);
-  if (minutes < 1) return 'just now';
   if (minutes < 60) return `${minutes}m ago`;
   const hours = Math.floor(minutes / 60);
   if (hours < 24) return `${hours}h ago`;
@@ -552,6 +554,7 @@ export function App() {
   const [refreshing, setRefreshing] = React.useState(false);
   const [autoRefreshing, setAutoRefreshing] = React.useState(false);
   const [lastRefreshAt, setLastRefreshAt] = React.useState<string | null>(null);
+  const [nowMs, setNowMs] = React.useState(() => Date.now());
   
   // Navigation Tab State
   const [activeTab, setActiveTab] = React.useState<TabType>(() => tabFromUrl());
@@ -587,6 +590,11 @@ export function App() {
     const timer = setInterval(() => void load(true), DASHBOARD_REFRESH_MS);
     return () => clearInterval(timer);
   }, [load]);
+
+  React.useEffect(() => {
+    const timer = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
 
   React.useEffect(() => {
     syncTabToUrl(activeTab);
@@ -751,6 +759,10 @@ export function App() {
     : undefined;
   const portfolioAvatarUrl = portfolio?.profile?.profileImageOptimized || portfolio?.profile?.profileImage;
   const portfolioInitial = (portfolioProfileName || portfolio?.accountAddress || '?').trim().slice(0, 1).toUpperCase();
+  const refreshIntervalSeconds = Math.round(DASHBOARD_REFRESH_MS / 1000);
+  const refreshStatusLabel = `Auto ${refreshIntervalSeconds}s`;
+  const lastRefreshLabel = lastRefreshAt ? formatRelativeAge(new Date(lastRefreshAt).getTime(), nowMs) : 'pending';
+  const refreshAriaStatus = autoRefreshing || refreshing ? 'Updating now' : `Auto refresh every ${refreshIntervalSeconds} seconds`;
 
   // Time progress bar calculation
   const secondsToEnd = snapshot.round.secondsToEnd;
@@ -892,15 +904,15 @@ export function App() {
             onClick={() => load()}
             disabled={refreshing}
             title="All dashboard panels refresh from /api/state on the same polling cycle."
-            aria-label={`Refresh dashboard. ${autoRefreshing ? 'Updating now' : `Auto refresh every ${Math.round(DASHBOARD_REFRESH_MS / 1000)} seconds`}. Last refresh ${lastRefreshAt ? formatEtTime(lastRefreshAt) : 'pending'}.`}
+            aria-label={`Refresh dashboard. ${refreshAriaStatus}. Last refresh ${lastRefreshLabel}.`}
           >
             <span className="refreshControlStatus">
               <RefreshCw size={13} className={(autoRefreshing || refreshing) ? 'spin' : ''} />
-              <span>{autoRefreshing || refreshing ? 'Updating' : `Auto ${Math.round(DASHBOARD_REFRESH_MS / 1000)}s`}</span>
-              <strong>{lastRefreshAt ? formatEtTime(lastRefreshAt) : 'pending'}</strong>
+              <span>{refreshStatusLabel}</span>
+              <strong>{lastRefreshLabel}</strong>
             </span>
             <span className="refreshControlAction">
-              {refreshing ? 'Refreshing' : 'Refresh'}
+              Refresh
             </span>
           </button>
         </div>
