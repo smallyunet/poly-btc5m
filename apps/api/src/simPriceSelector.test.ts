@@ -8,7 +8,7 @@ import type { AppConfig } from './config';
 import { rankFiveMinuteAssetCandidates, selectFiveMinuteEntryPrice } from './simPriceSelector';
 import type { MarketProfile, RoundSnapshot } from '../../../packages/shared/src';
 
-test('selects the highest-EV simulator price for each 5m asset profile', () => {
+test('selects the highest-score simulator price for each 5m asset profile', () => {
   const summaryPath = writeSummary([
     row('btc', 0.36, 0.025, 0.356),
     row('btc', 0.40, 0.013, 0.279),
@@ -27,7 +27,20 @@ test('selects the highest-EV simulator price for each 5m asset profile', () => {
   assert.equal(ethSelected.estimatedEvPerShare, 0.030);
 });
 
-test('selects the highest-EV simulator price even when EV is negative', () => {
+test('uses single-adjusted score instead of raw EV when selecting price', () => {
+  const summaryPath = writeSummary([
+    row('btc', 0.31, 0.020, 0.70),
+    row('btc', 0.40, 0.010, 0.20),
+  ]);
+  const selected = selectFiveMinuteEntryPrice(config(summaryPath), profile('btc-5m', 'btc'), round('btc-updown-5m-test-score'));
+
+  assert.equal(selected.source, 'simulator');
+  assert.equal(selected.selectedPrice, 0.40);
+  assert.equal(selected.estimatedEvPerShare, 0.010);
+  assert.match(selected.reason, /score/);
+});
+
+test('selects the highest-score simulator price even when EV is negative', () => {
   const summaryPath = writeSummary([
     row('btc', 0.36, -0.001, 0.356),
     row('btc', 0.40, -0.020, 0.5),
@@ -79,7 +92,7 @@ test('ranks 5m asset candidates and selects only the configured top N', () => {
   assert.equal(decisions.has('eth-15m'), false);
 });
 
-test('ranks 5m asset candidates by highest EV without requiring positive EV', () => {
+test('ranks 5m asset candidates by highest score without requiring positive EV', () => {
   const summaryPath = writeSummary([
     row('btc', 0.36, -0.020, 0.5),
     row('eth', 0.42, -0.005, 0.6),

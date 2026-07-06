@@ -81,12 +81,7 @@ export function selectFiveMinuteEntryPrice(appConfig: AppConfig, profile: Market
     .filter((row) => row.asset === profile.asset)
     .filter((row) => row.price >= appConfig.pm5mSimPriceMin - 0.000001 && row.price <= appConfig.pm5mSimPriceMax + 0.000001)
     .filter((row) => row.rounds >= appConfig.pm5mSimPriceMinRounds)
-    .sort((a, b) => (
-      b.estimatedEvPerShare - a.estimatedEvPerShare
-      || (a.singleRate ?? Number.POSITIVE_INFINITY) - (b.singleRate ?? Number.POSITIVE_INFINITY)
-      || (a.noneRate ?? Number.POSITIVE_INFINITY) - (b.noneRate ?? Number.POSITIVE_INFINITY)
-      || b.price - a.price
-    ));
+    .sort((a, b) => sortSimulatorRows(appConfig, a, b));
 
   const best = candidates[0];
   if (!best) {
@@ -107,7 +102,7 @@ export function selectFiveMinuteEntryPrice(appConfig: AppConfig, profile: Market
     source: 'simulator',
     selectedPrice: roundPrice(best.price),
     fallbackPrice,
-    reason: `best ${profile.asset} simulator EV ${best.estimatedEvPerShare.toFixed(4)}/share`,
+    reason: `best ${profile.asset} simulator score ${assetSelectorScore(best, appConfig.pm5mAssetSelectorSinglePenalty).toFixed(4)}/share = EV ${best.estimatedEvPerShare.toFixed(4)} - ${appConfig.pm5mAssetSelectorSinglePenalty.toFixed(3)}*single ${(best.singleRate ?? 0).toFixed(4)}`,
     selectedAt,
     nextSelectionAt,
     summaryGeneratedAt: summary.value.generatedAt,
@@ -195,12 +190,15 @@ function bestSimulatorRow(appConfig: AppConfig, profile: MarketProfile, rows: To
     .filter((row) => row.asset === profile.asset)
     .filter((row) => row.price >= appConfig.pm5mSimPriceMin - 0.000001 && row.price <= appConfig.pm5mSimPriceMax + 0.000001)
     .filter((row) => row.rounds >= appConfig.pm5mSimPriceMinRounds)
-    .sort((a, b) => (
-      b.estimatedEvPerShare - a.estimatedEvPerShare
-      || (a.singleRate ?? Number.POSITIVE_INFINITY) - (b.singleRate ?? Number.POSITIVE_INFINITY)
-      || (a.noneRate ?? Number.POSITIVE_INFINITY) - (b.noneRate ?? Number.POSITIVE_INFINITY)
-      || b.price - a.price
-    ))[0];
+    .sort((a, b) => sortSimulatorRows(appConfig, a, b))[0];
+}
+
+function sortSimulatorRows(appConfig: AppConfig, a: TouchAggregateRow, b: TouchAggregateRow): number {
+  return assetSelectorScore(b, appConfig.pm5mAssetSelectorSinglePenalty) - assetSelectorScore(a, appConfig.pm5mAssetSelectorSinglePenalty)
+    || b.estimatedEvPerShare - a.estimatedEvPerShare
+    || (a.singleRate ?? Number.POSITIVE_INFINITY) - (b.singleRate ?? Number.POSITIVE_INFINITY)
+    || (a.noneRate ?? Number.POSITIVE_INFINITY) - (b.noneRate ?? Number.POSITIVE_INFINITY)
+    || b.price - a.price;
 }
 
 function sortAssetCandidates(a: AssetCandidate, b: AssetCandidate): number {
