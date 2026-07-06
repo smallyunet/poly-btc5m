@@ -196,6 +196,11 @@ export function App() {
   const roundSummaries = React.useMemo(() => visibleState ? buildRoundExecutionSummaries(visibleState) : [], [visibleState]);
   const dailySummaries = React.useMemo(() => buildDailyExecutionSummaries(roundSummaries), [roundSummaries]);
   const executionStats = React.useMemo(() => visibleState ? buildExecutionStats(visibleState, nowMs) : null, [visibleState, nowMs]);
+  const touchCompletedByPrice = touchSim?.completed?.byPrice ?? [];
+  const touchCompletedByAssetPrice = touchSim?.completed?.byAssetPrice ?? [];
+  const touchMatrixAssets = React.useMemo(() => (
+    [...new Set(touchCompletedByAssetPrice.map((row) => row.asset || 'unknown'))].sort()
+  ), [touchCompletedByAssetPrice]);
 
   const dailyPagination = usePaginatedRows(dailySummaries, DAILY_PAGE_SIZE);
   const roundPagination = usePaginatedRows(roundSummaries, ROUND_PAGE_SIZE);
@@ -421,11 +426,6 @@ export function App() {
       : touchSim?.ok
         ? 'waiting'
         : 'unavailable';
-  const touchCompletedByPrice = touchSim?.completed?.byPrice ?? [];
-  const touchCompletedByAssetPrice = touchSim?.completed?.byAssetPrice ?? [];
-  const touchMatrixAssets = React.useMemo(() => (
-    [...new Set(touchCompletedByAssetPrice.map((row) => row.asset || 'unknown'))].sort()
-  ), [touchCompletedByAssetPrice]);
   const selectedTouchAsset = touchMatrixAssets.includes(simulationAssetTab)
     ? simulationAssetTab
     : touchMatrixAssets[0] || 'btc';
