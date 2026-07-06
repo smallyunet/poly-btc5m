@@ -10,7 +10,7 @@ import type { MarketDataService } from './marketData';
 import type { ParticipationService } from './participation';
 import type { RecurringCryptoRoundDiscovery } from './roundDiscovery';
 import type { InMemoryStore, SingleFillCooldownRecord } from './store';
-import { selectBtc5mEntryPrice } from './simPriceSelector';
+import { selectFiveMinuteEntryPrice } from './simPriceSelector';
 
 export async function runAllProfilesTick(appConfig: AppConfig, store: InMemoryStore, data: MarketDataService, adapter: PolymarketAdapter, discovery: RecurringCryptoRoundDiscovery, participationService: ParticipationService): Promise<StateSnapshot[]> {
   const enabledProfiles = appConfig.marketProfiles.filter((profile) => profile.status !== 'disabled');
@@ -53,7 +53,7 @@ export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, dat
   const portfolio = await loadPortfolio(appConfig, adapter, tokenLabels, store.settledPnl(), diagnostics);
   const positions = portfolio.positions.filter((position) => position.label !== 'UNKNOWN');
   const roundSnapshot = roundToSnapshot(appConfig, store, round);
-  const dynamicEntryPrice = selectBtc5mEntryPrice(appConfig, profile, roundSnapshot);
+  const dynamicEntryPrice = selectFiveMinuteEntryPrice(appConfig, profile, roundSnapshot);
   store.recordDynamicEntryPrice(dynamicEntryPrice);
   const entryAppConfig = { ...appConfig, dualLimitPrice: dynamicEntryPrice.selectedPrice };
   const baseSnapshot: StateSnapshot = {

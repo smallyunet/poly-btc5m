@@ -3,7 +3,7 @@ import { Activity, Clock3, Database, TrendingUp } from 'lucide-react';
 import type { DynamicEntryPriceSelection } from '../../../../packages/shared/src';
 import { Badge } from '../components/dashboard/Ui';
 import { formatEtTime } from '../lib/dashboardFormat';
-import { formatEv, formatPriceCents, formatRate } from './dashboardHelpers';
+import { assetNameForProfile, formatEv, formatPriceCents, formatRate } from './dashboardHelpers';
 
 type DynamicEntryPricePanelProps = {
   selection?: DynamicEntryPriceSelection;
@@ -16,12 +16,13 @@ export function DynamicEntryPricePanel({ selection, configuredPrice }: DynamicEn
   const sourceLabel = selection?.source === 'simulator' ? 'SIMULATOR' : selection?.source === 'fallback' ? 'FALLBACK' : 'CONFIG';
   const nextSelection = selection?.nextSelectionAt ? formatEtTime(selection.nextSelectionAt) : '-';
   const updatedAt = selection?.selectedAt ? formatEtTime(selection.selectedAt) : '-';
+  const title = selection?.profileId ? `${assetNameForProfile(selection.profileId)} ${selection.profileId.split('-')[1] || ''} Entry Price` : 'Entry Price';
 
   return (
-    <section className={`dynamicEntryPricePanel ${selection?.source || 'config'}`} aria-label="BTC 5m dynamic simulator entry price">
+    <section className={`dynamicEntryPricePanel ${selection?.source || 'config'}`} aria-label={`${title} dynamic simulator entry price`}>
       <div className="dynamicEntryPriceMain">
         <div>
-          <span className="dynamicEntryPriceKicker">BTC 5m Entry Price</span>
+          <span className="dynamicEntryPriceKicker">{title}</span>
           <strong>{formatPriceCents(price)}</strong>
         </div>
         <Badge tone={sourceTone}>{sourceLabel}</Badge>

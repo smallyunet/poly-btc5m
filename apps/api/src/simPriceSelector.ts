@@ -25,14 +25,14 @@ type TouchSummary = {
 let cachedSummary: { path: string; loadedAt: number; summary: TouchSummary } | null = null;
 const roundSelections = new Map<string, DynamicEntryPriceSelection>();
 
-export function selectBtc5mEntryPrice(appConfig: AppConfig, profile: MarketProfile, round: RoundSnapshot): DynamicEntryPriceSelection {
-  const fallbackPrice = roundPrice(appConfig.btc5mSimPriceFallback || appConfig.dualLimitPrice);
+export function selectFiveMinuteEntryPrice(appConfig: AppConfig, profile: MarketProfile, round: RoundSnapshot): DynamicEntryPriceSelection {
+  const fallbackPrice = roundPrice(appConfig.pm5mSimPriceFallback || appConfig.dualLimitPrice);
   const selectedAt = new Date().toISOString();
-  if (profile.id !== 'btc-5m') {
-    return disabledSelection(profile, fallbackPrice, selectedAt, 'simulator price selection only applies to btc-5m');
+  if (profile.interval !== '5m') {
+    return disabledSelection(profile, fallbackPrice, selectedAt, 'simulator price selection only applies to 5m profiles');
   }
-  if (!appConfig.btc5mSimPriceEnabled) {
-    return disabledSelection(profile, fallbackPrice, selectedAt, 'BTC_5M_SIM_PRICE_ENABLED=false');
+  if (!appConfig.pm5mSimPriceEnabled) {
+    return disabledSelection(profile, fallbackPrice, selectedAt, 'PM5M_SIM_PRICE_ENABLED=false');
   }
 
   const lockKey = `${profile.id}:${round.id}`;
@@ -40,15 +40,15 @@ export function selectBtc5mEntryPrice(appConfig: AppConfig, profile: MarketProfi
   if (locked) return locked;
 
   const nextSelectionAt = round.endAt;
-  const summaryPath = path.resolve(process.cwd(), appConfig.btc5mSimPriceSummaryPath);
-  const summary = readSummary(summaryPath, appConfig.btc5mSimPriceRefreshMs);
+  const summaryPath = path.resolve(process.cwd(), appConfig.pm5mSimPriceSummaryPath);
+  const summary = readSummary(summaryPath, appConfig.pm5mSimPriceRefreshMs);
   if (!summary.ok) {
     return lock(lockKey, fallbackSelection(profile, fallbackPrice, selectedAt, nextSelectionAt, summary.reason));
   }
 
   const generatedAtMs = summary.value.generatedAt ? new Date(summary.value.generatedAt).getTime() : NaN;
   const summaryAgeMs = Number.isFinite(generatedAtMs) ? Date.now() - generatedAtMs : null;
-  if (summaryAgeMs == null || summaryAgeMs > appConfig.btc5mSimPriceMaxSummaryAgeMs) {
+  if (summaryAgeMs == null || summaryAgeMs > appConfig.pm5mSimPriceMaxSummaryAgeMs) {
     return lock(lockKey, fallbackSelection(
       profile,
       fallbackPrice,
@@ -61,12 +61,12 @@ export function selectBtc5mEntryPrice(appConfig: AppConfig, profile: MarketProfi
   }
 
   const candidates = (summary.value.completed?.byAssetPrice || [])
-    .filter((row) => row.asset === 'btc')
-    .filter((row) => row.price >= appConfig.btc5mSimPriceMin - 0.000001 && row.price <= appConfig.btc5mSimPriceMax + 0.000001)
-    .filter((row) => row.rounds >= appConfig.btc5mSimPriceMinRounds)
-    .filter((row) => (row.singleRate ?? Number.POSITIVE_INFINITY) <= appConfig.btc5mSimPriceMaxSingleRate)
-    .filter((row) => (row.noneRate ?? Number.POSITIVE_INFINITY) <= appConfig.btc5mSimPriceMaxNoneRate)
-    .filter((row) => row.estimatedEvPerShare >= appConfig.btc5mSimPriceMinEv)
+    .filter((row) => row.asset === profile.asset)
+    .filter((row) => row.price >= appConfig.pm5mSimPriceMin - 0.000001 && row.price <= appConfig.pm5mSimPriceMax + 0.000001)
+    .filter((row) => row.rounds >= appConfig.pm5mSimPriceMinRounds)
+    .filter((row) => (row.singleRate ?? Number.POSITIVE_INFINITY) <= appConfig.pm5mSimPriceMaxSingleRate)
+    .filter((row) => (row.noneRate ?? Number.POSITIVE_INFINITY) <= appConfig.pm5mSimPriceMaxNoneRate)
+    .filter((row) => row.estimatedEvPerShare >= appConfig.pm5mSimPriceMinEv)
     .sort((a, b) => (
       b.estimatedEvPerShare - a.estimatedEvPerShare
       || (a.singleRate ?? Number.POSITIVE_INFINITY) - (b.singleRate ?? Number.POSITIVE_INFINITY)
@@ -80,7 +80,7 @@ export function selectBtc5mEntryPrice(appConfig: AppConfig, profile: MarketProfi
       fallbackPrice,
       selectedAt,
       nextSelectionAt,
-      'no btc simulator row passed EV/risk filters',
+      `no ${profile.asset} simulator row passed EV/risk filters`,
       summary.value.generatedAt,
       summaryAgeMs,
     ));
@@ -92,7 +92,7 @@ export function selectBtc5mEntryPrice(appConfig: AppConfig, profile: MarketProfi
     source: 'simulator',
     selectedPrice: roundPrice(best.price),
     fallbackPrice,
-    reason: `best btc simulator EV ${best.estimatedEvPerShare.toFixed(4)}/share`,
+    reason: `best ${profile.asset} simulator EV ${best.estimatedEvPerShare.toFixed(4)}/share`,
     selectedAt,
     nextSelectionAt,
     summaryGeneratedAt: summary.value.generatedAt,

@@ -36,6 +36,10 @@ const COOLDOWN_ENV_KEYS = [
   'HYPE_1H_PROFILE_STATUS',
   'HYPE_15M_SINGLE_FILL_COOLDOWN_BASE_MS',
   'BINANCE_WS_URL',
+  'PM5M_SIM_PRICE_ENABLED',
+  'PM5M_SIM_PRICE_MIN_ROUNDS',
+  'BTC_5M_SIM_PRICE_ENABLED',
+  'BTC_5M_SIM_PRICE_MIN_ROUNDS',
   '5M_SINGLE_FILL_COOLDOWN_BASE_MS',
   '15M_SINGLE_FILL_COOLDOWN_BASE_MS',
   '1H_SINGLE_FILL_COOLDOWN_BASE_MS',
@@ -70,6 +74,30 @@ test('cross-profile single-fill risk can be disabled by env override', () => {
     const config = loadConfig();
 
     assert.equal(config.crossProfileSingleFillRiskEnabled, false);
+  });
+});
+
+test('PM 5m simulator price config supports generic env and legacy BTC env fallback', () => {
+  withEnv(COOLDOWN_ENV_KEYS, {
+    BTC_5M_SIM_PRICE_ENABLED: 'true',
+    BTC_5M_SIM_PRICE_MIN_ROUNDS: '80',
+  }, () => {
+    const config = loadConfig();
+
+    assert.equal(config.pm5mSimPriceEnabled, true);
+    assert.equal(config.pm5mSimPriceMinRounds, 80);
+  });
+
+  withEnv(COOLDOWN_ENV_KEYS, {
+    PM5M_SIM_PRICE_ENABLED: 'false',
+    PM5M_SIM_PRICE_MIN_ROUNDS: '120',
+    BTC_5M_SIM_PRICE_ENABLED: 'true',
+    BTC_5M_SIM_PRICE_MIN_ROUNDS: '80',
+  }, () => {
+    const config = loadConfig();
+
+    assert.equal(config.pm5mSimPriceEnabled, false);
+    assert.equal(config.pm5mSimPriceMinRounds, 120);
   });
 });
 

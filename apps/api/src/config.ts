@@ -41,17 +41,17 @@ export type AppConfig = {
   maxDriftRatio120s: number;
   maxMomentumRatio30s: number;
   maxEntryQueueImbalance: number;
-  btc5mSimPriceEnabled: boolean;
-  btc5mSimPriceSummaryPath: string;
-  btc5mSimPriceRefreshMs: number;
-  btc5mSimPriceMin: number;
-  btc5mSimPriceMax: number;
-  btc5mSimPriceMinRounds: number;
-  btc5mSimPriceMaxSingleRate: number;
-  btc5mSimPriceMaxNoneRate: number;
-  btc5mSimPriceMinEv: number;
-  btc5mSimPriceFallback: number;
-  btc5mSimPriceMaxSummaryAgeMs: number;
+  pm5mSimPriceEnabled: boolean;
+  pm5mSimPriceSummaryPath: string;
+  pm5mSimPriceRefreshMs: number;
+  pm5mSimPriceMin: number;
+  pm5mSimPriceMax: number;
+  pm5mSimPriceMinRounds: number;
+  pm5mSimPriceMaxSingleRate: number;
+  pm5mSimPriceMaxNoneRate: number;
+  pm5mSimPriceMinEv: number;
+  pm5mSimPriceFallback: number;
+  pm5mSimPriceMaxSummaryAgeMs: number;
   minLiveChopScore: number;
   bypassEntryScoreGating: boolean;
   bypassSingleFillCooldown: boolean;
@@ -152,17 +152,17 @@ export function loadConfig(): AppConfig {
     maxDriftRatio120s: numberEnv('MAX_DRIFT_RATIO_120S', 0.45),
     maxMomentumRatio30s: numberEnv('MAX_MOMENTUM_RATIO_30S', 0.55),
     maxEntryQueueImbalance: numberEnv('MAX_ENTRY_QUEUE_IMBALANCE', 5),
-    btc5mSimPriceEnabled: booleanEnv('BTC_5M_SIM_PRICE_ENABLED', false),
-    btc5mSimPriceSummaryPath: process.env.BTC_5M_SIM_PRICE_SUMMARY_PATH || process.env.PM5M_TOUCH_SUMMARY_PATH || 'data-lab/pm-5m-touch/summary.json',
-    btc5mSimPriceRefreshMs: parsePositiveInteger(process.env.BTC_5M_SIM_PRICE_REFRESH_MS, 30_000),
-    btc5mSimPriceMin: numberEnv('BTC_5M_SIM_PRICE_MIN', 0.29),
-    btc5mSimPriceMax: numberEnv('BTC_5M_SIM_PRICE_MAX', 0.49),
-    btc5mSimPriceMinRounds: parsePositiveInteger(process.env.BTC_5M_SIM_PRICE_MIN_ROUNDS, 100),
-    btc5mSimPriceMaxSingleRate: numberEnv('BTC_5M_SIM_PRICE_MAX_SINGLE_RATE', 0.4),
-    btc5mSimPriceMaxNoneRate: numberEnv('BTC_5M_SIM_PRICE_MAX_NONE_RATE', 0.15),
-    btc5mSimPriceMinEv: numberEnv('BTC_5M_SIM_PRICE_MIN_EV', 0),
-    btc5mSimPriceFallback: numberEnv('BTC_5M_SIM_PRICE_FALLBACK', numberEnv('DUAL_LIMIT_PRICE', 0.45)),
-    btc5mSimPriceMaxSummaryAgeMs: parsePositiveInteger(process.env.BTC_5M_SIM_PRICE_MAX_SUMMARY_AGE_MS, 10 * 60_000),
+    pm5mSimPriceEnabled: booleanEnv('PM5M_SIM_PRICE_ENABLED', booleanEnv('BTC_5M_SIM_PRICE_ENABLED', false)),
+    pm5mSimPriceSummaryPath: process.env.PM5M_SIM_PRICE_SUMMARY_PATH || process.env.BTC_5M_SIM_PRICE_SUMMARY_PATH || process.env.PM5M_TOUCH_SUMMARY_PATH || 'data-lab/pm-5m-touch/summary.json',
+    pm5mSimPriceRefreshMs: parsePositiveInteger(process.env.PM5M_SIM_PRICE_REFRESH_MS || process.env.BTC_5M_SIM_PRICE_REFRESH_MS, 30_000),
+    pm5mSimPriceMin: numberEnv('PM5M_SIM_PRICE_MIN', numberEnv('BTC_5M_SIM_PRICE_MIN', 0.29)),
+    pm5mSimPriceMax: numberEnv('PM5M_SIM_PRICE_MAX', numberEnv('BTC_5M_SIM_PRICE_MAX', 0.49)),
+    pm5mSimPriceMinRounds: parsePositiveInteger(process.env.PM5M_SIM_PRICE_MIN_ROUNDS || process.env.BTC_5M_SIM_PRICE_MIN_ROUNDS, 100),
+    pm5mSimPriceMaxSingleRate: numberEnv('PM5M_SIM_PRICE_MAX_SINGLE_RATE', numberEnv('BTC_5M_SIM_PRICE_MAX_SINGLE_RATE', 0.4)),
+    pm5mSimPriceMaxNoneRate: numberEnv('PM5M_SIM_PRICE_MAX_NONE_RATE', numberEnv('BTC_5M_SIM_PRICE_MAX_NONE_RATE', 0.15)),
+    pm5mSimPriceMinEv: numberEnv('PM5M_SIM_PRICE_MIN_EV', numberEnv('BTC_5M_SIM_PRICE_MIN_EV', 0)),
+    pm5mSimPriceFallback: numberEnv('PM5M_SIM_PRICE_FALLBACK', numberEnv('BTC_5M_SIM_PRICE_FALLBACK', numberEnv('DUAL_LIMIT_PRICE', 0.45))),
+    pm5mSimPriceMaxSummaryAgeMs: parsePositiveInteger(process.env.PM5M_SIM_PRICE_MAX_SUMMARY_AGE_MS || process.env.BTC_5M_SIM_PRICE_MAX_SUMMARY_AGE_MS, 10 * 60_000),
     minLiveChopScore: numberEnv('MIN_LIVE_CHOP_SCORE', 70),
     bypassEntryScoreGating: booleanEnv('BYPASS_ENTRY_SCORE_GATING', true),
     bypassSingleFillCooldown: booleanEnv('BYPASS_SINGLE_FILL_COOLDOWN', false),
