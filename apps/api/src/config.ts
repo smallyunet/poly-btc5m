@@ -56,9 +56,6 @@ export type AppConfig = {
   pm5mSimPriceMin: number;
   pm5mSimPriceMax: number;
   pm5mSimPriceMinRounds: number;
-  pm5mSimPriceMaxSingleRate: number;
-  pm5mSimPriceMaxNoneRate: number;
-  pm5mSimPriceMinEv: number;
   pm5mSimPriceFallback: number;
   pm5mSimPriceMaxSummaryAgeMs: number;
   pm5mAssetSelectorEnabled: boolean;
@@ -168,9 +165,6 @@ export function loadConfig(): AppConfig {
     pm5mSimPriceMin: numberEnv('PM5M_SIM_PRICE_MIN', numberEnv('BTC_5M_SIM_PRICE_MIN', 0.29)),
     pm5mSimPriceMax: numberEnv('PM5M_SIM_PRICE_MAX', numberEnv('BTC_5M_SIM_PRICE_MAX', 0.49)),
     pm5mSimPriceMinRounds: parsePositiveInteger(process.env.PM5M_SIM_PRICE_MIN_ROUNDS || process.env.BTC_5M_SIM_PRICE_MIN_ROUNDS, 100),
-    pm5mSimPriceMaxSingleRate: numberEnv('PM5M_SIM_PRICE_MAX_SINGLE_RATE', numberEnv('BTC_5M_SIM_PRICE_MAX_SINGLE_RATE', 0.4)),
-    pm5mSimPriceMaxNoneRate: numberEnv('PM5M_SIM_PRICE_MAX_NONE_RATE', numberEnv('BTC_5M_SIM_PRICE_MAX_NONE_RATE', 0.15)),
-    pm5mSimPriceMinEv: numberEnv('PM5M_SIM_PRICE_MIN_EV', numberEnv('BTC_5M_SIM_PRICE_MIN_EV', 0)),
     pm5mSimPriceFallback: numberEnv('PM5M_SIM_PRICE_FALLBACK', numberEnv('BTC_5M_SIM_PRICE_FALLBACK', numberEnv('DUAL_LIMIT_PRICE', 0.45))),
     pm5mSimPriceMaxSummaryAgeMs: parsePositiveInteger(process.env.PM5M_SIM_PRICE_MAX_SUMMARY_AGE_MS || process.env.BTC_5M_SIM_PRICE_MAX_SUMMARY_AGE_MS, 10 * 60_000),
     pm5mAssetSelectorEnabled: booleanEnv('PM5M_ASSET_SELECTOR_ENABLED', false),

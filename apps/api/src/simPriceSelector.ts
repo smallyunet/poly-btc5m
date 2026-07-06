@@ -79,12 +79,10 @@ export function selectFiveMinuteEntryPrice(appConfig: AppConfig, profile: Market
     .filter((row) => row.asset === profile.asset)
     .filter((row) => row.price >= appConfig.pm5mSimPriceMin - 0.000001 && row.price <= appConfig.pm5mSimPriceMax + 0.000001)
     .filter((row) => row.rounds >= appConfig.pm5mSimPriceMinRounds)
-    .filter((row) => (row.singleRate ?? Number.POSITIVE_INFINITY) <= appConfig.pm5mSimPriceMaxSingleRate)
-    .filter((row) => (row.noneRate ?? Number.POSITIVE_INFINITY) <= appConfig.pm5mSimPriceMaxNoneRate)
-    .filter((row) => row.estimatedEvPerShare >= appConfig.pm5mSimPriceMinEv)
     .sort((a, b) => (
       b.estimatedEvPerShare - a.estimatedEvPerShare
       || (a.singleRate ?? Number.POSITIVE_INFINITY) - (b.singleRate ?? Number.POSITIVE_INFINITY)
+      || (a.noneRate ?? Number.POSITIVE_INFINITY) - (b.noneRate ?? Number.POSITIVE_INFINITY)
       || b.price - a.price
     ));
 
@@ -95,7 +93,7 @@ export function selectFiveMinuteEntryPrice(appConfig: AppConfig, profile: Market
       fallbackPrice,
       selectedAt,
       nextSelectionAt,
-      `no ${profile.asset} simulator row passed EV/risk filters`,
+      `no ${profile.asset} simulator row passed range/min-round filters`,
       summary.value.generatedAt,
       summaryAgeMs,
     ));
@@ -150,21 +148,13 @@ export function rankFiveMinuteAssetCandidates(appConfig: AppConfig, profiles: Ma
   }
 
   const rows = summary.value.completed?.byAssetPrice || [];
-  const strictCandidates = fiveMinuteProfiles
+  const candidates = fiveMinuteProfiles
     .map((profile): AssetCandidate | null => {
       const row = bestSimulatorRow(appConfig, profile, rows);
       return row ? { profile, row, score: row.estimatedEvPerShare, relaxed: false } : null;
     })
     .filter((candidate): candidate is AssetCandidate => Boolean(candidate))
     .sort(sortAssetCandidates);
-  const relaxedCandidates = strictCandidates.length ? [] : fiveMinuteProfiles
-    .map((profile): AssetCandidate | null => {
-      const row = bestRelativeSimulatorRow(appConfig, profile, rows);
-      return row ? { profile, row, score: row.estimatedEvPerShare, relaxed: true } : null;
-    })
-    .filter((candidate): candidate is AssetCandidate => Boolean(candidate))
-    .sort(sortAssetCandidates);
-  const candidates = strictCandidates.length ? strictCandidates : relaxedCandidates;
 
   const maxSelected = Math.max(1, appConfig.pm5mAssetSelectorMaxAssets);
   const selectedIds = new Set(candidates.slice(0, maxSelected).map((candidate) => candidate.profile.id));
@@ -176,7 +166,7 @@ export function rankFiveMinuteAssetCandidates(appConfig: AppConfig, profiles: Ma
       decisions.set(profile.id, {
         profileId: profile.id,
         selected: false,
-        reason: `5m asset selector rejected ${profile.asset}: no simulator row passed EV/risk filters at ${selectedAt}`,
+        reason: `5m asset selector rejected ${profile.asset}: no simulator row passed range/min-round filters at ${selectedAt}`,
       });
       continue;
     }
@@ -196,21 +186,6 @@ export function rankFiveMinuteAssetCandidates(appConfig: AppConfig, profiles: Ma
 }
 
 function bestSimulatorRow(appConfig: AppConfig, profile: MarketProfile, rows: TouchAggregateRow[]): TouchAggregateRow | undefined {
-  return rows
-    .filter((row) => row.asset === profile.asset)
-    .filter((row) => row.price >= appConfig.pm5mSimPriceMin - 0.000001 && row.price <= appConfig.pm5mSimPriceMax + 0.000001)
-    .filter((row) => row.rounds >= appConfig.pm5mSimPriceMinRounds)
-    .filter((row) => (row.singleRate ?? Number.POSITIVE_INFINITY) <= appConfig.pm5mSimPriceMaxSingleRate)
-    .filter((row) => (row.noneRate ?? Number.POSITIVE_INFINITY) <= appConfig.pm5mSimPriceMaxNoneRate)
-    .filter((row) => row.estimatedEvPerShare >= appConfig.pm5mSimPriceMinEv)
-    .sort((a, b) => (
-      b.estimatedEvPerShare - a.estimatedEvPerShare
-      || (a.singleRate ?? Number.POSITIVE_INFINITY) - (b.singleRate ?? Number.POSITIVE_INFINITY)
-      || b.price - a.price
-    ))[0];
-}
-
-function bestRelativeSimulatorRow(appConfig: AppConfig, profile: MarketProfile, rows: TouchAggregateRow[]): TouchAggregateRow | undefined {
   return rows
     .filter((row) => row.asset === profile.asset)
     .filter((row) => row.price >= appConfig.pm5mSimPriceMin - 0.000001 && row.price <= appConfig.pm5mSimPriceMax + 0.000001)

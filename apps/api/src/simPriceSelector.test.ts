@@ -8,7 +8,7 @@ import type { AppConfig } from './config';
 import { rankFiveMinuteAssetCandidates, selectFiveMinuteEntryPrice } from './simPriceSelector';
 import type { MarketProfile, RoundSnapshot } from '../../../packages/shared/src';
 
-test('selects the best positive-EV simulator price for each 5m asset profile', () => {
+test('selects the highest-EV simulator price for each 5m asset profile', () => {
   const summaryPath = writeSummary([
     row('btc', 0.36, 0.025, 0.356),
     row('btc', 0.40, 0.013, 0.279),
@@ -27,12 +27,23 @@ test('selects the best positive-EV simulator price for each 5m asset profile', (
   assert.equal(ethSelected.estimatedEvPerShare, 0.030);
 });
 
-test('falls back when no asset-specific simulator row passes filters', () => {
+test('selects the highest-EV simulator price even when EV is negative', () => {
   const summaryPath = writeSummary([
     row('btc', 0.36, -0.001, 0.356),
-    row('btc', 0.40, 0.02, 0.5),
+    row('btc', 0.40, -0.020, 0.5),
   ]);
   const selected = selectFiveMinuteEntryPrice(config(summaryPath), profile('btc-5m', 'btc'), round('btc-updown-5m-test-2'));
+  assert.equal(selected.source, 'simulator');
+  assert.equal(selected.selectedPrice, 0.36);
+  assert.equal(selected.estimatedEvPerShare, -0.001);
+});
+
+test('falls back when no asset-specific simulator row passes range and min-round filters', () => {
+  const summaryPath = writeSummary([
+    { ...row('btc', 0.36, 0.02, 0.2), rounds: 20 },
+    row('eth', 0.40, 0.05, 0.2),
+  ]);
+  const selected = selectFiveMinuteEntryPrice(config(summaryPath), profile('btc-5m', 'btc'), round('btc-updown-5m-test-3'));
   assert.equal(selected.source, 'fallback');
   assert.equal(selected.selectedPrice, 0.45);
 });
@@ -68,7 +79,7 @@ test('ranks 5m asset candidates and selects only the configured top N', () => {
   assert.equal(decisions.has('eth-15m'), false);
 });
 
-test('selects the relative best 5m asset when no candidate passes strict EV/risk filters', () => {
+test('ranks 5m asset candidates by highest EV without requiring positive EV', () => {
   const summaryPath = writeSummary([
     row('btc', 0.36, -0.020, 0.5),
     row('eth', 0.42, -0.005, 0.6),
@@ -83,7 +94,7 @@ test('selects the relative best 5m asset when no candidate passes strict EV/risk
 
   assert.equal(decisions.get('eth-5m')?.selected, true);
   assert.equal(decisions.get('eth-5m')?.rank, 1);
-  assert.match(decisions.get('eth-5m')?.reason || '', /relative fallback/);
+  assert.doesNotMatch(decisions.get('eth-5m')?.reason || '', /relative fallback/);
   assert.equal(decisions.get('btc-5m')?.selected, false);
   assert.equal(decisions.get('sol-5m')?.selected, false);
 });
@@ -119,9 +130,6 @@ function config(summaryPath: string): AppConfig {
     pm5mSimPriceMin: 0.29,
     pm5mSimPriceMax: 0.49,
     pm5mSimPriceMinRounds: 100,
-    pm5mSimPriceMaxSingleRate: 0.4,
-    pm5mSimPriceMaxNoneRate: 0.15,
-    pm5mSimPriceMinEv: 0,
     pm5mSimPriceFallback: 0.45,
     pm5mSimPriceMaxSummaryAgeMs: 600_000,
     pm5mAssetSelectorEnabled: false,
