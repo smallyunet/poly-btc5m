@@ -30,6 +30,7 @@ const config = {
 const priceLevels = buildPriceLevels(config.minPrice, config.maxPrice, config.step);
 const rounds = new Map();
 const tokenIndex = new Map();
+const historicalCompletedResults = loadHistoricalCompletedResults();
 let ws;
 let subscribedKey = '';
 let stopping = false;
@@ -40,6 +41,9 @@ fs.mkdirSync(config.outDir, { recursive: true });
 
 log(`starting Polymarket 5m touch recorder`);
 log(`assets=${config.assets.join(',')} prices=${priceLevels.map((price) => cents(price)).join(',')} out=${config.outDir}`);
+if (historicalCompletedResults.length) {
+  log(`loaded ${historicalCompletedResults.length} historical completed result rows`);
+}
 
 await discoverAll();
 connectWs();
@@ -326,12 +330,14 @@ function resultRowsForRound(round) {
 }
 
 function writeSummary() {
-  const completedResults = [];
+  const currentCompletedResults = [];
   const activeResults = [];
   for (const round of rounds.values()) {
-    const target = round.finalized ? completedResults : activeResults;
+    const target = round.finalized ? currentCompletedResults : activeResults;
     target.push(...resultRowsForRound(round));
   }
+  const completedResults = uniqueResultRows([...historicalCompletedResults, ...currentCompletedResults]);
+  const completed = aggregate(completedResults);
 
   const summary = {
     ok: true,
@@ -351,10 +357,11 @@ function writeSummary() {
       websocketConnected: ws?.readyState === WebSocket.OPEN,
       subscribedTokens: subscribedKey ? subscribedKey.split('|').filter(Boolean).length : 0,
       activeRounds: [...rounds.values()].filter((round) => !round.finalized).length,
-      completedRounds: [...rounds.values()].filter((round) => round.finalized).length,
+      completedRounds: completed.rounds,
+      historicalCompletedRows: historicalCompletedResults.length,
     },
     active: aggregate(activeResults),
-    completed: aggregate(completedResults),
+    completed,
     recentRounds: [...rounds.values()]
       .sort((a, b) => new Date(b.startAt).getTime() - new Date(a.startAt).getTime())
       .slice(0, 30)
@@ -374,6 +381,69 @@ function writeSummary() {
       })),
   };
   writeJsonAtomic('summary.json', summary);
+}
+
+function loadHistoricalCompletedResults() {
+  const filePath = path.join(config.outDir, 'round-results.ndjson');
+  if (!fs.existsSync(filePath)) return [];
+  const rows = [];
+  const allowedAssets = new Set(config.assets);
+  const allowedPrices = new Set(priceLevels.map(priceKey));
+  try {
+    const lines = fs.readFileSync(filePath, 'utf8').split('\n');
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      const row = parseHistoricalResultRow(line);
+      if (!row) continue;
+      if (!allowedAssets.has(row.asset) || !allowedPrices.has(priceKey(row.price))) continue;
+      rows.push(row);
+    }
+  } catch (error) {
+    log(`failed to load historical completed results: ${error.message}`);
+  }
+  return uniqueResultRows(rows);
+}
+
+function parseHistoricalResultRow(line) {
+  try {
+    const row = JSON.parse(line);
+    const asset = String(row.asset || '').trim().toLowerCase();
+    const slug = String(row.slug || '').trim();
+    const title = String(row.title || slug);
+    const price = finiteNumber(row.price);
+    const outcome = String(row.outcome || '').trim();
+    if (!asset || !slug || price == null || !['paired', 'single', 'none'].includes(outcome)) return null;
+    return {
+      type: 'round_result',
+      recordedAt: String(row.recordedAt || ''),
+      asset,
+      slug,
+      title,
+      startAt: typeof row.startAt === 'string' ? row.startAt : undefined,
+      endAt: typeof row.endAt === 'string' ? row.endAt : undefined,
+      price,
+      yesTouched: Boolean(row.yesTouched),
+      noTouched: Boolean(row.noTouched),
+      yesFirstTouchAt: row.yesFirstTouchAt ?? null,
+      noFirstTouchAt: row.noFirstTouchAt ?? null,
+      outcome,
+      pairedProfitPerShare: finiteNumber(row.pairedProfitPerShare),
+      singleLossPerShare: finiteNumber(row.singleLossPerShare),
+      breakevenSingleRate: finiteNumber(row.breakevenSingleRate),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function uniqueResultRows(rows) {
+  const byKey = new Map();
+  for (const row of rows) byKey.set(resultRowKey(row), row);
+  return [...byKey.values()];
+}
+
+function resultRowKey(row) {
+  return `${row.asset}:${row.slug}:${priceKey(row.price)}`;
 }
 
 function aggregate(rows) {
