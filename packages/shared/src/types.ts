@@ -502,6 +502,10 @@ export type DynamicEntryPriceSelection = {
   nextSelectionAt?: string;
   summaryGeneratedAt?: string;
   summaryAgeMs?: number;
+  assetSelectorEnabled?: boolean;
+  assetSelectorSelected?: boolean;
+  assetSelectorRank?: number;
+  assetSelectorScore?: number;
   rounds?: number;
   pairedRate?: number | null;
   singleRate?: number | null;

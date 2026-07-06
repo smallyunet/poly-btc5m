@@ -10,18 +10,22 @@ import type { MarketDataService } from './marketData';
 import type { ParticipationService } from './participation';
 import type { RecurringCryptoRoundDiscovery } from './roundDiscovery';
 import type { InMemoryStore, SingleFillCooldownRecord } from './store';
-import { selectFiveMinuteEntryPrice } from './simPriceSelector';
+import { rankFiveMinuteAssetCandidates, selectFiveMinuteEntryPrice, type FiveMinuteAssetSelection } from './simPriceSelector';
 
 export async function runAllProfilesTick(appConfig: AppConfig, store: InMemoryStore, data: MarketDataService, adapter: PolymarketAdapter, discovery: RecurringCryptoRoundDiscovery, participationService: ParticipationService): Promise<StateSnapshot[]> {
   const enabledProfiles = appConfig.marketProfiles.filter((profile) => profile.status !== 'disabled');
+  const selectorProfiles = appConfig.executionMode === 'live'
+    ? enabledProfiles.filter((profile) => profile.status === 'live')
+    : enabledProfiles;
+  const fiveMinuteAssetSelections = rankFiveMinuteAssetCandidates(appConfig, selectorProfiles);
   const snapshots: StateSnapshot[] = [];
   for (const profile of enabledProfiles) {
-    snapshots.push(await runBotTick(appConfigForProfile(appConfig, profile), store, data, adapter, discovery, participationService, profile));
+    snapshots.push(await runBotTick(appConfigForProfile(appConfig, profile), store, data, adapter, discovery, participationService, profile, fiveMinuteAssetSelections.get(profile.id)));
   }
   return snapshots;
 }
 
-export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, data: MarketDataService, adapter: PolymarketAdapter, discovery: RecurringCryptoRoundDiscovery, participationService: ParticipationService, profile: MarketProfile = appConfig.marketProfiles[0]): Promise<StateSnapshot> {
+export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, data: MarketDataService, adapter: PolymarketAdapter, discovery: RecurringCryptoRoundDiscovery, participationService: ParticipationService, profile: MarketProfile = appConfig.marketProfiles[0], fiveMinuteAssetSelection?: FiveMinuteAssetSelection): Promise<StateSnapshot> {
   const diagnostics: string[] = [];
   store.setActiveStrategyProfile(appConfig.activeStrategyProfile);
   const classicActive = appConfig.activeStrategyProfile === 'classic';
@@ -53,7 +57,7 @@ export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, dat
   const portfolio = await loadPortfolio(appConfig, adapter, tokenLabels, store.settledPnl(), diagnostics);
   const positions = portfolio.positions.filter((position) => position.label !== 'UNKNOWN');
   const roundSnapshot = roundToSnapshot(appConfig, store, round);
-  const dynamicEntryPrice = selectFiveMinuteEntryPrice(appConfig, profile, roundSnapshot);
+  const dynamicEntryPrice = withAssetSelection(selectFiveMinuteEntryPrice(appConfig, profile, roundSnapshot), fiveMinuteAssetSelection);
   store.recordDynamicEntryPrice(dynamicEntryPrice);
   const entryAppConfig = { ...appConfig, dualLimitPrice: dynamicEntryPrice.selectedPrice };
   const baseSnapshot: StateSnapshot = {
@@ -77,7 +81,7 @@ export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, dat
   const snapshot: StateSnapshot = { ...baseSnapshot, regime: classifyRegime(baseSnapshot, risk) };
   snapshot.orderbookDepth = buildOrderbookDepthSnapshot(snapshot, entryAppConfig);
   const evaluatedEntry = classicActive ? evaluateEntry(snapshot, risk) : evaluateExperimentEntry(snapshot, appConfig, store);
-  const entry = classicActive
+  const confirmedEntry = classicActive
     ? applyEntryConfirmation(
       evaluatedEntry,
       appConfig.bypassEntryScoreGating ? appConfig.entryConfirmTicks : store.recordEntrySignal(`${profile.id}:${snapshot.round.id}`, evaluatedEntry.intents.length > 0),
@@ -85,6 +89,7 @@ export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, dat
       appConfig.bypassEntryScoreGating,
     )
     : evaluatedEntry;
+  const entry = applyFiveMinuteAssetSelection(confirmedEntry, fiveMinuteAssetSelection);
   const intents = entry.intents.map((intent) => withProfile(intent, profile));
   store.recordIntents([...intents, ...entry.rejected.map((intent) => withProfile(intent, profile))]);
   const executionDiagnostics = await executeLiveIntents({
@@ -189,6 +194,51 @@ function appConfigForProfile(appConfig: AppConfig, profile: MarketProfile): AppC
 
 function withProfile<T extends object>(value: T, profile: MarketProfile): T {
   return { ...value, profileId: profile.id, asset: profile.asset, interval: profile.interval };
+}
+
+function withAssetSelection(selection: ReturnType<typeof selectFiveMinuteEntryPrice>, assetSelection?: FiveMinuteAssetSelection): ReturnType<typeof selectFiveMinuteEntryPrice> {
+  if (!assetSelection) return selection;
+  return {
+    ...selection,
+    assetSelectorEnabled: true,
+    assetSelectorSelected: assetSelection.selected,
+    assetSelectorRank: assetSelection.rank,
+    assetSelectorScore: assetSelection.score,
+    reason: `${selection.reason}; ${assetSelection.reason}`,
+  };
+}
+
+function applyFiveMinuteAssetSelection(entry: StrategyEvaluation, assetSelection?: FiveMinuteAssetSelection): StrategyEvaluation {
+  if (!assetSelection) return entry;
+  const selectorCondition = condition('5m asset selector', assetSelection.selected, assetSelection.reason);
+  const checks = entry.checks.map((check) => {
+    if (check.strategy !== 'UPDOWN_DUAL_ENTRY') return check;
+    if (assetSelection.selected) {
+      return { ...check, conditions: [...check.conditions, selectorCondition] };
+    }
+    return {
+      ...check,
+      status: 'blocked' as const,
+      reason: check.reason ? `${check.reason}; PM5M_ASSET_NOT_SELECTED` : 'PM5M_ASSET_NOT_SELECTED',
+      blockers: [...new Set([...check.blockers, 'PM5M_ASSET_NOT_SELECTED'])],
+      conditions: [...check.conditions, selectorCondition],
+    };
+  });
+  if (assetSelection.selected) return { ...entry, checks };
+  return {
+    ...entry,
+    intents: [],
+    rejected: [
+      ...entry.rejected,
+      ...entry.intents.map((intent) => ({
+        ...intent,
+        status: 'rejected' as const,
+        rejectionReason: 'PM5M_ASSET_NOT_SELECTED',
+        reason: `${intent.reason}; ${assetSelection.reason}`,
+      })),
+    ],
+    checks,
+  };
 }
 
 function buildOrderbookDepthSnapshot(snapshot: StateSnapshot, appConfig: AppConfig): OrderbookDepthSnapshot {

@@ -4,7 +4,7 @@ import test from 'node:test';
 import type { MarketProfile } from '../../../packages/shared/src';
 import type { PolymarketAdapter } from '../../../packages/polymarket/src';
 import { loadConfig } from './config';
-import { runAllProfilesTick } from './runtime';
+import { runAllProfilesTick, runBotTick } from './runtime';
 import { InMemoryStore } from './store';
 
 test('entry signal confirmation counts are isolated by market profile', () => {
@@ -151,4 +151,119 @@ test('runAllProfilesTick captures isolated six-asset 5m, 15m, and 1h profile sna
   assert.equal(entryChecks.length, enabledProfiles.length);
   assert.ok(entryChecks.every((check) => check?.status === 'eligible'));
   assert.ok(entryChecks.every((check) => /bypassed/.test(check?.conditions.find((condition) => condition.label === 'Entry signal confirmation')?.actual || '')));
+});
+
+test('runBotTick blocks 5m entry intents when the asset selector does not select the profile', async () => {
+  const config = loadConfig();
+  config.executionMode = 'monitor';
+  config.ownerPrivateKey = undefined;
+  config.depositWallet = undefined;
+  config.pm5mSimPriceEnabled = false;
+  config.pm5mAssetSelectorEnabled = true;
+  const profile = { ...config.marketProfiles.find((item) => item.id === 'btc-5m')!, status: 'monitor' as const };
+  config.marketProfiles = [profile];
+  const store = new InMemoryStore('monitor', 2_000, { persistencePath: false }, 'classic', undefined, config.marketProfiles);
+
+  const data = {
+    latestPrice() {
+      return 100000;
+    },
+    syncClobRound() {},
+    refreshOrderbooks() {
+      return [];
+    },
+    refreshOrderbooksForTokenIds() {
+      return [];
+    },
+    features(round: { strike: number }) {
+      return {
+        price: 100000,
+        strike: round.strike,
+        cross120s: 0,
+        crossFrequency: 0,
+        volatility120s: 0,
+        drift120s: 0,
+        momentum30s: 0,
+        range120s: 0,
+        range300s: 0,
+        rangeBps120s: 0,
+        rangeBps300s: 0,
+        centerPrice120s: 100000,
+        centerCross120s: 0,
+        latestRangePosition120s: null,
+        upExcursionBps120s: 0,
+        downExcursionBps120s: 0,
+        minBiExcursionBps120s: 0,
+        excursionBalance120s: 0,
+        centerUpExcursionBps120s: 0,
+        centerDownExcursionBps120s: 0,
+        centerMinBiExcursionBps120s: 0,
+        centerExcursionBalance120s: 0,
+        driftRatio120s: 1,
+        momentumRatio30s: 1,
+        rangePercentile120s: null,
+        chopScore: 0,
+        samples120s: 1,
+        source: 'binance' as const,
+        updatedAt: new Date().toISOString(),
+      };
+    },
+    status() {
+      return { binanceConnected: true, clobConnected: true, priceSamples: 1, source: 'live' as const };
+    },
+  };
+  const discovery = {
+    async discover(params: { profile: MarketProfile }) {
+      return {
+        diagnostics: [],
+        round: {
+          eventSlug: `${params.profile.seriesSlug}-1`,
+          title: `${params.profile.label} test round`,
+          startAt: new Date(Date.now() + 60_000).toISOString(),
+          endAt: new Date(Date.now() + 360_000).toISOString(),
+          strike: 100000,
+          yesTokenId: `${params.profile.id}-yes`,
+          noTokenId: `${params.profile.id}-no`,
+        },
+      };
+    },
+  };
+  const participation = {
+    async refresh() {
+      return {
+        status: 'disabled' as const,
+        updatedAt: new Date().toISOString(),
+        topHoldersPerSide: 0,
+        maxPositionPnl: null,
+        totalTopHolderShares: 0,
+        totalPositionPnl: 0,
+        sides: [],
+        diagnostics: [],
+      };
+    },
+  };
+  const adapter = {
+    async getPortfolioPositions() {
+      return [];
+    },
+    async getCollateralBalanceAllowance() {
+      return { balance: 0, allowance: 0 };
+    },
+  } as unknown as PolymarketAdapter;
+
+  await runBotTick(config, store, data as never, adapter, discovery as never, participation as never, profile, {
+    profileId: 'btc-5m',
+    selected: false,
+    rank: 2,
+    score: 0.01,
+    reason: '5m asset selector rejected rank #2; outside top 1',
+  });
+
+  const dashboard = store.dashboardState();
+  const entryCheck = dashboard.profiles[0].strategyChecks.find((check) => check.strategy === 'UPDOWN_DUAL_ENTRY');
+
+  assert.equal(entryCheck?.status, 'blocked');
+  assert.ok(entryCheck?.blockers.includes('PM5M_ASSET_NOT_SELECTED'));
+  assert.equal(dashboard.intents.filter((intent) => intent.status === 'generated').length, 0);
+  assert.equal(dashboard.intents.filter((intent) => intent.rejectionReason === 'PM5M_ASSET_NOT_SELECTED').length, 2);
 });

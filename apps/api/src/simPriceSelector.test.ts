@@ -5,7 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 import type { AppConfig } from './config';
-import { selectFiveMinuteEntryPrice } from './simPriceSelector';
+import { rankFiveMinuteAssetCandidates, selectFiveMinuteEntryPrice } from './simPriceSelector';
 import type { MarketProfile, RoundSnapshot } from '../../../packages/shared/src';
 
 test('selects the best positive-EV simulator price for each 5m asset profile', () => {
@@ -46,6 +46,28 @@ test('disables simulator price selection for non-5m profiles', () => {
   assert.equal(selected.selectedPrice, 0.45);
 });
 
+test('ranks 5m asset candidates and selects only the configured top N', () => {
+  const summaryPath = writeSummary([
+    row('btc', 0.36, 0.025, 0.2),
+    row('eth', 0.42, 0.030, 0.1),
+    row('sol', 0.40, 0.020, 0.1),
+  ]);
+  const appConfig = { ...config(summaryPath), pm5mAssetSelectorEnabled: true, pm5mAssetSelectorMaxAssets: 1 };
+  const decisions = rankFiveMinuteAssetCandidates(appConfig, [
+    profile('btc-5m', 'btc'),
+    profile('eth-5m', 'eth'),
+    profile('sol-5m', 'sol'),
+    profile('eth-15m', 'eth', '15m'),
+  ]);
+
+  assert.equal(decisions.get('eth-5m')?.selected, true);
+  assert.equal(decisions.get('eth-5m')?.rank, 1);
+  assert.equal(decisions.get('btc-5m')?.selected, false);
+  assert.equal(decisions.get('btc-5m')?.rank, 2);
+  assert.equal(decisions.get('sol-5m')?.selected, false);
+  assert.equal(decisions.has('eth-15m'), false);
+});
+
 function writeSummary(rows: unknown[]): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pm5m-selector-'));
   const summaryPath = path.join(dir, 'summary.json');
@@ -82,6 +104,8 @@ function config(summaryPath: string): AppConfig {
     pm5mSimPriceMinEv: 0,
     pm5mSimPriceFallback: 0.45,
     pm5mSimPriceMaxSummaryAgeMs: 600_000,
+    pm5mAssetSelectorEnabled: false,
+    pm5mAssetSelectorMaxAssets: 1,
     dualLimitPrice: 0.45,
   } as AppConfig;
 }
