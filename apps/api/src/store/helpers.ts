@@ -79,7 +79,7 @@ export function isTelegramNotificationStateLike(value: unknown): value is Telegr
 }
 
 export function isMarketProfileId(value: unknown): value is MarketProfileId {
-  return typeof value === 'string' && /^(btc|eth|sol|doge)-(5m|15m|1h)$/.test(value);
+  return typeof value === 'string' && /^(btc|eth|sol|doge|xrp|hype)-(5m|15m|1h)$/.test(value);
 }
 
 export function profileAsset(profileId: MarketProfileId): MarketAsset {

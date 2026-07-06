@@ -2,7 +2,7 @@
 
 Deployable Polymarket recurring crypto Up/Down strategy worker and operator dashboard.
 
-The current production path runs recurring crypto Up/Down markets. It supports BTC 5m, 15m, and 1h profiles, plus opt-in ETH 5m, 15m, and 1h profiles, with isolated state, orders, fills, settlements, cooldowns, price samples, and dashboard views. SOL profiles are reserved in code but disabled by default.
+The current production path runs recurring crypto Up/Down markets. It supports BTC, ETH, SOL, DOGE, XRP, and HYPE 5m, 15m, and 1h profiles, with isolated state, orders, fills, settlements, cooldowns, price samples, and dashboard views. Non-BTC profiles are disabled by default until explicitly enabled.
 
 ## Structure
 
@@ -68,7 +68,7 @@ and shares `./data-lab` with the API container.
 
 The worker runs every `BOT_TICK_MS` and produces a multi-profile `DashboardState`:
 
-- Discovers the next BTC/ETH 5m/15m/1h rounds from deterministic `<asset>-updown-<interval>-<roundStartSec>` slugs and Gamma `/markets/slug/:slug`.
+- Discovers the next enabled 5m/15m/1h rounds from deterministic `<asset>-updown-<interval>-<roundStartSec>` slugs and Gamma `/markets/slug/:slug`.
 - Maintains recent per-asset price samples only from Binance public aggTrade websockets.
 - Maintains YES/NO CLOB orderbooks only from the Polymarket CLOB market websocket.
 - Computes per-asset path features including `cross120s`, realized range bps, two-sided excursion bps, drift/momentum ratios, range percentile, and a `chopScore` for diagnostics.
@@ -100,15 +100,24 @@ BTC_1H_PROFILE_STATUS=monitor
 ETH_5M_PROFILE_STATUS=disabled
 ETH_15M_PROFILE_STATUS=disabled
 ETH_1H_PROFILE_STATUS=disabled
+SOL_5M_PROFILE_STATUS=disabled
+SOL_15M_PROFILE_STATUS=disabled
+SOL_1H_PROFILE_STATUS=disabled
 DOGE_5M_PROFILE_STATUS=disabled
 DOGE_15M_PROFILE_STATUS=disabled
 DOGE_1H_PROFILE_STATUS=disabled
+XRP_5M_PROFILE_STATUS=disabled
+XRP_15M_PROFILE_STATUS=disabled
+XRP_1H_PROFILE_STATUS=disabled
+HYPE_5M_PROFILE_STATUS=disabled
+HYPE_15M_PROFILE_STATUS=disabled
+HYPE_1H_PROFILE_STATUS=disabled
 ```
 
 Recommended live feed settings:
 
 ```dotenv
-BINANCE_WS_URL=wss://stream.binance.com:9443/stream?streams=btcusdt@aggTrade/ethusdt@aggTrade/dogeusdt@aggTrade
+BINANCE_WS_URL=wss://stream.binance.com:9443/stream?streams=btcusdt@aggTrade/ethusdt@aggTrade/solusdt@aggTrade/dogeusdt@aggTrade/xrpusdt@aggTrade/hypeusdt@aggTrade
 BINANCE_PRICE_SAMPLE_MS=1000
 POLYMARKET_CLOB_WS_URL=wss://ws-subscriptions-clob.polymarket.com/ws/market
 POLYMARKET_GAMMA_API_URL=https://gamma-api.polymarket.com

@@ -3,6 +3,8 @@ import path from 'node:path';
 
 import { btcMarketConfigSchema, type BtcMarketConfig, type ExecutionMode, type MarketInterval, type MarketProfile, type MarketProfileId, type StrategyProfile } from '../../../packages/shared/src';
 
+type SupportedAssetSymbol = 'BTC' | 'ETH' | 'SOL' | 'DOGE' | 'XRP' | 'HYPE';
+
 export type AppConfig = {
   port: number;
   dashboardInternalApiKey?: string;
@@ -242,16 +244,31 @@ function loadMarketProfiles(orderSharesPerSide: number): MarketProfile[] {
     '15m': parseProfileStatus(process.env.BTC_15M_PROFILE_STATUS, 'monitor'),
     '1h': parseProfileStatus(process.env.BTC_1H_PROFILE_STATUS, 'monitor'),
   };
-  const altStatuses: Record<'ETH' | 'DOGE', Record<MarketInterval, MarketProfile['status']>> = {
+  const altStatuses: Record<Exclude<SupportedAssetSymbol, 'BTC'>, Record<MarketInterval, MarketProfile['status']>> = {
     ETH: {
       '5m': parseProfileStatus(process.env.ETH_5M_PROFILE_STATUS, 'disabled'),
       '15m': parseProfileStatus(process.env.ETH_15M_PROFILE_STATUS, 'disabled'),
       '1h': parseProfileStatus(process.env.ETH_1H_PROFILE_STATUS, 'disabled'),
     },
+    SOL: {
+      '5m': parseProfileStatus(process.env.SOL_5M_PROFILE_STATUS, 'disabled'),
+      '15m': parseProfileStatus(process.env.SOL_15M_PROFILE_STATUS, 'disabled'),
+      '1h': parseProfileStatus(process.env.SOL_1H_PROFILE_STATUS, 'disabled'),
+    },
     DOGE: {
       '5m': parseProfileStatus(process.env.DOGE_5M_PROFILE_STATUS, 'disabled'),
       '15m': parseProfileStatus(process.env.DOGE_15M_PROFILE_STATUS, 'disabled'),
       '1h': parseProfileStatus(process.env.DOGE_1H_PROFILE_STATUS, 'disabled'),
+    },
+    XRP: {
+      '5m': parseProfileStatus(process.env.XRP_5M_PROFILE_STATUS, 'disabled'),
+      '15m': parseProfileStatus(process.env.XRP_15M_PROFILE_STATUS, 'disabled'),
+      '1h': parseProfileStatus(process.env.XRP_1H_PROFILE_STATUS, 'disabled'),
+    },
+    HYPE: {
+      '5m': parseProfileStatus(process.env.HYPE_5M_PROFILE_STATUS, 'disabled'),
+      '15m': parseProfileStatus(process.env.HYPE_15M_PROFILE_STATUS, 'disabled'),
+      '1h': parseProfileStatus(process.env.HYPE_1H_PROFILE_STATUS, 'disabled'),
     },
   };
   const profiles: MarketProfile[] = [
@@ -260,7 +277,7 @@ function loadMarketProfiles(orderSharesPerSide: number): MarketProfile[] {
     makeProfile({ id: 'btc-1h', assetSymbol: 'BTC', interval: '1h', status: btcStatuses['1h'], durationSeconds: 3600, decisionLeadSeconds: 180, orderSharesPerSide, limitPrice: baseLimitPrice, minSecondsToStart: baseMinSecondsToStart, confirmTicks: baseConfirmTicks, hedgeWindows: [600, 300, 60], priceFeedSymbol: 'btcusdt' }),
   ];
 
-  for (const assetSymbol of ['ETH', 'SOL', 'DOGE'] as const) {
+  for (const assetSymbol of ['ETH', 'SOL', 'DOGE', 'XRP', 'HYPE'] as const) {
     for (const interval of ['5m', '15m', '1h'] as const) {
       const durationSeconds = interval === '5m' ? 300 : interval === '15m' ? 900 : 3600;
       const decisionLeadSeconds = interval === '5m' ? 30 : interval === '15m' ? 90 : 180;
@@ -269,7 +286,7 @@ function loadMarketProfiles(orderSharesPerSide: number): MarketProfile[] {
         id: `${assetSymbol.toLowerCase()}-${interval}` as MarketProfileId,
         assetSymbol,
         interval,
-        status: assetSymbol === 'ETH' || assetSymbol === 'DOGE' ? altStatuses[assetSymbol][interval] : 'disabled',
+        status: altStatuses[assetSymbol][interval],
         durationSeconds,
         decisionLeadSeconds,
         orderSharesPerSide,
@@ -286,7 +303,7 @@ function loadMarketProfiles(orderSharesPerSide: number): MarketProfile[] {
 
 function makeProfile(params: {
   id: MarketProfileId;
-  assetSymbol: 'BTC' | 'ETH' | 'SOL' | 'DOGE';
+  assetSymbol: SupportedAssetSymbol;
   interval: MarketInterval;
   status: MarketProfile['status'];
   durationSeconds: number;
@@ -352,7 +369,7 @@ function makeProfile(params: {
   };
 }
 
-function profileCooldownMs(params: { assetSymbol: 'BTC' | 'ETH' | 'SOL' | 'DOGE'; interval: MarketInterval }, key: string, fiveMinuteDefaultMs: number): number {
+function profileCooldownMs(params: { assetSymbol: SupportedAssetSymbol; interval: MarketInterval }, key: string, fiveMinuteDefaultMs: number): number {
   const intervalKey = params.interval.toUpperCase().replace(/[^A-Z0-9]/g, '_');
   const assetIntervalKey = `${params.assetSymbol}_${intervalKey}_SINGLE_FILL_COOLDOWN_${key}_MS`;
   const intervalOnlyKey = `${intervalKey}_SINGLE_FILL_COOLDOWN_${key}_MS`;
@@ -361,6 +378,7 @@ function profileCooldownMs(params: { assetSymbol: 'BTC' | 'ETH' | 'SOL' | 'DOGE'
 
 function parseProfileStatus(value: string | undefined, fallback: MarketProfile['status']): MarketProfile['status'] {
   const normalized = value?.trim().toLowerCase();
+  if (normalized === 'disable') return 'disabled';
   if (normalized === 'live' || normalized === 'monitor' || normalized === 'disabled') return normalized;
   return fallback;
 }
@@ -396,7 +414,7 @@ function booleanEnv(name: string, fallback: boolean): boolean {
 }
 
 function binanceWsUrl(value: string | undefined, profiles: MarketProfile[]): string {
-  const url = value?.trim() || 'wss://stream.binance.com:9443/stream?streams=btcusdt@aggTrade/ethusdt@aggTrade/dogeusdt@aggTrade';
+  const url = value?.trim() || 'wss://stream.binance.com:9443/stream?streams=btcusdt@aggTrade/ethusdt@aggTrade/solusdt@aggTrade/dogeusdt@aggTrade/xrpusdt@aggTrade/hypeusdt@aggTrade';
   if (!url.startsWith('wss://')) throw new Error('BINANCE_WS_URL must be a wss:// URL.');
   if (!url.includes('/stream?streams=') && !url.includes('/ws/')) return url;
   const [base, streamList = ''] = url.includes('/stream?streams=')

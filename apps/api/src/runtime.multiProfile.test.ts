@@ -20,15 +20,15 @@ test('entry signal confirmation counts are isolated by market profile', () => {
   assert.equal(store.recordEntrySignal('btc-5m:round-a', true), 1);
 });
 
-test('runAllProfilesTick captures isolated BTC, ETH, and DOGE 5m, 15m, and 1h profile snapshots', async () => {
+test('runAllProfilesTick captures isolated six-asset 5m, 15m, and 1h profile snapshots', async () => {
   const config = loadConfig();
   config.executionMode = 'monitor';
   config.ownerPrivateKey = undefined;
   config.depositWallet = undefined;
   config.marketProfiles = config.marketProfiles.map((profile) => (
-    profile.asset === 'btc' || profile.asset === 'eth' || profile.asset === 'doge' ? { ...profile, status: 'monitor' } : profile
+    { ...profile, status: 'monitor' }
   ));
-  const enabledProfiles = config.marketProfiles.filter((profile) => (profile.asset === 'btc' || profile.asset === 'eth' || profile.asset === 'doge') && profile.status !== 'disabled');
+  const enabledProfiles = config.marketProfiles.filter((profile) => profile.status !== 'disabled');
   const store = new InMemoryStore('monitor', 2_000, { persistencePath: false }, 'classic', undefined, config.marketProfiles);
   const syncedTokens: string[][] = [];
 
@@ -132,8 +132,22 @@ test('runAllProfilesTick captures isolated BTC, ETH, and DOGE 5m, 15m, and 1h pr
 
   assert.deepEqual(snapshots.map((snapshot) => snapshot.profileId).sort(), enabledProfiles.map((profile) => profile.id).sort());
   assert.equal(dashboard.profiles.length, enabledProfiles.length);
-  assert.deepEqual(dashboard.profiles.map((item) => item.profile.id).sort(), ['btc-15m', 'btc-1h', 'btc-5m', 'doge-15m', 'doge-1h', 'doge-5m', 'eth-15m', 'eth-1h', 'eth-5m']);
-  assert.deepEqual(syncedTokens.flat().filter((token) => token.endsWith('-yes')).sort(), ['btc-15m-yes', 'btc-1h-yes', 'btc-5m-yes', 'doge-15m-yes', 'doge-1h-yes', 'doge-5m-yes', 'eth-15m-yes', 'eth-1h-yes', 'eth-5m-yes']);
+  assert.deepEqual(dashboard.profiles.map((item) => item.profile.id).sort(), [
+    'btc-15m', 'btc-1h', 'btc-5m',
+    'doge-15m', 'doge-1h', 'doge-5m',
+    'eth-15m', 'eth-1h', 'eth-5m',
+    'hype-15m', 'hype-1h', 'hype-5m',
+    'sol-15m', 'sol-1h', 'sol-5m',
+    'xrp-15m', 'xrp-1h', 'xrp-5m',
+  ]);
+  assert.deepEqual(syncedTokens.flat().filter((token) => token.endsWith('-yes')).sort(), [
+    'btc-15m-yes', 'btc-1h-yes', 'btc-5m-yes',
+    'doge-15m-yes', 'doge-1h-yes', 'doge-5m-yes',
+    'eth-15m-yes', 'eth-1h-yes', 'eth-5m-yes',
+    'hype-15m-yes', 'hype-1h-yes', 'hype-5m-yes',
+    'sol-15m-yes', 'sol-1h-yes', 'sol-5m-yes',
+    'xrp-15m-yes', 'xrp-1h-yes', 'xrp-5m-yes',
+  ]);
   assert.equal(entryChecks.length, enabledProfiles.length);
   assert.ok(entryChecks.every((check) => check?.status === 'eligible'));
   assert.ok(entryChecks.every((check) => /bypassed/.test(check?.conditions.find((condition) => condition.label === 'Entry signal confirmation')?.actual || '')));

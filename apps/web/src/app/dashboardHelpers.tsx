@@ -476,12 +476,19 @@ export function profileLabelFor(profiles: DashboardState['profiles'], profileId:
 
 export function inferProfileIdFromRound(roundId?: string): string | undefined {
   if (!roundId) return undefined;
-  if (roundId.includes('eth-updown-5m')) return 'eth-5m';
-  if (roundId.includes('eth-updown-15m')) return 'eth-15m';
-  if (roundId.includes('eth-updown-1h') || roundId.includes('ethereum-up-or-down')) return 'eth-1h';
-  if (roundId.includes('btc-updown-5m')) return 'btc-5m';
-  if (roundId.includes('btc-updown-15m')) return 'btc-15m';
-  if (roundId.includes('btc-updown-1h') || roundId.includes('bitcoin-up-or-down')) return 'btc-1h';
+  const assets = [
+    ['btc', 'bitcoin'],
+    ['eth', 'ethereum'],
+    ['sol', 'solana'],
+    ['doge', 'dogecoin'],
+    ['xrp', 'xrp'],
+    ['hype', 'hyperliquid'],
+  ] as const;
+  for (const [asset, humanSlug] of assets) {
+    if (roundId.includes(`${asset}-updown-5m`)) return `${asset}-5m`;
+    if (roundId.includes(`${asset}-updown-15m`)) return `${asset}-15m`;
+    if (roundId.includes(`${asset}-updown-1h`) || roundId.includes(`${humanSlug}-up-or-down`)) return `${asset}-1h`;
+  }
   return undefined;
 }
 
