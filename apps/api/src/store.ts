@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { STRATEGY_RULES } from '../../../packages/strategy/src';
-import type { BotRuntimeStatus, DashboardState, DataFeedStatus, EntryRuntimeConfig, ExecutionMode, FillRecord, MarketProfile, MarketProfileId, OrderRecord, RuntimeLogRecord, SettlementRecord, StateSnapshot, StrategyCheck, StrategyId, StrategyProfile, TradeIntent } from '../../../packages/shared/src';
+import type { BotRuntimeStatus, DashboardState, DataFeedStatus, DynamicEntryPriceSelection, EntryRuntimeConfig, ExecutionMode, FillRecord, MarketProfile, MarketProfileId, OrderRecord, RuntimeLogRecord, SettlementRecord, StateSnapshot, StrategyCheck, StrategyId, StrategyProfile, TradeIntent } from '../../../packages/shared/src';
 
 type OpenOrderLike = {
   id: string;
@@ -126,6 +126,7 @@ export class InMemoryStore {
   private entrySignalCounts = new Map<string, number>();
   private runtimeLogs: RuntimeLogRecord[] = [];
   private strategyChecksByProfile = new Map<MarketProfileId, StrategyCheck[]>();
+  private dynamicEntryPrices = new Map<MarketProfileId, DynamicEntryPriceSelection>();
   private telegramNotifications: TelegramNotificationState = { notifiedRoundSummaryKeys: [] };
   private experimentRunStartedAt = new Date().toISOString();
   private readonly persistencePath?: string;
@@ -240,6 +241,10 @@ export class InMemoryStore {
 
   recordStrategyChecks(checks: StrategyCheck[], profileId: MarketProfileId): void {
     this.strategyChecksByProfile.set(profileId, checks);
+  }
+
+  recordDynamicEntryPrice(selection: DynamicEntryPriceSelection): void {
+    this.dynamicEntryPrices.set(selection.profileId, selection);
   }
 
   recordEntrySignal(signalKey: string, passed: boolean): number {
@@ -739,6 +744,7 @@ export class InMemoryStore {
       strategyChecks: this.strategyChecksByProfile.get(profile.id) || [],
       entryCooldownUntil: this.singleFillCooldowns.get(profile.id)?.expiresAt,
       entryCooldownReason: this.entryCooldownReason(profile.id),
+      dynamicEntryPrice: this.dynamicEntryPrices.get(profile.id),
       stats: {
         orders: this.orders.filter((order) => order.profileId === profile.id).length,
         fills: this.fills.filter((fill) => fill.profileId === profile.id).length,

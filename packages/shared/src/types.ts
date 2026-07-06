@@ -482,10 +482,29 @@ export type ProfileDashboardState = {
   strategyChecks: StrategyCheck[];
   entryCooldownUntil?: string;
   entryCooldownReason?: string;
+  dynamicEntryPrice?: DynamicEntryPriceSelection;
   stats: {
     orders: number;
     fills: number;
     settlements: number;
     settledPnl: number;
   };
+};
+
+export type DynamicEntryPriceSelection = {
+  profileId: MarketProfileId;
+  enabled: boolean;
+  source: 'simulator' | 'fallback' | 'disabled';
+  selectedPrice: number;
+  fallbackPrice: number;
+  reason: string;
+  selectedAt: string;
+  nextSelectionAt?: string;
+  summaryGeneratedAt?: string;
+  summaryAgeMs?: number;
+  rounds?: number;
+  pairedRate?: number | null;
+  singleRate?: number | null;
+  noneRate?: number | null;
+  estimatedEvPerShare?: number | null;
 };

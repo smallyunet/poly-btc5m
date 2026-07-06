@@ -10,6 +10,7 @@ import type { MarketDataService } from './marketData';
 import type { ParticipationService } from './participation';
 import type { RecurringCryptoRoundDiscovery } from './roundDiscovery';
 import type { InMemoryStore, SingleFillCooldownRecord } from './store';
+import { selectBtc5mEntryPrice } from './simPriceSelector';
 
 export async function runAllProfilesTick(appConfig: AppConfig, store: InMemoryStore, data: MarketDataService, adapter: PolymarketAdapter, discovery: RecurringCryptoRoundDiscovery, participationService: ParticipationService): Promise<StateSnapshot[]> {
   const enabledProfiles = appConfig.marketProfiles.filter((profile) => profile.status !== 'disabled');
@@ -45,13 +46,16 @@ export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, dat
   const participation = await participationService.refresh(round);
   diagnostics.push(...participation.diagnostics);
   const features = data.features(round, profile);
-  const roundSnapshot = roundToSnapshot(appConfig, store, round);
   const tokenLabels = new Map<string, 'YES' | 'NO'>([
     [round.yesTokenId, 'YES'],
     [round.noTokenId, 'NO'],
   ]);
   const portfolio = await loadPortfolio(appConfig, adapter, tokenLabels, store.settledPnl(), diagnostics);
   const positions = portfolio.positions.filter((position) => position.label !== 'UNKNOWN');
+  const roundSnapshot = roundToSnapshot(appConfig, store, round);
+  const dynamicEntryPrice = selectBtc5mEntryPrice(appConfig, profile, roundSnapshot);
+  store.recordDynamicEntryPrice(dynamicEntryPrice);
+  const entryAppConfig = { ...appConfig, dualLimitPrice: dynamicEntryPrice.selectedPrice };
   const baseSnapshot: StateSnapshot = {
     id: `snapshot-${Date.now()}`,
     profileId: profile.id,
@@ -69,9 +73,9 @@ export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, dat
     diagnostics,
   };
   const activeCooldown = store.getActiveEntryCooldown(profile.id);
-  const risk = riskConfig(appConfig, store.getRuntime().executionMode !== 'live', activeCooldown?.expiresAt, activeCooldown ? `single fill on ${activeCooldown.roundId}` : undefined);
+  const risk = riskConfig(entryAppConfig, store.getRuntime().executionMode !== 'live', activeCooldown?.expiresAt, activeCooldown ? `single fill on ${activeCooldown.roundId}` : undefined);
   const snapshot: StateSnapshot = { ...baseSnapshot, regime: classifyRegime(baseSnapshot, risk) };
-  snapshot.orderbookDepth = buildOrderbookDepthSnapshot(snapshot, appConfig);
+  snapshot.orderbookDepth = buildOrderbookDepthSnapshot(snapshot, entryAppConfig);
   const evaluatedEntry = classicActive ? evaluateEntry(snapshot, risk) : evaluateExperimentEntry(snapshot, appConfig, store);
   const entry = classicActive
     ? applyEntryConfirmation(
