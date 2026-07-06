@@ -61,6 +61,19 @@ test('falls back when no asset-specific simulator row passes range and min-round
   assert.equal(selected.selectedPrice, 0.45);
 });
 
+test('uses all-time simulator rows when lookback rows do not meet min rounds', () => {
+  const summaryPath = writeSummary([
+    { ...row('btc', 0.40, 0.010, 0.2), rounds: 20 },
+  ], [
+    row('btc', 0.42, 0.005, 0.25),
+  ]);
+  const selected = selectFiveMinuteEntryPrice(config(summaryPath), profile('btc-5m', 'btc'), round('btc-updown-5m-test-alltime'));
+
+  assert.equal(selected.source, 'simulator');
+  assert.equal(selected.selectedPrice, 0.42);
+  assert.match(selected.reason, /all-time fallback/);
+});
+
 test('disables simulator price selection for non-5m profiles', () => {
   const summaryPath = writeSummary([
     row('btc', 0.36, 0.025, 0.356),
@@ -112,13 +125,15 @@ test('ranks 5m asset candidates by highest score without requiring positive EV',
   assert.equal(decisions.get('sol-5m')?.selected, false);
 });
 
-function writeSummary(rows: unknown[]): string {
+function writeSummary(rows: unknown[], allTimeRows?: unknown[]): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pm5m-selector-'));
   const summaryPath = path.join(dir, 'summary.json');
   fs.writeFileSync(summaryPath, JSON.stringify({
     ok: true,
     generatedAt: new Date().toISOString(),
+    config: { lookbackHours: 12 },
     completed: { byAssetPrice: rows },
+    completedAllTime: allTimeRows ? { byAssetPrice: allTimeRows } : undefined,
   }));
   return summaryPath;
 }

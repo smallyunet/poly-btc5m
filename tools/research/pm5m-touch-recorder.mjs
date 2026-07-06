@@ -25,6 +25,7 @@ const config = {
   clobWsUrl: args.clobWsUrl || DEFAULT_CLOB_WS_URL,
   discoveryMs: args.discoveryMs ?? 30_000,
   summaryMs: args.summaryMs ?? 5_000,
+  lookbackHours: args.lookbackHours ?? numberFromEnv('PM5M_TOUCH_LOOKBACK_HOURS', 12),
 };
 
 const priceLevels = buildPriceLevels(config.minPrice, config.maxPrice, config.step);
@@ -89,6 +90,9 @@ function parseArgs(argv) {
     } else if (arg === '--summary-ms') {
       parsed.summaryMs = Number(next);
       index += 1;
+    } else if (arg === '--lookback-hours') {
+      parsed.lookbackHours = Number(next);
+      index += 1;
     }
   }
   return parsed;
@@ -108,6 +112,7 @@ Options:
   --clob-ws-url wss://ws-subscriptions-clob.polymarket.com/ws/market
   --discovery-ms 30000
   --summary-ms 5000
+  --lookback-hours 12
 `);
 }
 
@@ -336,8 +341,13 @@ function writeSummary() {
     const target = round.finalized ? currentCompletedResults : activeResults;
     target.push(...resultRowsForRound(round));
   }
-  const completedResults = uniqueResultRows([...historicalCompletedResults, ...currentCompletedResults]);
-  const completed = aggregate(completedResults);
+  const completedAllTimeResults = uniqueResultRows([...historicalCompletedResults, ...currentCompletedResults]);
+  const windowStartMs = config.lookbackHours > 0 ? Date.now() - config.lookbackHours * 60 * 60 * 1000 : null;
+  const completedWindowResults = windowStartMs == null
+    ? completedAllTimeResults
+    : completedAllTimeResults.filter((row) => rowStartMs(row) == null || rowStartMs(row) >= windowStartMs);
+  const completed = aggregate(completedWindowResults);
+  const completedAllTime = aggregate(completedAllTimeResults);
 
   const summary = {
     ok: true,
@@ -350,6 +360,8 @@ function writeSummary() {
       maxPrice: config.maxPrice,
       step: config.step,
       priceLevels,
+      lookbackHours: config.lookbackHours,
+      lookbackStartAt: windowStartMs == null ? null : new Date(windowStartMs).toISOString(),
       gammaUrl: config.gammaUrl,
       clobWsUrl: config.clobWsUrl,
     },
@@ -358,10 +370,12 @@ function writeSummary() {
       subscribedTokens: subscribedKey ? subscribedKey.split('|').filter(Boolean).length : 0,
       activeRounds: [...rounds.values()].filter((round) => !round.finalized).length,
       completedRounds: completed.rounds,
+      completedAllTimeRounds: completedAllTime.rounds,
       historicalCompletedRows: historicalCompletedResults.length,
     },
     active: aggregate(activeResults),
     completed,
+    completedAllTime,
     recentRounds: [...rounds.values()]
       .sort((a, b) => new Date(b.startAt).getTime() - new Date(a.startAt).getTime())
       .slice(0, 30)
@@ -381,6 +395,11 @@ function writeSummary() {
       })),
   };
   writeJsonAtomic('summary.json', summary);
+}
+
+function rowStartMs(row) {
+  const value = typeof row.startAt === 'string' ? Date.parse(row.startAt) : NaN;
+  return Number.isFinite(value) ? value : null;
 }
 
 function loadHistoricalCompletedResults() {
@@ -534,6 +553,11 @@ function parseStringArray(value) {
 function finiteNumber(value) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function numberFromEnv(name, fallback) {
+  const parsed = Number(process.env[name]);
+  return Number.isFinite(parsed) ? parsed : fallback;
 }
 
 function priceKey(price) {

@@ -445,9 +445,12 @@ export function App() {
     const endMs = new Date(round.endAt).getTime();
     return Number.isFinite(startMs) && Number.isFinite(endMs) && startMs <= nowMs && nowMs <= endMs;
   });
-  const touchCommand = 'npm run research:pm5m-touch -- --assets btc,eth,sol,doge,xrp,hype --min-price 0.29 --max-price 0.49';
+  const touchCommand = 'npm run research:pm5m-touch -- --assets btc,eth,sol,doge,xrp,hype --min-price 0.29 --max-price 0.49 --lookback-hours 12';
   const touchGeneratedAtMs = touchSim?.generatedAt ? new Date(touchSim.generatedAt).getTime() : 0;
   const touchGeneratedLabel = touchGeneratedAtMs ? formatRelativeAge(touchGeneratedAtMs, nowMs) : 'not generated';
+  const touchLookbackHours = touchSim?.config?.lookbackHours;
+  const touchLookbackLabel = touchLookbackHours && Number.isFinite(touchLookbackHours) ? `${touchLookbackHours}h` : 'all-time';
+  const touchAllTimeRounds = touchSimStatus?.completedAllTimeRounds ?? touchSim?.completedAllTime?.rounds;
   const isResearchTab = activeTab === 'simulation';
 
   return (
@@ -1348,15 +1351,15 @@ export function App() {
                       tone={(touchSimStatus?.activeRounds ?? touchSim.active?.rounds ?? 0) > 0 ? 'good' : 'neutral'}
                     />
                     <DecisionMetric
-                      label="Completed rounds"
+                      label="Window rounds"
                       value={String(touchSimStatus?.completedRounds ?? touchSim.completed?.rounds ?? 0)}
-                      detail={`${touchCompletedByPrice.length} price levels`}
+                      detail={`${touchLookbackLabel} lookback / ${touchCompletedByPrice.length} levels`}
                       tone={(touchSimStatus?.completedRounds ?? touchSim.completed?.rounds ?? 0) > 0 ? 'good' : 'warn'}
                     />
                     <DecisionMetric
                       label="Sample scope"
                       value={`${touchSim.config?.assets.length ?? 0} assets`}
-                      detail={`${touchSim.config?.priceLevels.length ?? 0} levels / ${touchSim.config?.interval ?? '5m'}`}
+                      detail={`${touchAllTimeRounds ?? 0} all-time rounds / ${touchSim.config?.interval ?? '5m'}`}
                       tone="neutral"
                     />
                   </div>
@@ -1395,7 +1398,7 @@ export function App() {
                         <span className="sectionKicker">Completed rounds</span>
                         <h3>Price-Level Outcome Rates</h3>
                       </div>
-                      <span className="panelSubTitle">{touchSim.completed?.rows ?? 0} finalized rows</span>
+                      <span className="panelSubTitle">{touchSim.completed?.rows ?? 0} finalized rows / {touchLookbackLabel}</span>
                     </div>
                     {touchCompletedByPrice.length > 0 ? (
                       <DataTable headers={['Price', 'Rounds', 'Paired', 'Single', 'None', 'Break-even single', 'EV/share']}>

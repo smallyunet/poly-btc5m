@@ -20,6 +20,12 @@ type TouchSummary = {
   completed?: {
     byAssetPrice?: TouchAggregateRow[];
   };
+  completedAllTime?: {
+    byAssetPrice?: TouchAggregateRow[];
+  };
+  config?: {
+    lookbackHours?: number | null;
+  };
 };
 
 let cachedSummary: { path: string; loadedAt: number; summary: TouchSummary } | null = null;
@@ -40,6 +46,7 @@ type AssetCandidate = {
   profile: MarketProfile;
   row: TouchAggregateRow;
   score: number;
+  sampleScope: 'lookback' | 'all-time';
 };
 
 export function selectFiveMinuteEntryPrice(appConfig: AppConfig, profile: MarketProfile, round: RoundSnapshot): DynamicEntryPriceSelection {
@@ -77,13 +84,8 @@ export function selectFiveMinuteEntryPrice(appConfig: AppConfig, profile: Market
     ));
   }
 
-  const candidates = (summary.value.completed?.byAssetPrice || [])
-    .filter((row) => row.asset === profile.asset)
-    .filter((row) => row.price >= appConfig.pm5mSimPriceMin - 0.000001 && row.price <= appConfig.pm5mSimPriceMax + 0.000001)
-    .filter((row) => row.rounds >= appConfig.pm5mSimPriceMinRounds)
-    .sort((a, b) => sortSimulatorRows(appConfig, a, b));
-
-  const best = candidates[0];
+  const best = bestSimulatorRow(appConfig, profile, summaryRows(summary.value, 'lookback'))
+    ?? bestSimulatorRow(appConfig, profile, summaryRows(summary.value, 'all-time'), 'all-time');
   if (!best) {
     return lock(lockKey, fallbackSelection(
       profile,
@@ -95,23 +97,24 @@ export function selectFiveMinuteEntryPrice(appConfig: AppConfig, profile: Market
       summaryAgeMs,
     ));
   }
+  const sampleScope = best.sampleScope === 'all-time' ? 'all-time fallback' : summaryWindowLabel(summary.value);
 
   return lock(lockKey, {
     profileId: profile.id,
     enabled: true,
     source: 'simulator',
-    selectedPrice: roundPrice(best.price),
+    selectedPrice: roundPrice(best.row.price),
     fallbackPrice,
-    reason: `best ${profile.asset} simulator score ${assetSelectorScore(best, appConfig.pm5mAssetSelectorSinglePenalty).toFixed(4)}/share = EV ${best.estimatedEvPerShare.toFixed(4)} - ${appConfig.pm5mAssetSelectorSinglePenalty.toFixed(3)}*single ${(best.singleRate ?? 0).toFixed(4)}`,
+    reason: `best ${profile.asset} simulator score ${assetSelectorScore(best.row, appConfig.pm5mAssetSelectorSinglePenalty).toFixed(4)}/share from ${sampleScope} = EV ${best.row.estimatedEvPerShare.toFixed(4)} - ${appConfig.pm5mAssetSelectorSinglePenalty.toFixed(3)}*single ${(best.row.singleRate ?? 0).toFixed(4)}`,
     selectedAt,
     nextSelectionAt,
     summaryGeneratedAt: summary.value.generatedAt,
     summaryAgeMs,
-    rounds: best.rounds,
-    pairedRate: best.pairedRate,
-    singleRate: best.singleRate,
-    noneRate: best.noneRate,
-    estimatedEvPerShare: best.estimatedEvPerShare,
+    rounds: best.row.rounds,
+    pairedRate: best.row.pairedRate,
+    singleRate: best.row.singleRate,
+    noneRate: best.row.noneRate,
+    estimatedEvPerShare: best.row.estimatedEvPerShare,
   });
 }
 
@@ -144,11 +147,11 @@ export function rankFiveMinuteAssetCandidates(appConfig: AppConfig, profiles: Ma
     return decisions;
   }
 
-  const rows = summary.value.completed?.byAssetPrice || [];
   const candidates = fiveMinuteProfiles
     .map((profile): AssetCandidate | null => {
-      const row = bestSimulatorRow(appConfig, profile, rows);
-      return row ? { profile, row, score: assetSelectorScore(row, appConfig.pm5mAssetSelectorSinglePenalty) } : null;
+      const best = bestSimulatorRow(appConfig, profile, summaryRows(summary.value, 'lookback'))
+        ?? bestSimulatorRow(appConfig, profile, summaryRows(summary.value, 'all-time'), 'all-time');
+      return best ? { profile, row: best.row, score: assetSelectorScore(best.row, appConfig.pm5mAssetSelectorSinglePenalty), sampleScope: best.sampleScope } : null;
     })
     .filter((candidate): candidate is AssetCandidate => Boolean(candidate))
     .sort(sortAssetCandidates);
@@ -177,7 +180,7 @@ export function rankFiveMinuteAssetCandidates(appConfig: AppConfig, profiles: Ma
       singleRate: ranked.candidate.row.singleRate,
       singlePenalty: appConfig.pm5mAssetSelectorSinglePenalty,
       reason: selected
-        ? `5m asset selector selected rank #${ranked.rank} (${profile.asset} score ${ranked.candidate.score.toFixed(4)}/share = EV ${ranked.candidate.row.estimatedEvPerShare.toFixed(4)} - ${appConfig.pm5mAssetSelectorSinglePenalty.toFixed(3)}*single ${(ranked.candidate.row.singleRate ?? 0).toFixed(4)})`
+        ? `5m asset selector selected rank #${ranked.rank} (${profile.asset} ${ranked.candidate.sampleScope} score ${ranked.candidate.score.toFixed(4)}/share = EV ${ranked.candidate.row.estimatedEvPerShare.toFixed(4)} - ${appConfig.pm5mAssetSelectorSinglePenalty.toFixed(3)}*single ${(ranked.candidate.row.singleRate ?? 0).toFixed(4)})`
         : `5m asset selector rejected rank #${ranked.rank}; outside top ${maxSelected}`,
     });
   }
@@ -185,12 +188,23 @@ export function rankFiveMinuteAssetCandidates(appConfig: AppConfig, profiles: Ma
   return decisions;
 }
 
-function bestSimulatorRow(appConfig: AppConfig, profile: MarketProfile, rows: TouchAggregateRow[]): TouchAggregateRow | undefined {
-  return rows
+function summaryRows(summary: TouchSummary, sampleScope: 'lookback' | 'all-time'): TouchAggregateRow[] {
+  if (sampleScope === 'all-time') return summary.completedAllTime?.byAssetPrice || [];
+  return summary.completed?.byAssetPrice || [];
+}
+
+function bestSimulatorRow(appConfig: AppConfig, profile: MarketProfile, rows: TouchAggregateRow[], sampleScope: 'lookback' | 'all-time' = 'lookback'): { row: TouchAggregateRow; sampleScope: 'lookback' | 'all-time' } | undefined {
+  const row = rows
     .filter((row) => row.asset === profile.asset)
     .filter((row) => row.price >= appConfig.pm5mSimPriceMin - 0.000001 && row.price <= appConfig.pm5mSimPriceMax + 0.000001)
     .filter((row) => row.rounds >= appConfig.pm5mSimPriceMinRounds)
     .sort((a, b) => sortSimulatorRows(appConfig, a, b))[0];
+  return row ? { row, sampleScope } : undefined;
+}
+
+function summaryWindowLabel(summary: TouchSummary): string {
+  const hours = summary.config?.lookbackHours;
+  return hours && Number.isFinite(hours) ? `${hours}h lookback` : 'lookback';
 }
 
 function sortSimulatorRows(appConfig: AppConfig, a: TouchAggregateRow, b: TouchAggregateRow): number {

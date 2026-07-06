@@ -134,12 +134,15 @@ export type TouchSimSummary = {
     maxPrice: number;
     step: number;
     priceLevels: number[];
+    lookbackHours?: number | null;
+    lookbackStartAt?: string | null;
   };
   status?: {
     websocketConnected?: boolean;
     subscribedTokens?: number;
     activeRounds?: number;
     completedRounds?: number;
+    completedAllTimeRounds?: number;
   } | string;
   active?: {
     rounds: number;
@@ -148,6 +151,12 @@ export type TouchSimSummary = {
     byAssetPrice: TouchSimAggregateRow[];
   };
   completed?: {
+    rounds: number;
+    rows: number;
+    byPrice: TouchSimAggregateRow[];
+    byAssetPrice: TouchSimAggregateRow[];
+  };
+  completedAllTime?: {
     rounds: number;
     rows: number;
     byPrice: TouchSimAggregateRow[];
