@@ -1,0 +1,835 @@
+/* --- Round Timeline Step Pipeline --- */
+.timelinePipelineWrapper {
+  width: 100%;
+  margin: 6px 0;
+}
+
+.pipelineContainer {
+  position: relative;
+  padding: 16px 10px 10px 10px;
+}
+
+.pipelineProgressLine {
+  position: absolute;
+  top: 28px;
+  left: 40px;
+  right: 40px;
+  height: 3px;
+  transform: translateY(-50%);
+  z-index: 1;
+}
+
+.pipelineLineTrack {
+  position: absolute;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.06);
+  border-radius: 2px;
+}
+
+.pipelineLineFill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  border-radius: 2px;
+  transition: width 0.6s cubic-bezier(0.25, 1, 0.5, 1), background-color 0.5s ease;
+}
+
+.pipelineLineFill.safe {
+  background-color: var(--color-success);
+}
+
+.pipelineLineFill.warning {
+  background-color: var(--color-warning);
+}
+
+.pipelineLineFill.danger {
+  background-color: var(--color-danger);
+  animation: pulse-glow-light 1s infinite alternate;
+}
+
+.pipelineNodes {
+  display: flex;
+  justify-content: space-between;
+  position: relative;
+  z-index: 2;
+  user-select: none;
+}
+
+.pipelineNodeItem {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: 1;
+  text-align: center;
+  position: relative;
+}
+
+.pipelineNodeCircle {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #ffffff;
+  border: 2px solid var(--color-neutral);
+  transition: all 0.4s cubic-bezier(0.25, 1, 0.5, 1);
+  position: relative;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.nodeIcon {
+  font-size: 9px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  line-height: 1;
+}
+
+.nodeIcon.index {
+  color: var(--color-neutral);
+}
+
+.pipelineNodeItem.completed .pipelineNodeCircle {
+  border-color: var(--color-success);
+  background: var(--color-success);
+  box-shadow: 0 0 10px var(--color-success-glow);
+}
+
+.pipelineNodeItem.completed .nodeIcon.check {
+  color: #ffffff;
+  font-size: 11px;
+}
+
+.pipelineNodeItem.active .pipelineNodeCircle {
+  border-color: var(--color-primary);
+  background: #ffffff;
+  transform: scale(1.05);
+  box-shadow: 0 0 12px var(--color-primary-glow);
+}
+
+.pipelineNodeItem.active .nodeIcon.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  display: block;
+}
+
+.pipelineNodeItem.upcoming .pipelineNodeCircle {
+  border-color: rgba(15, 23, 42, 0.12);
+  background: #f8fafc;
+}
+
+.pipelineNodeItem.upcoming .nodeIcon.index {
+  color: var(--text-muted);
+}
+
+.pipelineNodeLabels {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-top: 10px;
+  gap: 2px;
+}
+
+.nodeLabel {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+  transition: color 0.3s ease;
+}
+
+.pipelineNodeItem.active .nodeLabel {
+  color: var(--color-primary);
+}
+
+.pipelineNodeItem.completed .nodeLabel {
+  color: var(--text-primary);
+}
+
+.nodeSubLabel {
+  font-size: 9px;
+  color: var(--text-muted);
+  max-width: 80px;
+  line-height: 1.15;
+}
+
+.nodeTelemetry {
+  font-size: 10px;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  margin-top: 5px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+  transition: all 0.3s ease;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
+}
+
+.nodeTelemetry.safe {
+  color: var(--color-success);
+  background: var(--color-success-glow);
+  border: 1px solid rgba(16, 185, 129, 0.15);
+}
+
+.nodeTelemetry.warning {
+  color: var(--color-warning);
+  background: var(--color-warning-glow);
+  border: 1px solid rgba(217, 119, 6, 0.15);
+}
+
+.nodeTelemetry.danger {
+  color: var(--color-danger);
+  background: var(--color-danger-glow);
+  border: 1px solid rgba(225, 29, 72, 0.15);
+  animation: pulse-glow-light 1s infinite alternate;
+}
+
+/* Pulsing rings for Active Node */
+.nodePulseRing {
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  border: 1.5px solid var(--color-primary);
+  opacity: 0.4;
+  animation: pipelinePulse 2s infinite ease-out;
+  pointer-events: none;
+}
+
+.nodePulseRingOuter {
+  position: absolute;
+  inset: -6px;
+  border-radius: 50%;
+  border: 1px solid var(--color-primary);
+  opacity: 0.2;
+  animation: pipelinePulseOuter 2s infinite ease-out;
+  pointer-events: none;
+}
+
+.nodePulseRing.safe { border-color: var(--color-success); }
+.nodePulseRingOuter.safe { border-color: var(--color-success); }
+.nodePulseRing.warning { border-color: var(--color-warning); }
+.nodePulseRingOuter.warning { border-color: var(--color-warning); }
+.nodePulseRing.danger { border-color: var(--color-danger); }
+.nodePulseRingOuter.danger { border-color: var(--color-danger); }
+
+@keyframes pipelinePulse {
+  0% { transform: scale(0.95); opacity: 0.6; }
+  100% { transform: scale(1.2); opacity: 0; }
+}
+
+@keyframes pipelinePulseOuter {
+  0% { transform: scale(0.9); opacity: 0.4; }
+  100% { transform: scale(1.35); opacity: 0; }
+}
+
+@media (max-width: 768px) {
+  .pipelineProgressLine {
+    left: 20px;
+    right: 20px;
+  }
+  .nodeSubLabel {
+    display: none;
+  }
+  .nodeLabel {
+    font-size: 8px;
+    letter-spacing: 0.2px;
+  }
+}
+/* Multi-profile controls */
+.profileSwitcher {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 0 14px;
+}
+
+.profilePill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--bg-panel);
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.profilePill em {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-style: normal;
+  text-transform: uppercase;
+}
+
+.profilePill.active {
+  border-color: var(--color-primary);
+  color: var(--text-primary);
+  background: var(--color-primary-glow);
+}
+
+.scopeSummary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.66);
+}
+
+.scopeSummary > div:first-child {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.scopeSummary strong {
+  color: var(--text-primary);
+  font-size: 14px;
+}
+
+.scopeSummaryStats {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.scopeSummaryStats span,
+.listScopeBar strong {
+  min-height: 24px;
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.7);
+  white-space: nowrap;
+}
+
+.listScopeBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.025);
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.listScopeBar span {
+  margin-right: auto;
+}
+
+.listScopeBar strong {
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.scopeWorkspace {
+  display: grid;
+  gap: 14px;
+}
+
+.scopePanel {
+  background: #ffffff;
+  border-radius: 8px;
+}
+
+.scopeMetricGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.profileGridPanel {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.profileGridPanel.compact {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.profileRuntimeCard {
+  min-height: auto;
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: #ffffff;
+  color: var(--text-primary);
+  text-align: left;
+  box-shadow: none;
+}
+
+.profileRuntimeCard:hover:not(:disabled) {
+  border-color: var(--border-color-active);
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.045);
+}
+
+.profileRuntimeHeader,
+.profileRuntimeFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.profileRuntimeHeader > div {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.profileRuntimeHeader strong {
+  color: var(--text-primary);
+  font-size: 14px;
+}
+
+.profileRuntimeHeader span,
+.profileRuntimeFooter span {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.profileRuntimeStats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.profileRuntimeStats div {
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 7px;
+  background: rgba(248, 250, 252, 0.74);
+}
+
+.profileRuntimeStats span {
+  display: block;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.profileRuntimeStats strong,
+.profileRuntimeFooter strong {
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 900px) {
+  .scopeMetricGrid,
+  .profileGridPanel,
+  .profileGridPanel.compact {
+    grid-template-columns: 1fr;
+  }
+
+  .scopeSummary {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .scopeSummaryStats {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 560px) {
+  .profileRuntimeStats {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Simplified operations terminal */
+.opsWorkspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) minmax(320px, 0.85fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.opsPrimary,
+.opsRail {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.opsHero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 16px;
+  padding: 18px;
+  border: 1px solid var(--border-color);
+  border-left: 4px solid var(--color-neutral);
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.04);
+}
+
+.opsHero.good { border-left-color: var(--color-success); }
+.opsHero.warn { border-left-color: var(--color-warning); }
+.opsHero.bad { border-left-color: var(--color-danger); }
+
+.opsHeroMain {
+  min-width: 0;
+}
+
+.opsHero h2 {
+  margin-top: 4px;
+  color: var(--text-primary);
+  font-size: 24px;
+  line-height: 1.15;
+  letter-spacing: 0;
+}
+
+.opsHero p {
+  margin-top: 8px;
+  max-width: 900px;
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
+.opsHeroMeta,
+.opsProfileBadges {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.opsMetricGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.dynamicEntryPricePanel {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: minmax(160px, 0.72fr) minmax(0, 1.7fr);
+  gap: 10px;
+  align-items: stretch;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 8px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.92));
+  box-shadow: inset 3px 0 0 rgba(100, 116, 139, 0.34);
+}
+
+.dynamicEntryPricePanel.simulator {
+  border-color: rgba(16, 185, 129, 0.26);
+  box-shadow: inset 3px 0 0 rgba(16, 185, 129, 0.82);
+}
+
+.dynamicEntryPricePanel.fallback {
+  border-color: rgba(245, 158, 11, 0.28);
+  box-shadow: inset 3px 0 0 rgba(245, 158, 11, 0.82);
+}
+
+.dynamicEntryPriceMain {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.76);
+}
+
+.dynamicEntryPriceMain > div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.dynamicEntryPriceKicker {
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.dynamicEntryPriceMain strong {
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 22px;
+  line-height: 1;
+}
+
+.dynamicEntryPricePanel.simulator .dynamicEntryPriceMain strong {
+  color: var(--color-success);
+}
+
+.dynamicEntryPriceStats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  min-width: 0;
+}
+
+.dynamicEntryPriceStats div {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  align-items: center;
+  column-gap: 6px;
+  row-gap: 2px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.68);
+}
+
+.dynamicEntryPriceStats svg {
+  grid-row: 1 / span 2;
+  color: var(--text-muted);
+}
+
+.dynamicEntryPriceStats span {
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.dynamicEntryPriceStats strong {
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.1;
+  overflow-wrap: anywhere;
+}
+
+.dynamicEntryPricePanel p {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.opsPanel {
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.opsRoundGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(280px, 0.75fr);
+  gap: 16px;
+  align-items: center;
+}
+
+.opsRoundTimeline {
+  min-width: 0;
+}
+
+.opsRoundFacts,
+.opsSystemList {
+  display: grid;
+  gap: 8px;
+}
+
+.opsRoundFacts div,
+.opsSystemList div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.opsRoundFacts div:last-child,
+.opsSystemList div:last-child {
+  border-bottom: 0;
+}
+
+.opsRoundFacts span,
+.opsSystemList span {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.opsRoundFacts strong,
+.opsSystemList strong {
+  min-width: 0;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.opsPositionGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.opsPosition {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: rgba(248, 250, 252, 0.72);
+}
+
+.opsPosition div {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.opsPosition strong {
+  color: var(--text-primary);
+}
+
+.opsPosition span,
+.opsPosition em {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-style: normal;
+  overflow-wrap: anywhere;
+}
+
+.opsEmptyState {
+  min-height: 96px;
+  display: grid;
+  place-items: center;
+  border: 1px dashed var(--border-color-light);
+  border-radius: 8px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.opsProfileList {
+  display: grid;
+  gap: 8px;
+}
+
+.opsProfileRow {
+  width: 100%;
+  min-height: auto;
+  padding: 12px;
+  display: grid;
+  grid-template-columns: minmax(120px, 0.85fr) minmax(0, 1.15fr);
+  gap: 12px;
+  align-items: center;
+  text-align: left;
+  border-radius: 8px;
+  box-shadow: none;
+}
+
+.opsProfileRow.active {
+  border-color: var(--color-primary);
+  background: rgba(37, 99, 235, 0.05);
+}
+
+.opsProfileRow div:first-child {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.opsProfileRow strong {
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.opsProfileRow span {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.opsDiagnostics summary {
+  cursor: pointer;
+}
+
+.opsDiagnosticList {
+  margin-top: 12px;
+  display: grid;
+  gap: 8px;
+}
+
+.opsDiagnosticList span {
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: rgba(217, 119, 6, 0.08);
+  color: var(--color-warning);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 1100px) {
+  .opsWorkspace,
+  .opsRoundGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .opsMetricGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .dynamicEntryPricePanel {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .opsHero,
+  .opsProfileRow,
+  .opsMetricGrid,
+  .opsPositionGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .dynamicEntryPriceStats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .opsHeroMeta,
+  .opsProfileBadges {
+    justify-content: flex-start;
+  }
+}

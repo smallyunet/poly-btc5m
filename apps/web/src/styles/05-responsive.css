@@ -1,0 +1,491 @@
+/* Responsive adjustments */
+@media (max-width: 1024px) {
+  .appShell {
+    padding: 18px;
+  }
+
+  .topbar {
+    flex-wrap: wrap;
+  }
+
+  .topbar > div:first-child {
+    min-width: 220px;
+  }
+
+  .actions {
+    margin-left: auto;
+  }
+
+  .tabBar {
+    order: 3;
+    width: 100%;
+  }
+
+  .runtimeModeStrip {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .terminalCommandBar {
+    grid-template-columns: 1fr;
+  }
+
+  .terminalCommandStats {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .executionStatsGrid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .simulationMetricGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .simulationStartState {
+    grid-template-columns: 1fr;
+  }
+
+  .terminalWorkspace {
+    grid-template-columns: 1fr;
+  }
+
+  .portfolioMetricGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .terminalContextRail {
+    position: static;
+  }
+
+  .digest {
+    grid-template-columns: 1fr;
+  }
+
+  .digestGroup {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .span-4, .span-6, .span-8 {
+    grid-column: span 12;
+  }
+
+  .positionCard {
+    grid-template-columns: minmax(180px, 1.5fr) repeat(3, minmax(110px, 1fr));
+  }
+}
+
+@media (max-width: 768px) {
+  .appShell {
+    padding: 12px;
+    gap: 14px;
+  }
+
+  .topbar {
+    flex-direction: column;
+    align-items: stretch;
+    padding: 16px;
+    gap: 14px;
+  }
+
+  .topbar h1 {
+    font-size: 20px;
+  }
+
+  .tabBar {
+    width: 100%;
+    overflow-x: auto;
+    padding-bottom: 5px;
+  }
+
+  .tabBtn {
+    padding: 8px 12px;
+  }
+
+  .actions {
+    width: 100%;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+    margin-left: 0;
+  }
+
+  .refreshControl {
+    min-width: 0;
+    justify-content: flex-start;
+  }
+
+  .refreshControlStatus {
+    flex: 1 1 auto;
+  }
+
+  .refreshControlStatus span,
+  .refreshControlStatus strong {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .runtimeModeStrip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .runtimeModeItem em {
+    white-space: normal;
+  }
+
+  .terminalCommandStats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .executionStatsHeader {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .singleRateTarget {
+    width: fit-content;
+  }
+
+  .executionStatsGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .simulationMetricGrid,
+  .touchRecentGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .terminalCommandPrimary {
+    grid-template-columns: 1fr;
+    align-items: start;
+  }
+
+  .terminalCommandIcon {
+    width: 34px;
+    height: 34px;
+  }
+
+  .digest {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .digestGroup {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .digestCard {
+    padding: 14px;
+    border-radius: 10px;
+  }
+
+  .digestValue {
+    font-size: 18px;
+  }
+
+  .focusDigest .digestCard,
+  .focusDigest .digestCard.primary {
+    min-height: 0;
+  }
+
+  .grid {
+    gap: 12px;
+  }
+
+  .panel {
+    padding: 14px;
+    border-radius: 10px;
+    gap: 14px;
+  }
+
+  .panel h2 {
+    align-items: flex-start;
+    gap: 8px;
+    flex-direction: column;
+  }
+
+  .panelSubTitle {
+    line-height: 1.35;
+  }
+
+  .terminalCommandPrimary strong {
+    font-size: 21px;
+  }
+
+  .orderbookSummary,
+  .orderbookHero {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .orderbookHeroPrimary,
+  .orderbookHeroMetrics {
+    grid-column: 1 / -1;
+  }
+
+  .capacityTierGrid,
+  .capacityFocus {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .positionCard {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: stretch;
+  }
+
+  .posToken {
+    grid-column: 1 / -1;
+  }
+
+  .posPnL {
+    align-items: flex-start;
+  }
+
+  .gaugeHeader,
+  .gaugeLabels {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .gaugeCenterLabel {
+    order: -1;
+    text-align: left;
+  }
+
+  .subTabBar {
+    width: 100%;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .subTabBar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .subTabBtn {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+
+  .marketCell {
+    min-width: 220px;
+    grid-template-columns: 30px minmax(160px, 1fr);
+  }
+
+  .marketThumb {
+    width: 30px;
+    height: 30px;
+  }
+
+  th,
+  td {
+    padding: 10px 12px;
+  }
+
+  .paginationBar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .paginationControls {
+    justify-content: stretch;
+  }
+
+  .paginationControls button {
+    flex: 1 1 86px;
+  }
+
+  .checks {
+    grid-template-columns: 1fr;
+  }
+
+  .checkCard {
+    padding: 14px;
+  }
+
+  .checkCardHeader,
+  .checkConditionRow,
+  .ruleHeader {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .checkConditionValue {
+    text-align: left;
+  }
+
+  .consoleLogLine {
+    grid-template-columns: 1fr;
+    gap: 4px;
+    padding: 8px;
+  }
+
+  .logTime, .logSource, .logLevelTag {
+    display: inline-block;
+    margin-right: 8px;
+  }
+
+  .rulesGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .ruleLists {
+    grid-template-columns: 1fr;
+  }
+
+  .logsViewContainer {
+    height: auto;
+    min-height: 0;
+  }
+
+  .logsControlBar {
+    flex-wrap: wrap;
+    padding: 10px;
+  }
+
+  .searchWrapper {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+
+  .logFilterSelect {
+    flex: 1 1 140px;
+  }
+
+  .logModeButton {
+    flex: 1 1 120px;
+  }
+
+  .logCounters {
+    flex: 1 1 100%;
+    justify-content: flex-start;
+  }
+
+  .consoleWindow {
+    min-height: 420px;
+    max-height: 65vh;
+    padding: 12px;
+  }
+}
+
+@media (max-width: 540px) {
+  .appShell {
+    padding: 10px;
+  }
+
+  .topbar {
+    padding: 12px;
+  }
+
+  .topbar h1 {
+    font-size: 18px;
+  }
+
+  .topbar h1 svg {
+    width: 20px;
+    height: 20px;
+  }
+
+  .actions {
+    grid-template-columns: 1fr;
+  }
+
+  .actions button {
+    width: 100%;
+  }
+
+  .refreshControlStatus {
+    justify-content: flex-start;
+  }
+
+  .digest {
+    grid-template-columns: 1fr;
+  }
+
+  .terminalCommandStats {
+    grid-template-columns: 1fr;
+  }
+
+  .digestGroup,
+  .orderbookSummary,
+  .orderbookHero,
+  .orderbookHeroMetrics,
+  .quotePairStrip {
+    grid-template-columns: 1fr;
+  }
+
+  .capacityHeader {
+    flex-direction: column;
+  }
+
+  .capacityTierGrid,
+  .capacityFocus {
+    grid-template-columns: 1fr;
+  }
+
+  .digestCard {
+    gap: 6px;
+  }
+
+  .decisionMetric {
+    padding: 10px;
+  }
+
+  .positionCard {
+    grid-template-columns: 1fr;
+  }
+
+  .metricRow {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .portfolioHero {
+    flex-direction: column;
+  }
+
+  .portfolioMetricGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .metricValue {
+    width: 100%;
+    text-align: left;
+  }
+
+  .gaugeContainer {
+    padding: 12px;
+  }
+
+  table {
+    min-width: 680px;
+  }
+
+  .rulesGrid {
+    gap: 12px;
+  }
+
+  .ruleCard {
+    padding: 14px;
+  }
+
+  .ruleAllocation {
+    width: fit-content;
+  }
+
+  .paginationControls {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .paginationPage {
+    grid-column: 1 / -1;
+    text-align: center;
+    order: -1;
+  }
+
+  .consoleWindow {
+    min-height: 360px;
+  }
+}
+

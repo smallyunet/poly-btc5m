@@ -23,6 +23,7 @@ import { formatEtTime, outcomeLabel, outcomeTone, shortenTokenId } from './lib/d
 import { RoundTimelinePipeline } from './components/RoundTimelinePipeline';
 import { OrderbookCapacityPanel, OrderbookExecutionSummary, OrderbookTable } from './components/dashboard/OrderbookPanels';
 import { Badge, DataTable, DecisionMetric, PaginationControls, Shell } from './components/dashboard/Ui';
+import { DynamicEntryPricePanel } from './app/DynamicEntryPricePanel';
 import {
   AssetIcon,
   AssetLabel,
@@ -73,6 +74,8 @@ import {
   usePaginatedRows,
 } from './app/dashboardHelpers';
 
+type SimulationSubTab = 'price' | 'matrix' | 'rounds';
+
 export function App() {
   const [state, setState] = React.useState<DashboardState | null>(null);
   const [error, setError] = React.useState<string | null>(null);
@@ -86,6 +89,8 @@ export function App() {
   // Navigation Tab State
   const [activeTab, setActiveTab] = React.useState<TabType>(() => tabFromUrl());
   const [activitySubTab, setActivitySubTab] = React.useState<ActivitySubTab>('daily');
+  const [simulationSubTab, setSimulationSubTab] = React.useState<SimulationSubTab>('price');
+  const [simulationAssetTab, setSimulationAssetTab] = React.useState<string>('btc');
   const [selectedProfileId, setSelectedProfileId] = React.useState<string>('all');
 
   // Logs Search & Filter States
@@ -395,18 +400,6 @@ export function App() {
   const entryPriceDisplay = entryLimit == null ? fixedLimitLabel : entryLimit.toFixed(3);
   const entrySharesDisplay = previewShares == null ? fixedSharesLabel : formatShares(previewShares);
   const dynamicEntryPrice = viewState.profileState.dynamicEntryPrice;
-  const dynamicEntryPriceValue = dynamicEntryPrice ? formatPriceCents(dynamicEntryPrice.selectedPrice) : formatPriceCents(entryLimit ?? entryConfig?.dualLimitPrice);
-  const dynamicEntryPriceNext = dynamicEntryPrice?.nextSelectionAt ? formatEtTime(dynamicEntryPrice.nextSelectionAt) : 'not scheduled';
-  const dynamicEntryPriceDetail = dynamicEntryPrice
-    ? dynamicEntryPrice.source === 'simulator'
-      ? `EV ${formatEv(dynamicEntryPrice.estimatedEvPerShare)} / single ${formatRate(dynamicEntryPrice.singleRate)} / ${dynamicEntryPrice.rounds ?? 0} rounds / next ${dynamicEntryPriceNext}`
-      : `${dynamicEntryPrice.reason}; next ${dynamicEntryPriceNext}`
-    : 'using configured entry price';
-  const dynamicEntryPriceTone = dynamicEntryPrice?.source === 'simulator'
-    ? 'good' as const
-    : dynamicEntryPrice?.source === 'fallback'
-      ? 'warn' as const
-      : 'neutral' as const;
   const profileStatusRows = state.profiles.map((item) => {
     const itemEntryCheck = item.strategyChecks.find((check) => check.strategy === 'UPDOWN_DUAL_ENTRY');
     const itemHedgeCheck = item.strategyChecks.find((check) => check.strategy === 'UPDOWN_SINGLE_FILL_HEDGE');
@@ -430,6 +423,13 @@ export function App() {
         : 'unavailable';
   const touchCompletedByPrice = touchSim?.completed?.byPrice ?? [];
   const touchCompletedByAssetPrice = touchSim?.completed?.byAssetPrice ?? [];
+  const touchMatrixAssets = React.useMemo(() => (
+    [...new Set(touchCompletedByAssetPrice.map((row) => row.asset || 'unknown'))].sort()
+  ), [touchCompletedByAssetPrice]);
+  const selectedTouchAsset = touchMatrixAssets.includes(simulationAssetTab)
+    ? simulationAssetTab
+    : touchMatrixAssets[0] || 'btc';
+  const touchCompletedBySelectedAsset = touchCompletedByAssetPrice.filter((row) => (row.asset || 'unknown') === selectedTouchAsset);
   const touchRecentRounds = touchSim?.recentRounds ?? [];
   const touchCommand = 'npm run research:pm5m-touch -- --assets btc,eth,sol,doge,xrp,hype --min-price 0.29 --max-price 0.49';
   const touchGeneratedAtMs = touchSim?.generatedAt ? new Date(touchSim.generatedAt).getTime() : 0;
@@ -647,12 +647,6 @@ export function App() {
                   tone={entryCheck?.status === 'eligible' ? 'good' : entryCooldownActive ? 'warn' : isRoundStarted ? 'neutral' : 'warn'}
                 />
                 <DecisionMetric
-                  label="Sim Price"
-                  value={dynamicEntryPriceValue}
-                  detail={dynamicEntryPriceDetail}
-                  tone={dynamicEntryPriceTone}
-                />
-                <DecisionMetric
                   label="Open Orders"
                   value={String(currentRoundOpenOrders.length)}
                   detail={`${currentRoundOrders.length} recorded in this round`}
@@ -682,6 +676,7 @@ export function App() {
                   detail={entryCooldownReason}
                   tone={entryCooldownActive ? 'warn' : 'good'}
                 />
+                <DynamicEntryPricePanel selection={dynamicEntryPrice} configuredPrice={entryLimit ?? entryConfig?.dualLimitPrice} />
               </div>
 
               <div className="panel opsPanel">
@@ -1350,6 +1345,34 @@ export function App() {
                     />
                   </div>
 
+                  <div className="subTabBar simulationSubTabs" aria-label="Simulation result views">
+                    <button
+                      type="button"
+                      className={`subTabBtn ${simulationSubTab === 'price' ? 'active' : ''}`}
+                      onClick={() => setSimulationSubTab('price')}
+                    >
+                      Price Levels
+                      <span>{touchCompletedByPrice.length}</span>
+                    </button>
+                    <button
+                      type="button"
+                      className={`subTabBtn ${simulationSubTab === 'matrix' ? 'active' : ''}`}
+                      onClick={() => setSimulationSubTab('matrix')}
+                    >
+                      Asset Matrix
+                      <span>{touchMatrixAssets.length}</span>
+                    </button>
+                    <button
+                      type="button"
+                      className={`subTabBtn ${simulationSubTab === 'rounds' ? 'active' : ''}`}
+                      onClick={() => setSimulationSubTab('rounds')}
+                    >
+                      Round Strip
+                      <span>{touchRecentRounds.length}</span>
+                    </button>
+                  </div>
+
+                  {simulationSubTab === 'price' && (
                   <section className="simulationSection">
                     <div className="sectionHeader compact">
                       <div>
@@ -1376,18 +1399,37 @@ export function App() {
                       <div className="opsEmptyState">Waiting for at least one completed 5m round.</div>
                     )}
                   </section>
+                  )}
 
+                  {simulationSubTab === 'matrix' && (
                   <section className="simulationSection">
                     <div className="sectionHeader compact">
                       <div>
                         <span className="sectionKicker">Asset split</span>
                         <h3>Asset x Price Matrix</h3>
                       </div>
-                      <span className="panelSubTitle">{touchCompletedByAssetPrice.length} rows</span>
+                      <span className="panelSubTitle">{touchCompletedBySelectedAsset.length} rows</span>
                     </div>
                     {touchCompletedByAssetPrice.length > 0 ? (
+                      <>
+                      <div className="assetMatrixTabs" aria-label="Asset matrix asset filter">
+                        {touchMatrixAssets.map((asset) => {
+                          const count = touchCompletedByAssetPrice.filter((row) => (row.asset || 'unknown') === asset).length;
+                          return (
+                            <button
+                              key={asset}
+                              type="button"
+                              className={`assetMatrixTab ${selectedTouchAsset === asset ? 'active' : ''}`}
+                              onClick={() => setSimulationAssetTab(asset)}
+                            >
+                              <AssetLabel profileId={`${asset}-5m`} label={asset.toUpperCase()} />
+                              <span>{count}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
                       <DataTable headers={['Asset', 'Price', 'Rounds', 'Paired rate', 'Single rate', 'Break-even', 'EV/share']}>
-                        {touchCompletedByAssetPrice.slice(0, 80).map((row) => (
+                        {touchCompletedBySelectedAsset.map((row) => (
                           <tr key={`${row.asset}-${row.price}`}>
                             <td><AssetLabel profileId={`${row.asset || 'btc'}-5m`} label={(row.asset || 'unknown').toUpperCase()} /></td>
                             <td className="mono">{formatPriceCents(row.price)}</td>
@@ -1399,12 +1441,14 @@ export function App() {
                           </tr>
                         ))}
                       </DataTable>
+                      </>
                     ) : (
                       <div className="opsEmptyState">Asset-level rows will appear after completed rounds are finalized.</div>
                     )}
                   </section>
+                  )}
 
-                  {touchRecentRounds.length > 0 && (
+                  {simulationSubTab === 'rounds' && (
                     <section className="simulationSection">
                       <div className="sectionHeader compact">
                         <div>
@@ -1412,8 +1456,9 @@ export function App() {
                           <h3>Round Outcome Strip</h3>
                         </div>
                       </div>
-                      <div className="touchRecentGrid">
-                        {touchRecentRounds.slice(0, 8).map((round) => (
+                      {touchRecentRounds.length > 0 ? (
+                        <div className="touchRecentGrid">
+                          {touchRecentRounds.slice(0, 8).map((round) => (
                           <div key={round.slug} className="touchRoundCard">
                             <div className="touchRoundHeader">
                               <AssetLabel profileId={`${round.asset}-5m`} label={round.asset.toUpperCase()} size="sm" />
@@ -1430,8 +1475,11 @@ export function App() {
                               ))}
                             </div>
                           </div>
-                        ))}
-                      </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="opsEmptyState">Recent round strips will appear once the recorder publishes active or finalized rounds.</div>
+                      )}
                     </section>
                   )}
                 </>
