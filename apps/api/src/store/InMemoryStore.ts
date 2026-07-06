@@ -624,7 +624,7 @@ export class InMemoryStore {
     keys.add(key);
     this.telegramNotifications = {
       ...this.telegramNotifications,
-      notifiedRoundSummaryKeys: [...keys].slice(-500),
+      notifiedRoundSummaryKeys: [...keys].slice(-this.telegramNotificationHistoryLimit()),
     };
     this.persistState();
   }
@@ -743,6 +743,10 @@ export class InMemoryStore {
     } catch (error) {
       console.warn('[store] failed to persist runtime state', error);
     }
+  }
+
+  private telegramNotificationHistoryLimit(): number {
+    return Math.max(500, this.maxRecords * 2);
   }
 
   private runtimeWithCooldown(nowMs = Date.now()): BotRuntimeStatus {

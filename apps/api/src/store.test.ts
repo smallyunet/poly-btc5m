@@ -9,6 +9,19 @@ import { InMemoryStore } from './store';
 
 const PROFILE = 'btc-5m';
 
+test('keeps Telegram round notification keys for the retained settlement window', () => {
+  const store = new InMemoryStore('live', 2_000, { persistencePath: false, maxRecords: 1_000 });
+
+  for (let index = 0; index < 600; index += 1) {
+    store.markTelegramRoundSummaryNotified(`btc-5m:btc-updown-5m-${index}:settled`);
+  }
+
+  const state = store.getTelegramNotificationState();
+  assert.equal(state.notifiedRoundSummaryKeys.length, 600);
+  assert.equal(state.notifiedRoundSummaryKeys[0], 'btc-5m:btc-updown-5m-0:settled');
+  assert.equal(state.notifiedRoundSummaryKeys[599], 'btc-5m:btc-updown-5m-599:settled');
+});
+
 test('does not start single-fill cooldown before the round is final', () => {
   const nowMs = Date.now();
   const roundId = roundIdFromStart(nowMs - 4 * 60_000);
