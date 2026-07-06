@@ -377,6 +377,29 @@ test('single-fill cooldown shared without configured profiles uses the source po
   }
 });
 
+test('pending single-fill review is not consumed by a different profile tick', () => {
+  const nowMs = Date.now();
+  const fiveMinuteRound = roundIdFromStart(nowMs - 7 * 60_000);
+  const store = new InMemoryStore('live', 2_000, { persistencePath: false }, 'classic', undefined, [
+    marketProfile('btc-5m'),
+    marketProfile('btc-15m'),
+    marketProfile('btc-1h'),
+  ]);
+
+  store.recordOrder(order(fiveMinuteRound, 'NO', { profileId: 'btc-5m' }));
+  store.recordFills([fill(fiveMinuteRound, 'NO', { profileId: 'btc-5m' })]);
+  store.maybeStartSingleFillCooldown([fill(fiveMinuteRound, 'NO', { profileId: 'btc-5m' })], policy(), nowMs - 2 * 60_000, 'UPDOWN_DUAL_ENTRY', 'btc-5m');
+
+  assert.equal(store.maybeStartSingleFillCooldown([], policy(), nowMs, 'UPDOWN_DUAL_ENTRY', 'btc-15m'), null);
+  assert.equal(store.getActiveEntryCooldown('btc-5m', nowMs), null);
+
+  const cooldown = store.maybeStartSingleFillCooldown([], policy(), nowMs, 'UPDOWN_DUAL_ENTRY', 'btc-5m');
+
+  assert.equal(cooldown?.roundId, fiveMinuteRound);
+  assert.equal(store.getActiveEntryCooldown('btc-15m', nowMs)?.sourceProfileId, 'btc-5m');
+  assert.equal(store.getActiveEntryCooldown('btc-1h', nowMs)?.sourceProfileId, 'btc-5m');
+});
+
 test('cross-profile single-fill risk candidates include active same-asset long intervals only', () => {
   const nowMs = Date.now();
   const fifteenMinuteRound = `btc-updown-15m-${Math.floor((nowMs - 5 * 60_000) / 1000)}`;
