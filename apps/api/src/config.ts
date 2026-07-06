@@ -60,6 +60,7 @@ export type AppConfig = {
   pm5mSimPriceMaxSummaryAgeMs: number;
   pm5mAssetSelectorEnabled: boolean;
   pm5mAssetSelectorMaxAssets: number;
+  pm5mAssetSelectorSinglePenalty: number;
   minLiveChopScore: number;
   bypassEntryScoreGating: boolean;
   bypassSingleFillCooldown: boolean;
@@ -169,6 +170,7 @@ export function loadConfig(): AppConfig {
     pm5mSimPriceMaxSummaryAgeMs: parsePositiveInteger(process.env.PM5M_SIM_PRICE_MAX_SUMMARY_AGE_MS || process.env.BTC_5M_SIM_PRICE_MAX_SUMMARY_AGE_MS, 10 * 60_000),
     pm5mAssetSelectorEnabled: booleanEnv('PM5M_ASSET_SELECTOR_ENABLED', false),
     pm5mAssetSelectorMaxAssets: parsePositiveInteger(process.env.PM5M_ASSET_SELECTOR_MAX_ASSETS, 1),
+    pm5mAssetSelectorSinglePenalty: numberEnv('PM5M_ASSET_SELECTOR_SINGLE_PENALTY', 0.05),
     minLiveChopScore: numberEnv('MIN_LIVE_CHOP_SCORE', 70),
     bypassEntryScoreGating: booleanEnv('BYPASS_ENTRY_SCORE_GATING', true),
     bypassSingleFillCooldown: booleanEnv('BYPASS_SINGLE_FILL_COOLDOWN', false),

@@ -30,6 +30,9 @@ export type FiveMinuteAssetSelection = {
   selected: boolean;
   rank?: number;
   score?: number;
+  ev?: number | null;
+  singleRate?: number | null;
+  singlePenalty?: number;
   reason: string;
 };
 
@@ -37,7 +40,6 @@ type AssetCandidate = {
   profile: MarketProfile;
   row: TouchAggregateRow;
   score: number;
-  relaxed: boolean;
 };
 
 export function selectFiveMinuteEntryPrice(appConfig: AppConfig, profile: MarketProfile, round: RoundSnapshot): DynamicEntryPriceSelection {
@@ -151,7 +153,7 @@ export function rankFiveMinuteAssetCandidates(appConfig: AppConfig, profiles: Ma
   const candidates = fiveMinuteProfiles
     .map((profile): AssetCandidate | null => {
       const row = bestSimulatorRow(appConfig, profile, rows);
-      return row ? { profile, row, score: row.estimatedEvPerShare, relaxed: false } : null;
+      return row ? { profile, row, score: assetSelectorScore(row, appConfig.pm5mAssetSelectorSinglePenalty) } : null;
     })
     .filter((candidate): candidate is AssetCandidate => Boolean(candidate))
     .sort(sortAssetCandidates);
@@ -176,9 +178,12 @@ export function rankFiveMinuteAssetCandidates(appConfig: AppConfig, profiles: Ma
       selected,
       rank: ranked.rank,
       score: ranked.candidate.score,
+      ev: ranked.candidate.row.estimatedEvPerShare,
+      singleRate: ranked.candidate.row.singleRate,
+      singlePenalty: appConfig.pm5mAssetSelectorSinglePenalty,
       reason: selected
-        ? `5m asset selector selected rank #${ranked.rank}${ranked.candidate.relaxed ? ' by relative fallback' : ''} (${profile.asset} EV ${ranked.candidate.score.toFixed(4)}/share)`
-        : `5m asset selector rejected rank #${ranked.rank}${ranked.candidate.relaxed ? ' by relative fallback' : ''}; outside top ${maxSelected}`,
+        ? `5m asset selector selected rank #${ranked.rank} (${profile.asset} score ${ranked.candidate.score.toFixed(4)}/share = EV ${ranked.candidate.row.estimatedEvPerShare.toFixed(4)} - ${appConfig.pm5mAssetSelectorSinglePenalty.toFixed(3)}*single ${(ranked.candidate.row.singleRate ?? 0).toFixed(4)})`
+        : `5m asset selector rejected rank #${ranked.rank}; outside top ${maxSelected}`,
     });
   }
 
@@ -200,10 +205,16 @@ function bestSimulatorRow(appConfig: AppConfig, profile: MarketProfile, rows: To
 
 function sortAssetCandidates(a: AssetCandidate, b: AssetCandidate): number {
   return b.score - a.score
+    || b.row.estimatedEvPerShare - a.row.estimatedEvPerShare
     || (a.row.singleRate ?? Number.POSITIVE_INFINITY) - (b.row.singleRate ?? Number.POSITIVE_INFINITY)
     || (a.row.noneRate ?? Number.POSITIVE_INFINITY) - (b.row.noneRate ?? Number.POSITIVE_INFINITY)
     || b.row.price - a.row.price
     || a.profile.id.localeCompare(b.profile.id);
+}
+
+function assetSelectorScore(row: TouchAggregateRow, singlePenalty: number): number {
+  const singleRate = row.singleRate ?? 0;
+  return row.estimatedEvPerShare - singlePenalty * singleRate;
 }
 
 function readSummary(summaryPath: string, refreshMs: number): { ok: true; value: TouchSummary } | { ok: false; reason: string; value: TouchSummary } {

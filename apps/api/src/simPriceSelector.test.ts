@@ -134,6 +134,7 @@ function config(summaryPath: string): AppConfig {
     pm5mSimPriceMaxSummaryAgeMs: 600_000,
     pm5mAssetSelectorEnabled: false,
     pm5mAssetSelectorMaxAssets: 1,
+    pm5mAssetSelectorSinglePenalty: 0.05,
     dualLimitPrice: 0.45,
   } as AppConfig;
 }

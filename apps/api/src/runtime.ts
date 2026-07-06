@@ -204,6 +204,8 @@ function withAssetSelection(selection: ReturnType<typeof selectFiveMinuteEntryPr
     assetSelectorSelected: assetSelection.selected,
     assetSelectorRank: assetSelection.rank,
     assetSelectorScore: assetSelection.score,
+    assetSelectorEv: assetSelection.ev,
+    assetSelectorSinglePenalty: assetSelection.singlePenalty,
     reason: `${selection.reason}; ${assetSelection.reason}`,
   };
 }

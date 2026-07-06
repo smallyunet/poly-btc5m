@@ -40,6 +40,7 @@ const COOLDOWN_ENV_KEYS = [
   'PM5M_SIM_PRICE_MIN_ROUNDS',
   'PM5M_ASSET_SELECTOR_ENABLED',
   'PM5M_ASSET_SELECTOR_MAX_ASSETS',
+  'PM5M_ASSET_SELECTOR_SINGLE_PENALTY',
   'BTC_5M_SIM_PRICE_ENABLED',
   'BTC_5M_SIM_PRICE_MIN_ROUNDS',
   '5M_SINGLE_FILL_COOLDOWN_BASE_MS',
@@ -113,11 +114,13 @@ test('PM 5m asset selector config supports live top-N routing env', () => {
   withEnv(COOLDOWN_ENV_KEYS, {
     PM5M_ASSET_SELECTOR_ENABLED: 'true',
     PM5M_ASSET_SELECTOR_MAX_ASSETS: '2',
+    PM5M_ASSET_SELECTOR_SINGLE_PENALTY: '0.07',
   }, () => {
     const config = loadConfig();
 
     assert.equal(config.pm5mAssetSelectorEnabled, true);
     assert.equal(config.pm5mAssetSelectorMaxAssets, 2);
+    assert.equal(config.pm5mAssetSelectorSinglePenalty, 0.07);
   });
 });
 

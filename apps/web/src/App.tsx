@@ -410,6 +410,9 @@ export function App() {
     const rank = selection.assetSelectorRank ? `#${selection.assetSelectorRank}` : '-';
     return selection.assetSelectorSelected ? rank : `skip ${rank}`;
   };
+  const assetSelectorScoreLabel = (selection: typeof dynamicEntryPrice): string => (
+    selection?.assetSelectorEnabled ? formatEv(selection.assetSelectorScore) : 'off'
+  );
   const profileStatusRows = state.profiles.map((item) => {
     const itemEntryCheck = item.strategyChecks.find((check) => check.strategy === 'UPDOWN_DUAL_ENTRY');
     const itemHedgeCheck = item.strategyChecks.find((check) => check.strategy === 'UPDOWN_SINGLE_FILL_HEDGE');
@@ -621,6 +624,7 @@ export function App() {
                     <div><span>Entry</span><strong>{strategyCheckLabel(itemEntryCheck)}</strong></div>
                     <div><span>Price</span><strong>{item.dynamicEntryPrice ? formatPriceCents(item.dynamicEntryPrice.selectedPrice) : itemEntryCheck?.limitPrice != null ? formatPriceCents(itemEntryCheck.limitPrice) : '-'}</strong></div>
                     <div><span>Route</span><strong>{assetRouteLabel(item.dynamicEntryPrice)}</strong></div>
+                    <div><span>Score</span><strong>{assetSelectorScoreLabel(item.dynamicEntryPrice)}</strong></div>
                     <div><span>Exit</span><strong>{strategyCheckLabel(itemProfitExitCheck)}</strong></div>
                     <div><span>Hedge</span><strong>{strategyCheckLabel(itemHedgeCheck)}</strong></div>
                     <div><span>Cooldown</span><strong>{itemCooldownActive ? formatCooldownRemaining(item.entryCooldownUntil) : 'clear'}</strong></div>

@@ -1,4 +1,4 @@
-import { Activity, Clock3, Database, TrendingUp } from 'lucide-react';
+import { Activity, Database, Route, Sigma, TrendingUp } from 'lucide-react';
 
 import type { DynamicEntryPriceSelection } from '../../../../packages/shared/src';
 import { Badge } from '../components/dashboard/Ui';
@@ -14,9 +14,16 @@ export function DynamicEntryPricePanel({ selection, configuredPrice }: DynamicEn
   const price = selection?.selectedPrice ?? configuredPrice;
   const sourceTone = selection?.source === 'simulator' ? 'good' : selection?.source === 'fallback' ? 'warn' : 'neutral';
   const sourceLabel = selection?.source === 'simulator' ? 'SIMULATOR' : selection?.source === 'fallback' ? 'FALLBACK' : 'CONFIG';
-  const nextSelection = selection?.nextSelectionAt ? formatEtTime(selection.nextSelectionAt) : '-';
   const updatedAt = selection?.selectedAt ? formatEtTime(selection.selectedAt) : '-';
   const title = selection?.profileId ? `${assetNameForProfile(selection.profileId)} ${selection.profileId.split('-')[1] || ''} Entry Price` : 'Entry Price';
+  const selectorRank = selection?.assetSelectorEnabled
+    ? selection.assetSelectorSelected
+      ? `#${selection.assetSelectorRank ?? '-'}`
+      : `skip #${selection.assetSelectorRank ?? '-'}`
+    : 'off';
+  const selectorFormula = selection?.assetSelectorSinglePenalty != null
+    ? `score = EV - ${selection.assetSelectorSinglePenalty.toFixed(3)} * single`
+    : undefined;
 
   return (
     <section className={`dynamicEntryPricePanel ${selection?.source || 'config'}`} aria-label={`${title} dynamic simulator entry price`}>
@@ -30,9 +37,14 @@ export function DynamicEntryPricePanel({ selection, configuredPrice }: DynamicEn
 
       <div className="dynamicEntryPriceStats" aria-label="Simulator selection metrics">
         <div>
+          <Sigma size={14} aria-hidden="true" />
+          <span>Score</span>
+          <strong>{formatEv(selection?.assetSelectorScore)}</strong>
+        </div>
+        <div>
           <TrendingUp size={14} aria-hidden="true" />
           <span>EV</span>
-          <strong>{formatEv(selection?.estimatedEvPerShare)}</strong>
+          <strong>{formatEv(selection?.assetSelectorEv ?? selection?.estimatedEvPerShare)}</strong>
         </div>
         <div>
           <Activity size={14} aria-hidden="true" />
@@ -45,13 +57,13 @@ export function DynamicEntryPricePanel({ selection, configuredPrice }: DynamicEn
           <strong>{selection?.rounds ?? '-'}</strong>
         </div>
         <div>
-          <Clock3 size={14} aria-hidden="true" />
-          <span>Next</span>
-          <strong>{nextSelection}</strong>
+          <Route size={14} aria-hidden="true" />
+          <span>Rank</span>
+          <strong>{selectorRank}</strong>
         </div>
       </div>
 
-      <p>{selection?.reason || `Using configured entry price; last update ${updatedAt}.`}</p>
+      <p>{selection?.reason || `Using configured entry price; last update ${updatedAt}.`}{selectorFormula ? ` ${selectorFormula}.` : ''}</p>
     </section>
   );
 }

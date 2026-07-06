@@ -506,6 +506,8 @@ export type DynamicEntryPriceSelection = {
   assetSelectorSelected?: boolean;
   assetSelectorRank?: number;
   assetSelectorScore?: number;
+  assetSelectorEv?: number | null;
+  assetSelectorSinglePenalty?: number;
   rounds?: number;
   pairedRate?: number | null;
   singleRate?: number | null;
