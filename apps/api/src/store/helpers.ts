@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import type { FillRecord, MarketProfileId, OrderRecord, StrategyId, StrategyProfile, TradeIntent } from '../../../../packages/shared/src';
+import type { FillRecord, MarketAsset, MarketInterval, MarketProfileId, OrderRecord, StrategyId, StrategyProfile, TradeIntent } from '../../../../packages/shared/src';
 import { BENIGN_HEDGE_REASONS, CLASSIC_ENTRY_STRATEGY, EXPERIMENT_STRATEGY, FINAL_SINGLE_FILL_GRACE_MS, PRICE_CAP_HEDGE_REASONS } from './constants';
 import type { ExperimentStopRecord, SingleFillCooldownEvent, SingleFillCooldownPolicy, SingleFillCooldownRecord, SingleFillHedgeOutcome, TelegramNotificationState } from './types';
 
@@ -79,14 +79,14 @@ export function isTelegramNotificationStateLike(value: unknown): value is Telegr
 }
 
 export function isMarketProfileId(value: unknown): value is MarketProfileId {
-  return typeof value === 'string' && /^(btc|eth|sol)-(5m|15m|1h)$/.test(value);
+  return typeof value === 'string' && /^(btc|eth|sol|doge)-(5m|15m|1h)$/.test(value);
 }
 
-export function profileAsset(profileId: MarketProfileId): 'btc' | 'eth' | 'sol' {
-  return profileId.split('-')[0] as 'btc' | 'eth' | 'sol';
+export function profileAsset(profileId: MarketProfileId): MarketAsset {
+  return profileId.split('-')[0] as MarketAsset;
 }
 
-export function profileIntervals(_asset: 'btc' | 'eth' | 'sol'): Array<'5m' | '15m' | '1h'> {
+export function profileIntervals(_asset: MarketAsset): MarketInterval[] {
   return ['5m', '15m', '1h'];
 }
 
@@ -265,7 +265,7 @@ export function profileRoundKey(profileId: MarketProfileId | undefined, roundId:
 
 export function parseProfileRoundKey(value: string): { profileId?: MarketProfileId; roundId: string } {
   const [maybeProfileId, ...rest] = value.split(':');
-  if (rest.length && /^(btc|eth|sol)-(5m|15m|1h)$/.test(maybeProfileId)) {
+  if (rest.length && isMarketProfileId(maybeProfileId)) {
     return { profileId: maybeProfileId as MarketProfileId, roundId: rest.join(':') };
   }
   return { roundId: value };
@@ -275,4 +275,3 @@ export function toTime(value: string): number {
   const time = new Date(value).getTime();
   return Number.isFinite(time) ? time : 0;
 }
-

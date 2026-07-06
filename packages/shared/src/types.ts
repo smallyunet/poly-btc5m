@@ -8,7 +8,7 @@ export type Regime = 'CHOP' | 'TREND' | 'LOW_ACTIVITY' | 'UNKNOWN';
 
 export type StrategyProfile = 'classic' | 'experiment_next_round';
 
-export type MarketAsset = 'btc' | 'eth' | 'sol';
+export type MarketAsset = 'btc' | 'eth' | 'sol' | 'doge';
 
 export type MarketInterval = '5m' | '15m' | '1h';
 
@@ -19,7 +19,7 @@ export type MarketProfileStatus = 'disabled' | 'monitor' | 'live';
 export type MarketProfile = {
   id: MarketProfileId;
   asset: MarketAsset;
-  assetSymbol: 'BTC' | 'ETH' | 'SOL';
+  assetSymbol: 'BTC' | 'ETH' | 'SOL' | 'DOGE';
   interval: MarketInterval;
   label: string;
   status: MarketProfileStatus;

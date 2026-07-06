@@ -113,6 +113,7 @@ export type AppConfig = {
 
 export function loadConfig(): AppConfig {
   const orderSharesPerSide = numberEnv('ORDER_SHARES_PER_SIDE', 5);
+  const marketProfiles = loadMarketProfiles(orderSharesPerSide);
   return {
     port: Number(process.env.PORT || 8788),
     dashboardInternalApiKey: process.env.DASHBOARD_INTERNAL_API_KEY,
@@ -127,7 +128,7 @@ export function loadConfig(): AppConfig {
     tickIntervalMs: parsePositiveInteger(process.env.BOT_TICK_MS, 2_000),
     runtimeStatePath: process.env.RUNTIME_STATE_PATH || path.resolve(process.cwd(), 'data/runtime-state.json'),
     runtimeMaxRecords: parsePositiveInteger(process.env.RUNTIME_MAX_RECORDS, 1_000),
-    binanceWsUrl: binanceWsUrl(process.env.BINANCE_WS_URL || process.env.BINANCE_BTC_WS_URL),
+    binanceWsUrl: binanceWsUrl(process.env.BINANCE_WS_URL || process.env.BINANCE_BTC_WS_URL, marketProfiles),
     binancePriceSampleMs: parsePositiveInteger(process.env.BINANCE_PRICE_SAMPLE_MS, 1_000),
     clobWsUrl: clobWsUrl(process.env.POLYMARKET_CLOB_WS_URL),
     dualLimitPrice: numberEnv('DUAL_LIMIT_PRICE', 0.45),
@@ -218,7 +219,7 @@ export function loadConfig(): AppConfig {
     telegramRoundSummaryOnOrderOnly: booleanEnv('TELEGRAM_ROUND_SUMMARY_ON_ORDER_ONLY', true),
     telegramIdleSummaryIntervalMs: parsePositiveInteger(process.env.TELEGRAM_IDLE_SUMMARY_INTERVAL_MS, 4 * 60 * 60_000),
     marketConfig: loadMarketConfig(),
-    marketProfiles: loadMarketProfiles(orderSharesPerSide),
+    marketProfiles,
   };
 }
 
@@ -241,10 +242,17 @@ function loadMarketProfiles(orderSharesPerSide: number): MarketProfile[] {
     '15m': parseProfileStatus(process.env.BTC_15M_PROFILE_STATUS, 'monitor'),
     '1h': parseProfileStatus(process.env.BTC_1H_PROFILE_STATUS, 'monitor'),
   };
-  const ethStatuses: Record<MarketInterval, MarketProfile['status']> = {
-    '5m': parseProfileStatus(process.env.ETH_5M_PROFILE_STATUS, 'disabled'),
-    '15m': parseProfileStatus(process.env.ETH_15M_PROFILE_STATUS, 'disabled'),
-    '1h': parseProfileStatus(process.env.ETH_1H_PROFILE_STATUS, 'disabled'),
+  const altStatuses: Record<'ETH' | 'DOGE', Record<MarketInterval, MarketProfile['status']>> = {
+    ETH: {
+      '5m': parseProfileStatus(process.env.ETH_5M_PROFILE_STATUS, 'disabled'),
+      '15m': parseProfileStatus(process.env.ETH_15M_PROFILE_STATUS, 'disabled'),
+      '1h': parseProfileStatus(process.env.ETH_1H_PROFILE_STATUS, 'disabled'),
+    },
+    DOGE: {
+      '5m': parseProfileStatus(process.env.DOGE_5M_PROFILE_STATUS, 'disabled'),
+      '15m': parseProfileStatus(process.env.DOGE_15M_PROFILE_STATUS, 'disabled'),
+      '1h': parseProfileStatus(process.env.DOGE_1H_PROFILE_STATUS, 'disabled'),
+    },
   };
   const profiles: MarketProfile[] = [
     makeProfile({ id: 'btc-5m', assetSymbol: 'BTC', interval: '5m', status: btcStatuses['5m'], durationSeconds: 300, decisionLeadSeconds: 30, orderSharesPerSide, limitPrice: baseLimitPrice, minSecondsToStart: baseMinSecondsToStart, confirmTicks: baseConfirmTicks, hedgeWindows: [60, 30, 15], priceFeedSymbol: 'btcusdt' }),
@@ -252,7 +260,7 @@ function loadMarketProfiles(orderSharesPerSide: number): MarketProfile[] {
     makeProfile({ id: 'btc-1h', assetSymbol: 'BTC', interval: '1h', status: btcStatuses['1h'], durationSeconds: 3600, decisionLeadSeconds: 180, orderSharesPerSide, limitPrice: baseLimitPrice, minSecondsToStart: baseMinSecondsToStart, confirmTicks: baseConfirmTicks, hedgeWindows: [600, 300, 60], priceFeedSymbol: 'btcusdt' }),
   ];
 
-  for (const assetSymbol of ['ETH', 'SOL'] as const) {
+  for (const assetSymbol of ['ETH', 'SOL', 'DOGE'] as const) {
     for (const interval of ['5m', '15m', '1h'] as const) {
       const durationSeconds = interval === '5m' ? 300 : interval === '15m' ? 900 : 3600;
       const decisionLeadSeconds = interval === '5m' ? 30 : interval === '15m' ? 90 : 180;
@@ -261,7 +269,7 @@ function loadMarketProfiles(orderSharesPerSide: number): MarketProfile[] {
         id: `${assetSymbol.toLowerCase()}-${interval}` as MarketProfileId,
         assetSymbol,
         interval,
-        status: assetSymbol === 'ETH' ? ethStatuses[interval] : 'disabled',
+        status: assetSymbol === 'ETH' || assetSymbol === 'DOGE' ? altStatuses[assetSymbol][interval] : 'disabled',
         durationSeconds,
         decisionLeadSeconds,
         orderSharesPerSide,
@@ -278,7 +286,7 @@ function loadMarketProfiles(orderSharesPerSide: number): MarketProfile[] {
 
 function makeProfile(params: {
   id: MarketProfileId;
-  assetSymbol: 'BTC' | 'ETH' | 'SOL';
+  assetSymbol: 'BTC' | 'ETH' | 'SOL' | 'DOGE';
   interval: MarketInterval;
   status: MarketProfile['status'];
   durationSeconds: number;
@@ -344,7 +352,7 @@ function makeProfile(params: {
   };
 }
 
-function profileCooldownMs(params: { assetSymbol: 'BTC' | 'ETH' | 'SOL'; interval: MarketInterval }, key: string, fiveMinuteDefaultMs: number): number {
+function profileCooldownMs(params: { assetSymbol: 'BTC' | 'ETH' | 'SOL' | 'DOGE'; interval: MarketInterval }, key: string, fiveMinuteDefaultMs: number): number {
   const intervalKey = params.interval.toUpperCase().replace(/[^A-Z0-9]/g, '_');
   const assetIntervalKey = `${params.assetSymbol}_${intervalKey}_SINGLE_FILL_COOLDOWN_${key}_MS`;
   const intervalOnlyKey = `${intervalKey}_SINGLE_FILL_COOLDOWN_${key}_MS`;
@@ -387,10 +395,19 @@ function booleanEnv(name: string, fallback: boolean): boolean {
   return fallback;
 }
 
-function binanceWsUrl(value: string | undefined): string {
-  const url = value?.trim() || 'wss://stream.binance.com:9443/stream?streams=btcusdt@aggTrade/ethusdt@aggTrade';
+function binanceWsUrl(value: string | undefined, profiles: MarketProfile[]): string {
+  const url = value?.trim() || 'wss://stream.binance.com:9443/stream?streams=btcusdt@aggTrade/ethusdt@aggTrade/dogeusdt@aggTrade';
   if (!url.startsWith('wss://')) throw new Error('BINANCE_WS_URL must be a wss:// URL.');
-  return url;
+  if (!url.includes('/stream?streams=') && !url.includes('/ws/')) return url;
+  const [base, streamList = ''] = url.includes('/stream?streams=')
+    ? url.split('/stream?streams=')
+    : url.split('/ws/');
+  const streams = new Set(streamList.split('/').map((item) => item.trim()).filter(Boolean));
+  for (const profile of profiles) {
+    if (profile.status === 'disabled') continue;
+    streams.add(`${profile.priceFeedSymbol.toLowerCase()}@aggTrade`);
+  }
+  return `${base}/stream?streams=${[...streams].join('/')}`;
 }
 
 function clobWsUrl(value: string | undefined): string {

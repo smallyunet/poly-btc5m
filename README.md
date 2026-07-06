@@ -100,12 +100,15 @@ BTC_1H_PROFILE_STATUS=monitor
 ETH_5M_PROFILE_STATUS=disabled
 ETH_15M_PROFILE_STATUS=disabled
 ETH_1H_PROFILE_STATUS=disabled
+DOGE_5M_PROFILE_STATUS=disabled
+DOGE_15M_PROFILE_STATUS=disabled
+DOGE_1H_PROFILE_STATUS=disabled
 ```
 
 Recommended live feed settings:
 
 ```dotenv
-BINANCE_WS_URL=wss://stream.binance.com:9443/stream?streams=btcusdt@aggTrade/ethusdt@aggTrade
+BINANCE_WS_URL=wss://stream.binance.com:9443/stream?streams=btcusdt@aggTrade/ethusdt@aggTrade/dogeusdt@aggTrade
 BINANCE_PRICE_SAMPLE_MS=1000
 POLYMARKET_CLOB_WS_URL=wss://ws-subscriptions-clob.polymarket.com/ws/market
 POLYMARKET_GAMMA_API_URL=https://gamma-api.polymarket.com

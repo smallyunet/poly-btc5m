@@ -17,6 +17,11 @@ const COOLDOWN_ENV_KEYS = [
   'ETH_15M_PROFILE_STATUS',
   'ETH_1H_PROFILE_STATUS',
   'ETH_15M_SINGLE_FILL_COOLDOWN_BASE_MS',
+  'DOGE_5M_PROFILE_STATUS',
+  'DOGE_15M_PROFILE_STATUS',
+  'DOGE_1H_PROFILE_STATUS',
+  'DOGE_15M_SINGLE_FILL_COOLDOWN_BASE_MS',
+  'BINANCE_WS_URL',
   '5M_SINGLE_FILL_COOLDOWN_BASE_MS',
   '15M_SINGLE_FILL_COOLDOWN_BASE_MS',
   '1H_SINGLE_FILL_COOLDOWN_BASE_MS',
@@ -69,12 +74,16 @@ test('market profile cooldown supports profile-specific env override', () => {
   });
 });
 
-test('ETH recurring profiles can be enabled independently from BTC profiles', () => {
+test('ETH and DOGE recurring profiles can be enabled independently from BTC profiles', () => {
   withEnv(COOLDOWN_ENV_KEYS, {
     ETH_5M_PROFILE_STATUS: 'monitor',
     ETH_15M_PROFILE_STATUS: 'live',
     ETH_1H_PROFILE_STATUS: 'disabled',
     ETH_15M_SINGLE_FILL_COOLDOWN_BASE_MS: String(44 * 60_000),
+    DOGE_5M_PROFILE_STATUS: 'monitor',
+    DOGE_15M_PROFILE_STATUS: 'live',
+    DOGE_1H_PROFILE_STATUS: 'disabled',
+    DOGE_15M_SINGLE_FILL_COOLDOWN_BASE_MS: String(55 * 60_000),
   }, () => {
     const config = loadConfig();
     const byId = new Map(config.marketProfiles.map((profile) => [profile.id, profile]));
@@ -85,7 +94,37 @@ test('ETH recurring profiles can be enabled independently from BTC profiles', ()
     assert.equal(byId.get('eth-5m')?.seriesSlug, 'eth-updown-5m');
     assert.equal(byId.get('eth-15m')?.priceFeedSymbol, 'ethusdt');
     assert.equal(byId.get('eth-15m')?.cooldown.baseMs, 44 * 60_000);
+    assert.equal(byId.get('doge-5m')?.status, 'monitor');
+    assert.equal(byId.get('doge-15m')?.status, 'live');
+    assert.equal(byId.get('doge-1h')?.status, 'disabled');
+    assert.equal(byId.get('doge-5m')?.seriesSlug, 'doge-updown-5m');
+    assert.equal(byId.get('doge-15m')?.priceFeedSymbol, 'dogeusdt');
+    assert.equal(byId.get('doge-15m')?.cooldown.baseMs, 55 * 60_000);
     assert.equal(byId.get('sol-5m')?.status, 'disabled');
+  });
+});
+
+test('enabled DOGE profiles are added to an existing Binance multi-stream URL', () => {
+  withEnv(COOLDOWN_ENV_KEYS, {
+    BINANCE_WS_URL: 'wss://stream.binance.com:9443/stream?streams=btcusdt@aggTrade/ethusdt@aggTrade',
+    DOGE_5M_PROFILE_STATUS: 'monitor',
+  }, () => {
+    const config = loadConfig();
+
+    assert.match(config.binanceWsUrl, /btcusdt@aggTrade/);
+    assert.match(config.binanceWsUrl, /ethusdt@aggTrade/);
+    assert.match(config.binanceWsUrl, /dogeusdt@aggTrade/);
+  });
+});
+
+test('enabled DOGE profiles upgrade an existing Binance single-stream URL', () => {
+  withEnv(COOLDOWN_ENV_KEYS, {
+    BINANCE_WS_URL: 'wss://stream.binance.com:9443/ws/btcusdt@aggTrade',
+    DOGE_5M_PROFILE_STATUS: 'monitor',
+  }, () => {
+    const config = loadConfig();
+
+    assert.equal(config.binanceWsUrl, 'wss://stream.binance.com:9443/stream?streams=btcusdt@aggTrade/dogeusdt@aggTrade');
   });
 });
 

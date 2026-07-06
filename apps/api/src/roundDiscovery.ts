@@ -134,6 +134,7 @@ function hourlyHumanSlug(profile: MarketProfile, roundStartSec: number): string 
     btc: 'bitcoin',
     eth: 'ethereum',
     sol: 'solana',
+    doge: 'dogecoin',
   }[profile.asset];
   const marketStartMs = (roundStartSec - profile.roundDurationSeconds) * 1000;
   const parts = new Intl.DateTimeFormat('en-US', {
