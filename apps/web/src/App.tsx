@@ -431,12 +431,12 @@ export function App() {
     : touchMatrixAssets[0] || 'btc';
   const touchCompletedBySelectedAsset = touchCompletedByAssetPrice.filter((row) => (row.asset || 'unknown') === selectedTouchAsset);
   const touchRecentRounds = touchSim?.recentRounds ?? [];
-  const touchCurrentRounds = React.useMemo(() => touchRecentRounds.filter((round) => {
+  const touchCurrentRounds = touchRecentRounds.filter((round) => {
     if (round.finalized) return false;
     const startMs = new Date(round.startAt).getTime();
     const endMs = new Date(round.endAt).getTime();
     return Number.isFinite(startMs) && Number.isFinite(endMs) && startMs <= nowMs && nowMs <= endMs;
-  }), [touchRecentRounds, nowMs]);
+  });
   const touchCommand = 'npm run research:pm5m-touch -- --assets btc,eth,sol,doge,xrp,hype --min-price 0.29 --max-price 0.49';
   const touchGeneratedAtMs = touchSim?.generatedAt ? new Date(touchSim.generatedAt).getTime() : 0;
   const touchGeneratedLabel = touchGeneratedAtMs ? formatRelativeAge(touchGeneratedAtMs, nowMs) : 'not generated';
