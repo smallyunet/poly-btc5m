@@ -5,6 +5,15 @@ import { btcMarketConfigSchema, type BtcMarketConfig, type ExecutionMode, type M
 
 type SupportedAssetSymbol = 'BTC' | 'ETH' | 'SOL' | 'DOGE' | 'XRP' | 'HYPE';
 
+const DEFAULT_SINGLE_FILL_COOLDOWN = {
+  baseMs: 15 * 60_000,
+  priceCapMs: 30 * 60_000,
+  executionMs: 60 * 60_000,
+  repeatWindowMs: 60 * 60_000,
+  secondMs: 60 * 60_000,
+  thirdMs: 60 * 60_000,
+};
+
 export type AppConfig = {
   port: number;
   dashboardInternalApiKey?: string;
@@ -68,7 +77,6 @@ export type AppConfig = {
   minParticipationTopPositionPnl: number;
   minParticipationPositionPnlSum: number;
   maxParticipationHolderConcentration: number;
-  singleFillCooldownMs: number;
   singleFillCooldownBaseMs: number;
   singleFillCooldownPriceCapMs: number;
   singleFillCooldownExecutionMs: number;
@@ -181,13 +189,12 @@ export function loadConfig(): AppConfig {
     minParticipationTopPositionPnl: numberEnv('MIN_PARTICIPATION_TOP_POSITION_PNL', 40),
     minParticipationPositionPnlSum: numberEnv('MIN_PARTICIPATION_POSITION_PNL_SUM', 100),
     maxParticipationHolderConcentration: numberEnv('MAX_PARTICIPATION_HOLDER_CONCENTRATION', 0.75),
-    singleFillCooldownMs: parsePositiveInteger(process.env.SINGLE_FILL_COOLDOWN_MS, 4 * 60 * 60_000),
-    singleFillCooldownBaseMs: parsePositiveInteger(process.env.SINGLE_FILL_COOLDOWN_BASE_MS, 30 * 60_000),
-    singleFillCooldownPriceCapMs: parsePositiveInteger(process.env.SINGLE_FILL_COOLDOWN_PRICE_CAP_MS, 60 * 60_000),
-    singleFillCooldownExecutionMs: parsePositiveInteger(process.env.SINGLE_FILL_COOLDOWN_EXECUTION_MS, 2 * 60 * 60_000),
-    singleFillCooldownRepeatWindowMs: parsePositiveInteger(process.env.SINGLE_FILL_COOLDOWN_REPEAT_WINDOW_MS, 2 * 60 * 60_000),
-    singleFillCooldownSecondMs: parsePositiveInteger(process.env.SINGLE_FILL_COOLDOWN_SECOND_MS, 2 * 60 * 60_000),
-    singleFillCooldownThirdMs: parsePositiveInteger(process.env.SINGLE_FILL_COOLDOWN_THIRD_MS, 4 * 60 * 60_000),
+    singleFillCooldownBaseMs: parsePositiveInteger(process.env.SINGLE_FILL_COOLDOWN_BASE_MS, DEFAULT_SINGLE_FILL_COOLDOWN.baseMs),
+    singleFillCooldownPriceCapMs: parsePositiveInteger(process.env.SINGLE_FILL_COOLDOWN_PRICE_CAP_MS, DEFAULT_SINGLE_FILL_COOLDOWN.priceCapMs),
+    singleFillCooldownExecutionMs: parsePositiveInteger(process.env.SINGLE_FILL_COOLDOWN_EXECUTION_MS, DEFAULT_SINGLE_FILL_COOLDOWN.executionMs),
+    singleFillCooldownRepeatWindowMs: parsePositiveInteger(process.env.SINGLE_FILL_COOLDOWN_REPEAT_WINDOW_MS, DEFAULT_SINGLE_FILL_COOLDOWN.repeatWindowMs),
+    singleFillCooldownSecondMs: parsePositiveInteger(process.env.SINGLE_FILL_COOLDOWN_SECOND_MS, DEFAULT_SINGLE_FILL_COOLDOWN.secondMs),
+    singleFillCooldownThirdMs: parsePositiveInteger(process.env.SINGLE_FILL_COOLDOWN_THIRD_MS, DEFAULT_SINGLE_FILL_COOLDOWN.thirdMs),
     singleFillHedgeEnabled: booleanEnv('SINGLE_FILL_HEDGE_ENABLED', true),
     singleFillEarlyHedgeWindowSeconds: parsePositiveInteger(process.env.SINGLE_FILL_EARLY_HEDGE_WINDOW_SECONDS, 60),
     singleFillEarlyHedgeMaxPairCost: numberEnv('SINGLE_FILL_EARLY_HEDGE_MAX_PAIR_COST', 1.02),
@@ -363,12 +370,12 @@ function makeProfile(params: {
       maxPairCost: numberEnv('SINGLE_FILL_HEDGE_MAX_PAIR_COST', 1.1),
     },
     cooldown: {
-      baseMs: profileCooldownMs(params, 'BASE', 30 * 60_000),
-      priceCapMs: profileCooldownMs(params, 'PRICE_CAP', 60 * 60_000),
-      executionMs: profileCooldownMs(params, 'EXECUTION', 2 * 60 * 60_000),
-      repeatWindowMs: profileCooldownMs(params, 'REPEAT_WINDOW', 2 * 60 * 60_000),
-      secondMs: profileCooldownMs(params, 'SECOND', 2 * 60 * 60_000),
-      thirdMs: profileCooldownMs(params, 'THIRD', 4 * 60 * 60_000),
+      baseMs: profileCooldownMs(params, 'BASE', DEFAULT_SINGLE_FILL_COOLDOWN.baseMs),
+      priceCapMs: profileCooldownMs(params, 'PRICE_CAP', DEFAULT_SINGLE_FILL_COOLDOWN.priceCapMs),
+      executionMs: profileCooldownMs(params, 'EXECUTION', DEFAULT_SINGLE_FILL_COOLDOWN.executionMs),
+      repeatWindowMs: profileCooldownMs(params, 'REPEAT_WINDOW', DEFAULT_SINGLE_FILL_COOLDOWN.repeatWindowMs),
+      secondMs: profileCooldownMs(params, 'SECOND', DEFAULT_SINGLE_FILL_COOLDOWN.secondMs),
+      thirdMs: profileCooldownMs(params, 'THIRD', DEFAULT_SINGLE_FILL_COOLDOWN.thirdMs),
     },
   };
 }
@@ -377,7 +384,8 @@ function profileCooldownMs(params: { assetSymbol: SupportedAssetSymbol; interval
   const intervalKey = params.interval.toUpperCase().replace(/[^A-Z0-9]/g, '_');
   const assetIntervalKey = `${params.assetSymbol}_${intervalKey}_SINGLE_FILL_COOLDOWN_${key}_MS`;
   const intervalOnlyKey = `${intervalKey}_SINGLE_FILL_COOLDOWN_${key}_MS`;
-  return parsePositiveInteger(process.env[assetIntervalKey] || process.env[intervalOnlyKey], fiveMinuteDefaultMs);
+  const globalKey = `SINGLE_FILL_COOLDOWN_${key}_MS`;
+  return parsePositiveInteger(process.env[assetIntervalKey] || process.env[intervalOnlyKey] || process.env[globalKey], fiveMinuteDefaultMs);
 }
 
 function parseProfileStatus(value: string | undefined, fallback: MarketProfile['status']): MarketProfile['status'] {

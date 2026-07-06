@@ -471,7 +471,6 @@ function config(): AppConfig {
     minParticipationTopPositionPnl: 40,
     minParticipationPositionPnlSum: 100,
     maxParticipationHolderConcentration: 0.75,
-    singleFillCooldownMs: 4 * 60 * 60_000,
     singleFillCooldownBaseMs: 30 * 60_000,
     singleFillCooldownPriceCapMs: 60 * 60_000,
     singleFillCooldownExecutionMs: 2 * 60 * 60_000,
