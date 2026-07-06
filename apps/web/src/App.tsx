@@ -431,6 +431,12 @@ export function App() {
     : touchMatrixAssets[0] || 'btc';
   const touchCompletedBySelectedAsset = touchCompletedByAssetPrice.filter((row) => (row.asset || 'unknown') === selectedTouchAsset);
   const touchRecentRounds = touchSim?.recentRounds ?? [];
+  const touchCurrentRounds = React.useMemo(() => touchRecentRounds.filter((round) => {
+    if (round.finalized) return false;
+    const startMs = new Date(round.startAt).getTime();
+    const endMs = new Date(round.endAt).getTime();
+    return Number.isFinite(startMs) && Number.isFinite(endMs) && startMs <= nowMs && nowMs <= endMs;
+  }), [touchRecentRounds, nowMs]);
   const touchCommand = 'npm run research:pm5m-touch -- --assets btc,eth,sol,doge,xrp,hype --min-price 0.29 --max-price 0.49';
   const touchGeneratedAtMs = touchSim?.generatedAt ? new Date(touchSim.generatedAt).getTime() : 0;
   const touchGeneratedLabel = touchGeneratedAtMs ? formatRelativeAge(touchGeneratedAtMs, nowMs) : 'not generated';
@@ -1368,7 +1374,7 @@ export function App() {
                       onClick={() => setSimulationSubTab('rounds')}
                     >
                       Round Strip
-                      <span>{touchRecentRounds.length}</span>
+                      <span>{touchCurrentRounds.length}</span>
                     </button>
                   </div>
 
@@ -1456,9 +1462,9 @@ export function App() {
                           <h3>Round Outcome Strip</h3>
                         </div>
                       </div>
-                      {touchRecentRounds.length > 0 ? (
+                      {touchCurrentRounds.length > 0 ? (
                         <div className="touchRecentGrid">
-                          {touchRecentRounds.slice(0, 8).map((round) => (
+                          {touchCurrentRounds.map((round) => (
                           <div key={round.slug} className="touchRoundCard">
                             <div className="touchRoundHeader">
                               <AssetLabel profileId={`${round.asset}-5m`} label={round.asset.toUpperCase()} size="sm" />
@@ -1478,7 +1484,7 @@ export function App() {
                           ))}
                         </div>
                       ) : (
-                        <div className="opsEmptyState">Recent round strips will appear once the recorder publishes active or finalized rounds.</div>
+                        <div className="opsEmptyState">Current round strips will appear once the recorder publishes active markets.</div>
                       )}
                     </section>
                   )}
