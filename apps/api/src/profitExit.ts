@@ -70,7 +70,7 @@ export function planSingleFillProfitExit(params: {
   const bestBid = quote?.bestBid;
   if (bestBid == null) return { ok: false, reason: 'BEST_BID_MISSING' };
 
-  const limitPrice = roundPrice(Math.max(params.appConfig.singleFillProfitExitMinPrice, bestBid - params.appConfig.singleFillProfitExitPriceOffset));
+  const limitPrice = roundPrice(Math.max(0.01, bestBid - params.appConfig.singleFillProfitExitPriceOffset));
   const profitRate = exit.avgBuyPrice > 0 ? (limitPrice - exit.avgBuyPrice) / exit.avgBuyPrice : 0;
   if (profitRate < params.appConfig.singleFillProfitExitMinRate) return { ok: false, reason: 'EXIT_PROFIT_RATE_BELOW_MIN' };
   const expectedPnlUsd = (limitPrice - exit.avgBuyPrice) * exit.netShares;
@@ -147,7 +147,7 @@ export function buildSingleFillProfitExitCheck(params: {
       condition('Profit exit window', secondsToEnd <= params.appConfig.singleFillProfitExitMaxSecondsToEnd && secondsToEnd > params.appConfig.singleFillProfitExitMinSecondsToEnd, `${secondsToEnd.toFixed(1)}s to end / max ${params.appConfig.singleFillProfitExitMaxSecondsToEnd}s / min ${params.appConfig.singleFillProfitExitMinSecondsToEnd}s`),
       condition('Single net exposure', exitLabel != null, `YES net ${yes.netShares.toFixed(2)} / NO net ${no.netShares.toFixed(2)}`),
       condition('Exit-side book ready', quoteGate == null, quoteGate || quoteAgeLabel(quote)),
-      condition('Exit bid floor', quote?.bestBid != null && quote.bestBid >= params.appConfig.singleFillProfitExitMinPrice, quote?.bestBid == null ? 'bid missing' : `${quote.bestBid.toFixed(3)} / min ${params.appConfig.singleFillProfitExitMinPrice.toFixed(3)}`),
+      condition('Exit profit rate', plan.ok || plan.reason !== 'EXIT_PROFIT_RATE_BELOW_MIN', plan.ok ? `${(((plan.intent.limitPrice - plan.avgPrice) / plan.avgPrice) * 100).toFixed(2)}% / min ${(params.appConfig.singleFillProfitExitMinRate * 100).toFixed(2)}%` : `blocked: ${plan.reason}`),
       condition('Exit PnL floor', plan.ok || plan.reason !== 'EXIT_PNL_BELOW_MIN', plan.ok ? `${plan.expectedPnlUsd.toFixed(2)} / min ${params.appConfig.singleFillProfitExitMinPnlUsd.toFixed(2)}` : `blocked: ${plan.reason}`),
       condition('Duplicate exit guard', !params.hasRecentExitOrder, params.hasRecentExitOrder ? 'recent exit order exists' : 'clear'),
       condition('Failed exit cooldown', !params.hasRecentFailedExitOrder, params.hasRecentFailedExitOrder ? 'recent failed exit order exists' : 'clear'),

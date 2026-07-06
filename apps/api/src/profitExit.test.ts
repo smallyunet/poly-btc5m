@@ -27,9 +27,9 @@ test('plans a capped sell exit for profitable single-fill exposure', () => {
   assert.equal(plan.intent.side, 'SELL');
   assert.equal(plan.intent.strategy, 'UPDOWN_SINGLE_FILL_PROFIT_EXIT');
   assert.equal(plan.intent.label, 'YES');
-  assert.equal(plan.intent.limitPrice, 0.5);
+  assert.equal(plan.intent.limitPrice, 0.49);
   assert.equal(plan.intent.shares, 10);
-  assert.equal(plan.expectedPnlUsd, 0.4999999999999999);
+  assert.equal(plan.expectedPnlUsd, 0.3999999999999998);
 });
 
 test('blocks profit exit when the live bid is below the configured profit rate', () => {
@@ -40,7 +40,7 @@ test('blocks profit exit when the live bid is below the configured profit rate',
       order('NO', 'BUY', { filledSize: 0, status: 'posted', clobOrderId: 'no-open' }),
     ],
     orderbooks: [quote('yes-token', 0.46)],
-    appConfig: { ...config(), singleFillProfitExitMinPrice: 0 },
+    appConfig: config(),
     nowMs,
   });
 
@@ -269,7 +269,6 @@ function config(): AppConfig {
   return {
     singleFillProfitExitEnabled: true,
     singleFillProfitExitMinRate: 0.05,
-    singleFillProfitExitMinPrice: 0.5,
     singleFillProfitExitMinPnlUsd: 0.3,
     singleFillProfitExitPriceOffset: 0.01,
     singleFillProfitExitMaxOrderbookAgeMs: 1_000,

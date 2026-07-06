@@ -70,13 +70,14 @@ export const STRATEGY_RULES: StrategyRule[] = [
     entryRules: [
       'Round must already be running and inside the configured profit-exit window.',
       'Exactly one side must have net BUY exposure by at least the minimum order size.',
-      'The filled-side orderbook must be live, fresh under SINGLE_FILL_PROFIT_EXIT_MAX_ORDERBOOK_AGE_MS, and have bestBid >= SINGLE_FILL_PROFIT_EXIT_MIN_PRICE.',
+      'The filled-side orderbook must be live and fresh under SINGLE_FILL_PROFIT_EXIT_MAX_ORDERBOOK_AGE_MS.',
+      'The capped sell limit must realize at least SINGLE_FILL_PROFIT_EXIT_MIN_RATE profit on the filled side.',
       'The capped sell limit must realize at least SINGLE_FILL_PROFIT_EXIT_MIN_PNL_USD.',
       'The exit is posted as a FAK SELL LIMIT, not an uncapped market order.',
     ],
     exitRules: [
       'The missing-side open BUY order is cancelled before the sell attempt.',
-      'If the bid moves below the configured floor after cancellation, the sell is skipped and the single exposure remains managed by the hedge rule.',
+      'If the bid moves below the configured relative profit threshold after cancellation, the sell is skipped and the single exposure remains managed by the hedge rule.',
     ],
   },
   {

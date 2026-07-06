@@ -177,7 +177,6 @@ function appConfigForProfile(appConfig: AppConfig, profile: MarketProfile): AppC
     singleFillHedgeMaxPairCost: profile.hedge.maxPairCost,
     singleFillProfitExitEnabled: profile.profitExit.enabled,
     singleFillProfitExitMinRate: profile.profitExit.minProfitRate,
-    singleFillProfitExitMinPrice: 0,
     singleFillProfitExitMinPnlUsd: profile.profitExit.minPnlUsd,
     singleFillProfitExitPriceOffset: profile.profitExit.priceOffset,
     singleFillProfitExitMaxOrderbookAgeMs: profile.profitExit.maxOrderbookAgeMs,

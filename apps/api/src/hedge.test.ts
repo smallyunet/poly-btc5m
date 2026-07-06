@@ -489,7 +489,6 @@ function config(): AppConfig {
     singleFillHedgePriceOffset: 0.01,
     singleFillHedgeMaxPairCost: 1.1,
     singleFillProfitExitEnabled: true,
-    singleFillProfitExitMinPrice: 0.5,
     singleFillProfitExitMinPnlUsd: 0.3,
     singleFillProfitExitPriceOffset: 0.01,
     singleFillProfitExitMaxOrderbookAgeMs: 1_000,

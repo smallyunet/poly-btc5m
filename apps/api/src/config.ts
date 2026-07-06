@@ -94,7 +94,6 @@ export type AppConfig = {
   singleFillHedgeMaxPairCost: number;
   singleFillProfitExitEnabled: boolean;
   singleFillProfitExitMinRate: number;
-  singleFillProfitExitMinPrice: number;
   singleFillProfitExitMinPnlUsd: number;
   singleFillProfitExitPriceOffset: number;
   singleFillProfitExitMaxOrderbookAgeMs: number;
@@ -204,7 +203,6 @@ export function loadConfig(): AppConfig {
     singleFillHedgeMaxPairCost: numberEnv('SINGLE_FILL_HEDGE_MAX_PAIR_COST', 1.1),
     singleFillProfitExitEnabled: booleanEnv('SINGLE_FILL_PROFIT_EXIT_ENABLED', true),
     singleFillProfitExitMinRate: numberEnv('SINGLE_FILL_PROFIT_EXIT_MIN_RATE', 0.05),
-    singleFillProfitExitMinPrice: numberEnv('SINGLE_FILL_PROFIT_EXIT_MIN_PRICE', 0.5),
     singleFillProfitExitMinPnlUsd: numberEnv('SINGLE_FILL_PROFIT_EXIT_MIN_PNL_USD', 0.3),
     singleFillProfitExitPriceOffset: numberEnv('SINGLE_FILL_PROFIT_EXIT_PRICE_OFFSET', 0.01),
     singleFillProfitExitMaxOrderbookAgeMs: parsePositiveInteger(process.env.SINGLE_FILL_PROFIT_EXIT_MAX_ORDERBOOK_AGE_MS, 1_000),
