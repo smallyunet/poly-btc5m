@@ -37,6 +37,7 @@ type AssetCandidate = {
   profile: MarketProfile;
   row: TouchAggregateRow;
   score: number;
+  relaxed: boolean;
 };
 
 export function selectFiveMinuteEntryPrice(appConfig: AppConfig, profile: MarketProfile, round: RoundSnapshot): DynamicEntryPriceSelection {
@@ -149,18 +150,21 @@ export function rankFiveMinuteAssetCandidates(appConfig: AppConfig, profiles: Ma
   }
 
   const rows = summary.value.completed?.byAssetPrice || [];
-  const candidates = fiveMinuteProfiles
+  const strictCandidates = fiveMinuteProfiles
     .map((profile): AssetCandidate | null => {
       const row = bestSimulatorRow(appConfig, profile, rows);
-      return row ? { profile, row, score: row.estimatedEvPerShare } : null;
+      return row ? { profile, row, score: row.estimatedEvPerShare, relaxed: false } : null;
     })
     .filter((candidate): candidate is AssetCandidate => Boolean(candidate))
-    .sort((a, b) => (
-      b.score - a.score
-      || (a.row.singleRate ?? Number.POSITIVE_INFINITY) - (b.row.singleRate ?? Number.POSITIVE_INFINITY)
-      || b.row.price - a.row.price
-      || a.profile.id.localeCompare(b.profile.id)
-    ));
+    .sort(sortAssetCandidates);
+  const relaxedCandidates = strictCandidates.length ? [] : fiveMinuteProfiles
+    .map((profile): AssetCandidate | null => {
+      const row = bestRelativeSimulatorRow(appConfig, profile, rows);
+      return row ? { profile, row, score: row.estimatedEvPerShare, relaxed: true } : null;
+    })
+    .filter((candidate): candidate is AssetCandidate => Boolean(candidate))
+    .sort(sortAssetCandidates);
+  const candidates = strictCandidates.length ? strictCandidates : relaxedCandidates;
 
   const maxSelected = Math.max(1, appConfig.pm5mAssetSelectorMaxAssets);
   const selectedIds = new Set(candidates.slice(0, maxSelected).map((candidate) => candidate.profile.id));
@@ -183,8 +187,8 @@ export function rankFiveMinuteAssetCandidates(appConfig: AppConfig, profiles: Ma
       rank: ranked.rank,
       score: ranked.candidate.score,
       reason: selected
-        ? `5m asset selector selected rank #${ranked.rank} (${profile.asset} EV ${ranked.candidate.score.toFixed(4)}/share)`
-        : `5m asset selector rejected rank #${ranked.rank}; outside top ${maxSelected}`,
+        ? `5m asset selector selected rank #${ranked.rank}${ranked.candidate.relaxed ? ' by relative fallback' : ''} (${profile.asset} EV ${ranked.candidate.score.toFixed(4)}/share)`
+        : `5m asset selector rejected rank #${ranked.rank}${ranked.candidate.relaxed ? ' by relative fallback' : ''}; outside top ${maxSelected}`,
     });
   }
 
@@ -204,6 +208,27 @@ function bestSimulatorRow(appConfig: AppConfig, profile: MarketProfile, rows: To
       || (a.singleRate ?? Number.POSITIVE_INFINITY) - (b.singleRate ?? Number.POSITIVE_INFINITY)
       || b.price - a.price
     ))[0];
+}
+
+function bestRelativeSimulatorRow(appConfig: AppConfig, profile: MarketProfile, rows: TouchAggregateRow[]): TouchAggregateRow | undefined {
+  return rows
+    .filter((row) => row.asset === profile.asset)
+    .filter((row) => row.price >= appConfig.pm5mSimPriceMin - 0.000001 && row.price <= appConfig.pm5mSimPriceMax + 0.000001)
+    .filter((row) => row.rounds >= appConfig.pm5mSimPriceMinRounds)
+    .sort((a, b) => (
+      b.estimatedEvPerShare - a.estimatedEvPerShare
+      || (a.singleRate ?? Number.POSITIVE_INFINITY) - (b.singleRate ?? Number.POSITIVE_INFINITY)
+      || (a.noneRate ?? Number.POSITIVE_INFINITY) - (b.noneRate ?? Number.POSITIVE_INFINITY)
+      || b.price - a.price
+    ))[0];
+}
+
+function sortAssetCandidates(a: AssetCandidate, b: AssetCandidate): number {
+  return b.score - a.score
+    || (a.row.singleRate ?? Number.POSITIVE_INFINITY) - (b.row.singleRate ?? Number.POSITIVE_INFINITY)
+    || (a.row.noneRate ?? Number.POSITIVE_INFINITY) - (b.row.noneRate ?? Number.POSITIVE_INFINITY)
+    || b.row.price - a.row.price
+    || a.profile.id.localeCompare(b.profile.id);
 }
 
 function readSummary(summaryPath: string, refreshMs: number): { ok: true; value: TouchSummary } | { ok: false; reason: string; value: TouchSummary } {

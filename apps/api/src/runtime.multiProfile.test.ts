@@ -25,6 +25,7 @@ test('runAllProfilesTick captures isolated six-asset 5m, 15m, and 1h profile sna
   config.executionMode = 'monitor';
   config.ownerPrivateKey = undefined;
   config.depositWallet = undefined;
+  config.pm5mAssetSelectorEnabled = false;
   config.marketProfiles = config.marketProfiles.map((profile) => (
     { ...profile, status: 'monitor' }
   ));

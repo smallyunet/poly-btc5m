@@ -68,6 +68,26 @@ test('ranks 5m asset candidates and selects only the configured top N', () => {
   assert.equal(decisions.has('eth-15m'), false);
 });
 
+test('selects the relative best 5m asset when no candidate passes strict EV/risk filters', () => {
+  const summaryPath = writeSummary([
+    row('btc', 0.36, -0.020, 0.5),
+    row('eth', 0.42, -0.005, 0.6),
+    row('sol', 0.40, -0.010, 0.7),
+  ]);
+  const appConfig = { ...config(summaryPath), pm5mAssetSelectorEnabled: true, pm5mAssetSelectorMaxAssets: 1 };
+  const decisions = rankFiveMinuteAssetCandidates(appConfig, [
+    profile('btc-5m', 'btc'),
+    profile('eth-5m', 'eth'),
+    profile('sol-5m', 'sol'),
+  ]);
+
+  assert.equal(decisions.get('eth-5m')?.selected, true);
+  assert.equal(decisions.get('eth-5m')?.rank, 1);
+  assert.match(decisions.get('eth-5m')?.reason || '', /relative fallback/);
+  assert.equal(decisions.get('btc-5m')?.selected, false);
+  assert.equal(decisions.get('sol-5m')?.selected, false);
+});
+
 function writeSummary(rows: unknown[]): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pm5m-selector-'));
   const summaryPath = path.join(dir, 'summary.json');
