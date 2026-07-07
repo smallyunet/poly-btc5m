@@ -194,6 +194,8 @@ PM5M_SIM_PRICE_MAX=0.49
 PM5M_SIM_PRICE_MIN_ROUNDS=100
 PM5M_SIM_PRICE_FALLBACK=0.45
 PM5M_SIM_PRICE_MAX_SUMMARY_AGE_MS=600000
+PM5M_SIM_REQUIRE_POSITIVE_EV=true
+PM5M_SIM_MIN_EV_PER_SHARE=0
 PM5M_ASSET_SELECTOR_ENABLED=true
 PM5M_ASSET_SELECTOR_MAX_ASSETS=1
 PM5M_ASSET_SELECTOR_SINGLE_PENALTY=0.05
@@ -237,6 +239,7 @@ Live entry orders are configured as CLOB limit order `price + size`:
 - With `DYNAMIC_LIMIT_ENABLED=true`, CHOP score maps to 42c/44c/45c/46c, capped by `MAX_PAIR_COST`.
 - In live mode, `MIN_LIVE_CHOP_SCORE=80` blocks edge-score 42c setups from posting real orders.
 - `BYPASS_ENTRY_SCORE_GATING=true` bypasses strategy entry blockers and the entry orderbook quote gate so each round can attempt paired entry, but it does not bypass `SINGLE_FILL_COOLDOWN`. It still leaves execution-level duplicate/open-order, balance, credential, round-start, invalid price/size, and exit/hedge rules in place.
+- `PM5M_SIM_REQUIRE_POSITIVE_EV=true` blocks 5m live entry unless the touch simulator has a row above `PM5M_SIM_MIN_EV_PER_SHARE`; it applies before asset selection and prevents falling back to a fixed entry price when all simulator rows are negative.
 - `BYPASS_SINGLE_FILL_COOLDOWN=true` bypasses only the active single-fill cooldown entry blocker. It does not disable the single-fill hedge/profit-exit logic.
 - `REFRESH_SINGLE_FILL_COOLDOWN_ON_BOOT=true` recomputes any persisted active single-fill cooldown from the current profile cooldown config during process boot. It preserves fills, reviewed rounds, and repeat history, and only updates or clears active cooldown records.
 - `ENTRY_CONFIRM_TICKS=3` requires the full entry setup to remain eligible across three consecutive bot ticks before orders are posted.

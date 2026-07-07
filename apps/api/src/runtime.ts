@@ -89,7 +89,8 @@ export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, dat
       appConfig.bypassEntryScoreGating,
     )
     : evaluatedEntry;
-  const entry = applyFiveMinuteAssetSelection(confirmedEntry, fiveMinuteAssetSelection);
+  const simGuardedEntry = applyFiveMinuteSimulatorSelection(confirmedEntry, dynamicEntryPrice);
+  const entry = applyFiveMinuteAssetSelection(simGuardedEntry, fiveMinuteAssetSelection);
   const intents = entry.intents.map((intent) => withProfile(intent, profile));
   store.recordIntents([...intents, ...entry.rejected.map((intent) => withProfile(intent, profile))]);
   const executionDiagnostics = await executeLiveIntents({
@@ -236,6 +237,35 @@ function applyFiveMinuteAssetSelection(entry: StrategyEvaluation, assetSelection
         status: 'rejected' as const,
         rejectionReason: 'PM5M_ASSET_NOT_SELECTED',
         reason: `${intent.reason}; ${assetSelection.reason}`,
+      })),
+    ],
+    checks,
+  };
+}
+
+function applyFiveMinuteSimulatorSelection(entry: StrategyEvaluation, selection: ReturnType<typeof selectFiveMinuteEntryPrice>): StrategyEvaluation {
+  if (selection.enabled || !selection.reason.includes('positive EV')) return entry;
+  const selectorCondition = condition('5m simulator EV gate', false, selection.reason);
+  const checks = entry.checks.map((check) => {
+    if (check.strategy !== 'UPDOWN_DUAL_ENTRY') return check;
+    return {
+      ...check,
+      status: 'blocked' as const,
+      reason: check.reason ? `${check.reason}; PM5M_SIM_EV_NOT_POSITIVE` : 'PM5M_SIM_EV_NOT_POSITIVE',
+      blockers: [...new Set([...check.blockers, 'PM5M_SIM_EV_NOT_POSITIVE'])],
+      conditions: [...check.conditions, selectorCondition],
+    };
+  });
+  return {
+    ...entry,
+    intents: [],
+    rejected: [
+      ...entry.rejected,
+      ...entry.intents.map((intent) => ({
+        ...intent,
+        status: 'rejected' as const,
+        rejectionReason: 'PM5M_SIM_EV_NOT_POSITIVE',
+        reason: `${intent.reason}; ${selection.reason}`,
       })),
     ],
     checks,

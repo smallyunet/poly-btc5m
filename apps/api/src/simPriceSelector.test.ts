@@ -40,7 +40,7 @@ test('uses single-adjusted score instead of raw EV when selecting price', () => 
   assert.match(selected.reason, /score/);
 });
 
-test('selects the highest-score simulator price even when EV is negative', () => {
+test('selects the highest-score simulator price even when EV is negative by default', () => {
   const summaryPath = writeSummary([
     row('btc', 0.36, -0.001, 0.356),
     row('btc', 0.40, -0.020, 0.5),
@@ -49,6 +49,31 @@ test('selects the highest-score simulator price even when EV is negative', () =>
   assert.equal(selected.source, 'simulator');
   assert.equal(selected.selectedPrice, 0.36);
   assert.equal(selected.estimatedEvPerShare, -0.001);
+});
+
+test('blocks simulator price selection when positive EV is required and no row passes', () => {
+  const summaryPath = writeSummary([
+    row('btc', 0.36, -0.001, 0.356),
+    row('btc', 0.40, 0, 0.5),
+  ]);
+  const selected = selectFiveMinuteEntryPrice({ ...config(summaryPath), pm5mSimRequirePositiveEv: true }, profile('btc-5m', 'btc'), round('btc-updown-5m-test-positive'));
+
+  assert.equal(selected.enabled, false);
+  assert.equal(selected.source, 'disabled');
+  assert.equal(selected.selectedPrice, 0.45);
+  assert.match(selected.reason, /positive EV gate blocked/);
+});
+
+test('selects simulator price above min EV threshold when positive EV is required', () => {
+  const summaryPath = writeSummary([
+    row('btc', 0.36, 0.001, 0.2),
+    row('btc', 0.40, 0.020, 0.2),
+  ]);
+  const selected = selectFiveMinuteEntryPrice({ ...config(summaryPath), pm5mSimRequirePositiveEv: true, pm5mSimMinEvPerShare: 0.01 }, profile('btc-5m', 'btc'), round('btc-updown-5m-test-min-ev'));
+
+  assert.equal(selected.source, 'simulator');
+  assert.equal(selected.selectedPrice, 0.40);
+  assert.equal(selected.estimatedEvPerShare, 0.020);
 });
 
 test('falls back when no asset-specific simulator row passes range and min-round filters', () => {
@@ -105,7 +130,7 @@ test('ranks 5m asset candidates and selects only the configured top N', () => {
   assert.equal(decisions.has('eth-15m'), false);
 });
 
-test('ranks 5m asset candidates by highest score without requiring positive EV', () => {
+test('ranks 5m asset candidates by highest score without requiring positive EV by default', () => {
   const summaryPath = writeSummary([
     row('btc', 0.36, -0.020, 0.5),
     row('eth', 0.42, -0.005, 0.6),
@@ -121,6 +146,25 @@ test('ranks 5m asset candidates by highest score without requiring positive EV',
   assert.equal(decisions.get('eth-5m')?.selected, true);
   assert.equal(decisions.get('eth-5m')?.rank, 1);
   assert.doesNotMatch(decisions.get('eth-5m')?.reason || '', /relative fallback/);
+  assert.equal(decisions.get('btc-5m')?.selected, false);
+  assert.equal(decisions.get('sol-5m')?.selected, false);
+});
+
+test('blocks all 5m asset candidates when positive EV is required and all scores are negative', () => {
+  const summaryPath = writeSummary([
+    row('btc', 0.36, -0.020, 0.5),
+    row('eth', 0.42, -0.005, 0.6),
+    row('sol', 0.40, -0.010, 0.7),
+  ]);
+  const appConfig = { ...config(summaryPath), pm5mAssetSelectorEnabled: true, pm5mAssetSelectorMaxAssets: 1, pm5mSimRequirePositiveEv: true };
+  const decisions = rankFiveMinuteAssetCandidates(appConfig, [
+    profile('btc-5m', 'btc'),
+    profile('eth-5m', 'eth'),
+    profile('sol-5m', 'sol'),
+  ]);
+
+  assert.equal(decisions.get('eth-5m')?.selected, false);
+  assert.match(decisions.get('eth-5m')?.reason || '', /no simulator row passed/);
   assert.equal(decisions.get('btc-5m')?.selected, false);
   assert.equal(decisions.get('sol-5m')?.selected, false);
 });
@@ -160,6 +204,8 @@ function config(summaryPath: string): AppConfig {
     pm5mSimPriceMinRounds: 100,
     pm5mSimPriceFallback: 0.45,
     pm5mSimPriceMaxSummaryAgeMs: 600_000,
+    pm5mSimRequirePositiveEv: false,
+    pm5mSimMinEvPerShare: 0,
     pm5mAssetSelectorEnabled: false,
     pm5mAssetSelectorMaxAssets: 1,
     pm5mAssetSelectorSinglePenalty: 0.05,

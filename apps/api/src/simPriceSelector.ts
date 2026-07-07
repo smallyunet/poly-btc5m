@@ -67,12 +67,23 @@ export function selectFiveMinuteEntryPrice(appConfig: AppConfig, profile: Market
   const summaryPath = path.resolve(process.cwd(), appConfig.pm5mSimPriceSummaryPath);
   const summary = readSummary(summaryPath, appConfig.pm5mSimPriceRefreshMs);
   if (!summary.ok) {
+    if (appConfig.pm5mSimRequirePositiveEv) {
+      return lock(lockKey, disabledSelection(profile, fallbackPrice, selectedAt, `5m simulator positive EV gate blocked ${profile.asset}: ${summary.reason}`));
+    }
     return lock(lockKey, fallbackSelection(profile, fallbackPrice, selectedAt, nextSelectionAt, summary.reason));
   }
 
   const generatedAtMs = summary.value.generatedAt ? new Date(summary.value.generatedAt).getTime() : NaN;
   const summaryAgeMs = Number.isFinite(generatedAtMs) ? Date.now() - generatedAtMs : null;
   if (summaryAgeMs == null || summaryAgeMs > appConfig.pm5mSimPriceMaxSummaryAgeMs) {
+    if (appConfig.pm5mSimRequirePositiveEv) {
+      return lock(lockKey, disabledSelection(
+        profile,
+        fallbackPrice,
+        selectedAt,
+        `5m simulator positive EV gate blocked ${profile.asset}: simulator summary stale (${summaryAgeMs == null ? 'unknown age' : `${Math.round(summaryAgeMs / 1000)}s`})`,
+      ));
+    }
     return lock(lockKey, fallbackSelection(
       profile,
       fallbackPrice,
@@ -87,6 +98,14 @@ export function selectFiveMinuteEntryPrice(appConfig: AppConfig, profile: Market
   const best = bestSimulatorRow(appConfig, profile, summaryRows(summary.value, 'lookback'))
     ?? bestSimulatorRow(appConfig, profile, summaryRows(summary.value, 'all-time'), 'all-time');
   if (!best) {
+    if (appConfig.pm5mSimRequirePositiveEv) {
+      return lock(lockKey, disabledSelection(
+        profile,
+        fallbackPrice,
+        selectedAt,
+        `5m simulator positive EV gate blocked ${profile.asset}: no row above ${appConfig.pm5mSimMinEvPerShare.toFixed(4)}/share passed range/min-round filters`,
+      ));
+    }
     return lock(lockKey, fallbackSelection(
       profile,
       fallbackPrice,
@@ -198,6 +217,7 @@ function bestSimulatorRow(appConfig: AppConfig, profile: MarketProfile, rows: To
     .filter((row) => row.asset === profile.asset)
     .filter((row) => row.price >= appConfig.pm5mSimPriceMin - 0.000001 && row.price <= appConfig.pm5mSimPriceMax + 0.000001)
     .filter((row) => row.rounds >= appConfig.pm5mSimPriceMinRounds)
+    .filter((row) => !appConfig.pm5mSimRequirePositiveEv || row.estimatedEvPerShare > appConfig.pm5mSimMinEvPerShare)
     .sort((a, b) => sortSimulatorRows(appConfig, a, b))[0];
   return row ? { row, sampleScope } : undefined;
 }

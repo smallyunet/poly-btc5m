@@ -38,6 +38,8 @@ const COOLDOWN_ENV_KEYS = [
   'BINANCE_WS_URL',
   'PM5M_SIM_PRICE_ENABLED',
   'PM5M_SIM_PRICE_MIN_ROUNDS',
+  'PM5M_SIM_REQUIRE_POSITIVE_EV',
+  'PM5M_SIM_MIN_EV_PER_SHARE',
   'PM5M_ASSET_SELECTOR_ENABLED',
   'PM5M_ASSET_SELECTOR_MAX_ASSETS',
   'PM5M_ASSET_SELECTOR_SINGLE_PENALTY',
@@ -115,12 +117,16 @@ test('PM 5m asset selector config supports live top-N routing env', () => {
     PM5M_ASSET_SELECTOR_ENABLED: 'true',
     PM5M_ASSET_SELECTOR_MAX_ASSETS: '2',
     PM5M_ASSET_SELECTOR_SINGLE_PENALTY: '0.07',
+    PM5M_SIM_REQUIRE_POSITIVE_EV: 'true',
+    PM5M_SIM_MIN_EV_PER_SHARE: '0.01',
   }, () => {
     const config = loadConfig();
 
     assert.equal(config.pm5mAssetSelectorEnabled, true);
     assert.equal(config.pm5mAssetSelectorMaxAssets, 2);
     assert.equal(config.pm5mAssetSelectorSinglePenalty, 0.07);
+    assert.equal(config.pm5mSimRequirePositiveEv, true);
+    assert.equal(config.pm5mSimMinEvPerShare, 0.01);
   });
 });
 
