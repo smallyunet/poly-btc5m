@@ -15,11 +15,11 @@ table {
 
 .executionTable {
   table-layout: fixed;
-  min-width: 1180px;
+  min-width: 1260px;
 }
 
 .executionTable.withProfile {
-  min-width: 1300px;
+  min-width: 1380px;
 }
 
 .dailyExecutionTable th:nth-child(1),
@@ -43,20 +43,23 @@ table {
 
 .dailyExecutionTable th:nth-child(4),
 .dailyExecutionTable td:nth-child(4),
-.roundExecutionTable th:nth-child(4),
-.roundExecutionTable td:nth-child(4) {
-  width: 130px;
+.roundExecutionTable th:nth-child(3),
+.roundExecutionTable td:nth-child(3) {
+  width: 112px;
 }
 
 .dailyExecutionTable th:nth-child(5),
-.dailyExecutionTable td:nth-child(5),
-.roundExecutionTable th:nth-child(5),
-.roundExecutionTable td:nth-child(5) {
-  width: 92px;
+.dailyExecutionTable td:nth-child(5) {
+  width: 130px;
 }
 
-.roundExecutionTable th:nth-child(3),
-.roundExecutionTable td:nth-child(3) {
+.roundExecutionTable th:nth-child(5),
+.roundExecutionTable td:nth-child(5) {
+  width: 130px;
+}
+
+.roundExecutionTable th:nth-child(4),
+.roundExecutionTable td:nth-child(4) {
   width: 160px;
 }
 
@@ -88,7 +91,24 @@ table {
 
 .roundExecutionTable.withProfile th:nth-child(4),
 .roundExecutionTable.withProfile td:nth-child(4) {
+  width: 112px;
+}
+
+.dailyExecutionTable.withProfile th:nth-child(5),
+.dailyExecutionTable.withProfile td:nth-child(5) {
+  width: 112px;
+}
+
+.roundExecutionTable.withProfile th:nth-child(5),
+.roundExecutionTable.withProfile td:nth-child(5) {
   width: 160px;
+}
+
+.dailyExecutionTable.withProfile th:nth-child(6),
+.dailyExecutionTable.withProfile td:nth-child(6),
+.roundExecutionTable.withProfile th:nth-child(6),
+.roundExecutionTable.withProfile td:nth-child(6) {
+  width: 130px;
 }
 
 th, td {
@@ -754,4 +774,3 @@ td.mono {
 .singleRateActual.good {
   background: var(--color-success);
 }
-

@@ -479,3 +479,7 @@ button.primary:hover:not(:disabled) {
   color: var(--color-primary);
 }
 
+.strategyFilterBar {
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}

@@ -1,11 +1,13 @@
 import React from 'react';
 
-import type { BotRuntimeStatus, DashboardState, RuntimeLogRecord, StrategyCheck } from '../../../../packages/shared/src';
+import type { BotRuntimeStatus, DashboardState, RuntimeLogRecord, StrategyCheck, StrategyId } from '../../../../packages/shared/src';
 import { formatMoney } from '../lib/format';
+import type { Tone } from '../lib/dashboardFormat';
 import { formatEtTime, outcomeLabel } from '../lib/dashboardFormat';
 
 export type TabType = 'terminal' | 'portfolio' | 'orderbooks' | 'activity' | 'simulation' | 'strategy' | 'logs';
 export type ActivitySubTab = 'daily' | 'rounds' | 'orders';
+export type OrderStrategyFilter = 'all' | 'dual' | 'tail' | 'exit' | 'experiment';
 export type DashboardOrder = DashboardState['orders'][number];
 export type DashboardFill = DashboardState['fills'][number];
 export type DashboardProfileState = DashboardState['profiles'][number];
@@ -29,6 +31,7 @@ export type RoundExecutionSummary = {
   profileId?: string;
   profileLabel: string;
   roundId: string;
+  strategy: StrategyId;
   title: string;
   imageUrl?: string;
   latestTime: number;
@@ -82,6 +85,7 @@ export const DAILY_PAGE_SIZE = 1;
 export const LOG_PAGE_SIZE = 75;
 export const TAB_TYPES: TabType[] = ['terminal', 'portfolio', 'orderbooks', 'activity', 'simulation', 'strategy', 'logs'];
 export const STATS_WINDOW_MS = 24 * 60 * 60 * 1000;
+export const ORDER_STRATEGY_FILTERS: OrderStrategyFilter[] = ['all', 'dual', 'tail', 'exit', 'experiment'];
 const SINGLE_FILL_TARGET_RATE = 0.18;
 const SINGLE_FILL_EXPOSURE_EPSILON = 0.01;
 
@@ -540,6 +544,10 @@ export function sumShares(values: number[]): number {
   return values.reduce((total, value) => total + value, 0);
 }
 
+function roundMoneyValue(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
 export function weightedAverageOrderPrice(orders: DashboardOrder[]): number | undefined {
   const totalShares = sumShares(orders.map((order) => order.size));
   if (totalShares <= 0) return undefined;
@@ -590,7 +598,84 @@ export function recordProfileId(record: { profileId?: string; roundId?: string; 
 }
 
 export function strategySourceLabel(order: DashboardOrder): string {
-  return order.strategy || 'UPDOWN_DUAL_ENTRY';
+  const strategy = orderStrategyId(order);
+  switch (strategy) {
+    case 'UPDOWN_TAIL_ENTRY':
+      return 'TAIL ENTRY';
+    case 'UPDOWN_DUAL_ENTRY':
+      return 'DUAL ENTRY';
+    case 'UPDOWN_SINGLE_FILL_HEDGE':
+      return 'HEDGE';
+    case 'UPDOWN_SINGLE_FILL_PROFIT_EXIT':
+      return 'PROFIT EXIT';
+    case 'UPDOWN_SINGLE_FILL_LOSS_EXIT':
+      return 'LOSS EXIT';
+    case 'UPDOWN_NEXT_ROUND_50_49_STOP_ON_SINGLE':
+      return 'EXPERIMENT';
+    default:
+      return strategy;
+  }
+}
+
+export function strategySourceTone(order: DashboardOrder): Tone {
+  const strategy = orderStrategyId(order);
+  if (strategy === 'UPDOWN_TAIL_ENTRY') return 'warn';
+  if (strategy === 'UPDOWN_DUAL_ENTRY') return 'good';
+  if (strategy.includes('LOSS_EXIT') || strategy.includes('HEDGE')) return 'bad';
+  if (strategy.includes('PROFIT_EXIT')) return 'good';
+  return 'neutral';
+}
+
+export function orderStrategyId(record: { strategy?: StrategyId }): StrategyId {
+  return record.strategy || 'UPDOWN_DUAL_ENTRY';
+}
+
+export function orderStrategyFilterFor(record: { strategy?: StrategyId }): Exclude<OrderStrategyFilter, 'all'> {
+  const strategy = orderStrategyId(record);
+  if (strategy === 'UPDOWN_TAIL_ENTRY') return 'tail';
+  if (strategy === 'UPDOWN_DUAL_ENTRY') return 'dual';
+  if (strategy === 'UPDOWN_NEXT_ROUND_50_49_STOP_ON_SINGLE') return 'experiment';
+  return 'exit';
+}
+
+export function orderStrategyFilterLabel(filter: OrderStrategyFilter): string {
+  switch (filter) {
+    case 'all':
+      return 'All';
+    case 'dual':
+      return 'Dual';
+    case 'tail':
+      return 'Tail';
+    case 'exit':
+      return 'Exit';
+    case 'experiment':
+      return 'Experiment';
+    default:
+      return filter;
+  }
+}
+
+export function orderMatchesStrategyFilter(order: DashboardOrder, filter: OrderStrategyFilter): boolean {
+  return filter === 'all' || orderStrategyFilterFor(order) === filter;
+}
+
+export function strategySourceLabelForStrategy(strategy: StrategyId): string {
+  return strategySourceLabel({ strategy } as DashboardOrder);
+}
+
+export function strategySourceToneForStrategy(strategy: StrategyId): Tone {
+  return strategySourceTone({ strategy } as DashboardOrder);
+}
+
+function strategySettlementPnl(fills: DashboardFill[], winningLabel?: 'YES' | 'NO'): number | undefined {
+  if (!fills.length || !winningLabel) return undefined;
+  const buyCost = sumShares(fills.filter((fill) => fill.side === 'BUY').map((fill) => fill.price * fill.size));
+  const sellProceeds = sumShares(fills.filter((fill) => fill.side === 'SELL').map((fill) => fill.price * fill.size));
+  const totalCost = buyCost - sellProceeds;
+  const payout = fills
+    .filter((fill) => fill.label === winningLabel)
+    .reduce((total, fill) => total + (fill.side === 'BUY' ? fill.size : -fill.size), 0);
+  return roundMoneyValue(payout - totalCost);
 }
 
 export function assetRouteLabel(selection: DashboardProfileState['dynamicEntryPrice']): string {
@@ -648,29 +733,40 @@ export function isRoutineHeartbeatLog(log: RuntimeLogRecord): boolean {
 export function buildRoundExecutionSummaries(state: Pick<DashboardState, 'orders' | 'fills' | 'settlements' | 'profiles'>): RoundExecutionSummary[] {
   const byRound = new Map<string, {
     profileId?: string;
+    strategy: StrategyId;
     orders: DashboardOrder[];
     fills: DashboardFill[];
     settlements: DashboardState['settlements'];
   }>();
-  const ensure = (roundId: string, profileId?: string) => {
-    const key = `${profileId || 'unknown'}:${roundId}`;
+  const ensure = (roundId: string, profileId: string | undefined, strategy: StrategyId) => {
+    const key = `${profileId || 'unknown'}:${roundId}:${strategy}`;
     const existing = byRound.get(key);
     if (existing) return existing;
-    const created = { profileId, orders: [], fills: [], settlements: [] };
+    const created = { profileId, strategy, orders: [], fills: [], settlements: [] };
     byRound.set(key, created);
     return created;
   };
 
-  state.orders.forEach((order) => ensure(order.roundId, order.profileId).orders.push(order));
-  state.fills.forEach((fill) => ensure(fill.roundId, fill.profileId).fills.push(fill));
-  state.settlements.forEach((settlement) => ensure(settlement.roundId, settlement.profileId).settlements.push(settlement));
+  state.orders.forEach((order) => ensure(order.roundId, order.profileId, orderStrategyId(order)).orders.push(order));
+  state.fills.forEach((fill) => ensure(fill.roundId, fill.profileId, orderStrategyId(fill)).fills.push(fill));
+  state.settlements.forEach((settlement) => {
+    const matchingStrategies = new Set<StrategyId>();
+    state.orders.forEach((order) => {
+      if (order.roundId === settlement.roundId && order.profileId === settlement.profileId) matchingStrategies.add(orderStrategyId(order));
+    });
+    state.fills.forEach((fill) => {
+      if (fill.roundId === settlement.roundId && fill.profileId === settlement.profileId) matchingStrategies.add(orderStrategyId(fill));
+    });
+    if (matchingStrategies.size === 0) matchingStrategies.add('UPDOWN_DUAL_ENTRY');
+    matchingStrategies.forEach((strategy) => ensure(settlement.roundId, settlement.profileId, strategy).settlements.push(settlement));
+  });
 
   return [...byRound.entries()].map(([key, record]) => {
     const yesBuyOrders = record.orders.filter((order) => order.label === 'YES' && order.side === 'BUY');
     const noBuyOrders = record.orders.filter((order) => order.label === 'NO' && order.side === 'BUY');
     const unfilledByOrder = record.orders.map((order) => Math.max(0, order.size - orderFilledShares(order, record.fills)));
     const metadataSource = record.orders[0] || record.fills[0] || record.settlements[0];
-    const roundId = metadataSource?.roundId || key.split(':').slice(1).join(':');
+    const roundId = metadataSource?.roundId || key.split(':').slice(1, -1).join(':');
     const profileId = record.profileId || metadataSource?.profileId;
     const settlement = [...record.settlements].sort((a, b) => {
       if (a.status !== b.status) return a.status === 'settled' ? -1 : 1;
@@ -689,6 +785,7 @@ export function buildRoundExecutionSummaries(state: Pick<DashboardState, 'orders
       profileId,
       profileLabel: profileLabelFor(state.profiles, profileId),
       roundId,
+      strategy: record.strategy,
       title: metadataSource?.marketTitle || derivedRoundTitle(roundId, profileId),
       imageUrl: metadataSource?.imageUrl,
       latestTime,
@@ -711,7 +808,7 @@ export function buildRoundExecutionSummaries(state: Pick<DashboardState, 'orders
       filledSellNo: sumShares(record.fills.filter((fill) => fill.label === 'NO' && fill.side === 'SELL').map((fill) => fill.size)),
       unfilledOrders: unfilledByOrder.filter((shares) => shares > 0.01).length,
       unfilledShares: sumShares(unfilledByOrder),
-      settlementPnl: settlement?.pnl,
+      settlementPnl: strategySettlementPnl(record.fills, settlement?.winningLabel),
       settlementStatus: settlement?.status,
     };
   }).sort((a, b) => b.latestTime - a.latestTime);

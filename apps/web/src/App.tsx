@@ -33,9 +33,11 @@ import {
   DAILY_PAGE_SIZE,
   LOG_PAGE_SIZE,
   ORDER_PAGE_SIZE,
+  ORDER_STRATEGY_FILTERS,
   ROUND_PAGE_SIZE,
   STATS_WINDOW_MS,
   type ActivitySubTab,
+  type OrderStrategyFilter,
   type TailSimSummary,
   type TabType,
   type TouchSimSummary,
@@ -61,6 +63,9 @@ import {
   netFilledShares,
   orderFailureReason,
   orderMarketTitle,
+  orderMatchesStrategyFilter,
+  orderStrategyFilterFor,
+  orderStrategyFilterLabel,
   portfolioStatusLabel,
   positionCost,
   positionPnl,
@@ -71,6 +76,9 @@ import {
   strategyCheckLabel,
   strategyCheckTone,
   strategySourceLabel,
+  strategySourceLabelForStrategy,
+  strategySourceTone,
+  strategySourceToneForStrategy,
   syncTabToUrl,
   tabFromUrl,
   touchOutcomeTone,
@@ -96,6 +104,7 @@ export function App() {
   // Navigation Tab State
   const [activeTab, setActiveTab] = React.useState<TabType>(() => tabFromUrl());
   const [activitySubTab, setActivitySubTab] = React.useState<ActivitySubTab>('daily');
+  const [orderStrategyFilter, setOrderStrategyFilter] = React.useState<OrderStrategyFilter>('all');
   const [simulationResearchTab, setSimulationResearchTab] = React.useState<SimulationResearchTab>('touch');
   const [simulationSubTab, setSimulationSubTab] = React.useState<SimulationSubTab>('price');
   const [tailSimulationSubTab, setTailSimulationSubTab] = React.useState<TailSimulationSubTab>('checkpoint');
@@ -218,6 +227,22 @@ export function App() {
   const roundSummaries = React.useMemo(() => visibleState ? buildRoundExecutionSummaries(visibleState) : [], [visibleState]);
   const dailySummaries = React.useMemo(() => buildDailyExecutionSummaries(roundSummaries), [roundSummaries]);
   const executionStats = React.useMemo(() => visibleState ? buildExecutionStats(visibleState, nowMs) : null, [visibleState, nowMs]);
+  const filteredOrders = React.useMemo(() => (
+    (visibleState?.orders ?? []).filter((order) => orderMatchesStrategyFilter(order, orderStrategyFilter))
+  ), [visibleState?.orders, orderStrategyFilter]);
+  const orderStrategyCounts = React.useMemo(() => {
+    const counts: Record<OrderStrategyFilter, number> = {
+      all: visibleState?.orders.length ?? 0,
+      dual: 0,
+      tail: 0,
+      exit: 0,
+      experiment: 0,
+    };
+    (visibleState?.orders ?? []).forEach((order) => {
+      counts[orderStrategyFilterFor(order)] += 1;
+    });
+    return counts;
+  }, [visibleState?.orders]);
   const touchCompletedByPrice = touchSim?.completed?.byPrice ?? [];
   const touchCompletedByAssetPrice = touchSim?.completed?.byAssetPrice ?? [];
   const touchMatrixAssets = React.useMemo(() => (
@@ -226,7 +251,7 @@ export function App() {
 
   const dailyPagination = usePaginatedRows(dailySummaries, DAILY_PAGE_SIZE);
   const roundPagination = usePaginatedRows(roundSummaries, ROUND_PAGE_SIZE);
-  const ordersPagination = usePaginatedRows(visibleState?.orders ?? [], ORDER_PAGE_SIZE);
+  const ordersPagination = usePaginatedRows(filteredOrders, ORDER_PAGE_SIZE);
   const logsPagination = usePaginatedRows(filteredLogs, LOG_PAGE_SIZE);
 
   React.useEffect(() => {
@@ -236,7 +261,7 @@ export function App() {
 
   React.useEffect(() => {
     ordersPagination.setPage(1);
-  }, [visibleState?.orders.length, selectedProfileId]);
+  }, [filteredOrders.length, orderStrategyFilter, selectedProfileId]);
 
   React.useEffect(() => {
     logsPagination.setPage(1);
@@ -560,7 +585,7 @@ export function App() {
     ? { title: 'Daily execution rollup', summary: 'Best for answering whether the strategy is making money and whether single-fill risk is contained across a day.' }
     : activitySubTab === 'rounds'
       ? { title: 'Round-level fill quality', summary: 'Best for debugging a market lifecycle: submitted orders, filled shares, unfilled shares, and settlement result.' }
-      : { title: 'Raw order ledger', summary: 'Best for checking individual CLOB order IDs, failed FAKs, prices, sizes, and strategy source.' };
+      : { title: 'Raw order ledger', summary: 'Best for checking individual CLOB order IDs, failed FAKs, prices, sizes, and strategy source. Use strategy filters to separate Dual, Tail, and Exit records without leaving the ledger.' };
   const simulationViewCopy = simulationResearchTab === 'touch'
     ? (simulationSubTab === 'price'
       ? { title: 'Price-level outcome rates', summary: 'Compare paired, single, no-fill, and EV/share by target entry price.' }
@@ -1133,8 +1158,8 @@ export function App() {
 
                           <DataTable
                             headers={isAllProfiles
-                              ? ['Profile', 'Time (ET)', 'Age', 'Market', 'Round Status', 'Orders', 'Submitted Buy Orders', 'Filled Buy Shares', 'Unfilled', 'Settlement PnL']
-                              : ['Time (ET)', 'Age', 'Market', 'Round Status', 'Orders', 'Submitted Buy Orders', 'Filled Buy Shares', 'Unfilled', 'Settlement PnL']}
+                              ? ['Profile', 'Time (ET)', 'Age', 'Market', 'Strategy', 'Round Status', 'Orders', 'Submitted Buy Orders', 'Filled Buy Shares', 'Unfilled', 'Settlement PnL']
+                              : ['Time (ET)', 'Age', 'Market', 'Strategy', 'Round Status', 'Orders', 'Submitted Buy Orders', 'Filled Buy Shares', 'Unfilled', 'Settlement PnL']}
                             className={`executionTable dailyExecutionTable ${isAllProfiles ? 'withProfile' : ''}`}
                           >
                             {day.rounds.map((round) => {
@@ -1156,6 +1181,9 @@ export function App() {
                                       )}
                                       <span className="marketTitle">{round.title}</span>
                                     </div>
+                                  </td>
+                                  <td>
+                                    <Badge tone={strategySourceToneForStrategy(round.strategy)}>{strategySourceLabelForStrategy(round.strategy)}</Badge>
                                   </td>
                                   <td>
                                     <Badge tone={status.tone}>{status.label}</Badge>
@@ -1211,8 +1239,8 @@ export function App() {
                   <>
                     <DataTable
                       headers={isAllProfiles
-                        ? ['Profile', 'Age', 'Market', 'Round ID', 'Round Status', 'Orders', 'Submitted Buy Orders', 'Filled Buy Shares', 'Filled Sell Shares', 'Unfilled', 'Settlement PnL']
-                        : ['Age', 'Market', 'Round ID', 'Round Status', 'Orders', 'Submitted Buy Orders', 'Filled Buy Shares', 'Filled Sell Shares', 'Unfilled', 'Settlement PnL']}
+                        ? ['Profile', 'Age', 'Market', 'Strategy', 'Round ID', 'Round Status', 'Orders', 'Submitted Buy Orders', 'Filled Buy Shares', 'Filled Sell Shares', 'Unfilled', 'Settlement PnL']
+                        : ['Age', 'Market', 'Strategy', 'Round ID', 'Round Status', 'Orders', 'Submitted Buy Orders', 'Filled Buy Shares', 'Filled Sell Shares', 'Unfilled', 'Settlement PnL']}
                       className={`executionTable roundExecutionTable ${isAllProfiles ? 'withProfile' : ''}`}
                     >
                       {roundPagination.pageRows.map((round) => {
@@ -1233,6 +1261,9 @@ export function App() {
                                 )}
                                 <span className="marketTitle">{round.title}</span>
                               </div>
+                            </td>
+                            <td>
+                              <Badge tone={strategySourceToneForStrategy(round.strategy)}>{strategySourceLabelForStrategy(round.strategy)}</Badge>
                             </td>
                             <td className="mono" style={{ fontSize: '11px' }}>{round.roundId}</td>
                             <td>
@@ -1287,50 +1318,73 @@ export function App() {
               {activitySubTab === 'orders' && (
                 viewState.orders.length > 0 ? (
                   <>
-                    <DataTable headers={isAllProfiles
-                      ? ['Profile', 'Time (ET)', 'Strategy', 'Market', 'Round ID', 'Outcome', 'Side', 'Price', 'Size', 'Status', 'Reason', 'Polymarket CLOB Order ID']
-                      : ['Time (ET)', 'Strategy', 'Market', 'Round ID', 'Outcome', 'Side', 'Price', 'Size', 'Status', 'Reason', 'Polymarket CLOB Order ID']}>
-                      {ordersPagination.pageRows.map((order) => (
-                        <tr key={order.id}>
-                          {isAllProfiles && <td><Badge tone="neutral"><AssetLabel profileId={order.profileId} label={profileLabelFor(state.profiles, order.profileId)} /></Badge></td>}
-                          <td className="mono">{formatEtTime(order.createdAt)}</td>
-                          <td className="mono" style={{ fontSize: '11px' }}>{strategySourceLabel(order)}</td>
-                          <td>
-                            <div className="marketCell compact">
-                              <AssetIcon profileId={order.profileId} size="sm" />
-                              <span className="marketTitle">{orderMarketTitle(order)}</span>
-                            </div>
-                          </td>
-                          <td className="mono" style={{ fontSize: '11px' }}>{order.roundId}</td>
-                          <td><Badge tone={outcomeTone(order.label)}>{outcomeLabel(order.label)}</Badge></td>
-                          <td>
-                            <strong style={{ color: order.side === 'BUY' ? 'var(--color-success)' : 'var(--color-danger)' }}>
-                              {order.side}
-                            </strong>
-                          </td>
-                          <td className="mono">${order.price.toFixed(3)}</td>
-                          <td className="mono">{order.size.toFixed(1)}</td>
-                          <td>
-                            <Badge tone={order.status === 'failed' ? 'bad' : order.status === 'filled' ? 'good' : order.status === 'posted' ? 'warn' : 'neutral'}>
-                              {order.status}
-                            </Badge>
-                          </td>
-                          <td className="mono" style={{ fontSize: '11px', maxWidth: '260px', whiteSpace: 'normal' }}>
-                            {orderFailureReason(order)}
-                          </td>
-                          <td className="mono" style={{ fontSize: '11px' }} title={order.clobOrderId || ''}>
-                            {order.clobOrderId ? shortenTokenId(order.clobOrderId) : '-'}
-                          </td>
-                        </tr>
+                    <div className="subTabBar strategyFilterBar" aria-label="Order strategy filter">
+                      {ORDER_STRATEGY_FILTERS.map((filter) => (
+                        <button
+                          key={filter}
+                          type="button"
+                          className={`subTabBtn ${orderStrategyFilter === filter ? 'active' : ''}`}
+                          onClick={() => setOrderStrategyFilter(filter)}
+                        >
+                          {orderStrategyFilterLabel(filter)}
+                          <span>{orderStrategyCounts[filter]}</span>
+                        </button>
                       ))}
-                    </DataTable>
-                    <PaginationControls
-                      page={ordersPagination.page}
-                      totalPages={ordersPagination.totalPages}
-                      totalRows={viewState.orders.length}
-                      pageSize={ORDER_PAGE_SIZE}
-                      onPageChange={ordersPagination.setPage}
-                    />
+                    </div>
+                    {filteredOrders.length > 0 ? (
+                      <>
+                        <DataTable headers={isAllProfiles
+                          ? ['Profile', 'Time (ET)', 'Strategy', 'Market', 'Round ID', 'Outcome', 'Side', 'Price', 'Size', 'Status', 'Reason', 'Polymarket CLOB Order ID']
+                          : ['Time (ET)', 'Strategy', 'Market', 'Round ID', 'Outcome', 'Side', 'Price', 'Size', 'Status', 'Reason', 'Polymarket CLOB Order ID']}>
+                          {ordersPagination.pageRows.map((order) => (
+                            <tr key={order.id}>
+                              {isAllProfiles && <td><Badge tone="neutral"><AssetLabel profileId={order.profileId} label={profileLabelFor(state.profiles, order.profileId)} /></Badge></td>}
+                              <td className="mono">{formatEtTime(order.createdAt)}</td>
+                              <td title={order.strategy || 'UPDOWN_DUAL_ENTRY'}>
+                                <Badge tone={strategySourceTone(order)}>{strategySourceLabel(order)}</Badge>
+                              </td>
+                              <td>
+                                <div className="marketCell compact">
+                                  <AssetIcon profileId={order.profileId} size="sm" />
+                                  <span className="marketTitle">{orderMarketTitle(order)}</span>
+                                </div>
+                              </td>
+                              <td className="mono" style={{ fontSize: '11px' }}>{order.roundId}</td>
+                              <td><Badge tone={outcomeTone(order.label)}>{outcomeLabel(order.label)}</Badge></td>
+                              <td>
+                                <strong style={{ color: order.side === 'BUY' ? 'var(--color-success)' : 'var(--color-danger)' }}>
+                                  {order.side}
+                                </strong>
+                              </td>
+                              <td className="mono">${order.price.toFixed(3)}</td>
+                              <td className="mono">{order.size.toFixed(1)}</td>
+                              <td>
+                                <Badge tone={order.status === 'failed' ? 'bad' : order.status === 'filled' ? 'good' : order.status === 'posted' ? 'warn' : 'neutral'}>
+                                  {order.status}
+                                </Badge>
+                              </td>
+                              <td className="mono" style={{ fontSize: '11px', maxWidth: '260px', whiteSpace: 'normal' }}>
+                                {orderFailureReason(order)}
+                              </td>
+                              <td className="mono" style={{ fontSize: '11px' }} title={order.clobOrderId || ''}>
+                                {order.clobOrderId ? shortenTokenId(order.clobOrderId) : '-'}
+                              </td>
+                            </tr>
+                          ))}
+                        </DataTable>
+                        <PaginationControls
+                          page={ordersPagination.page}
+                          totalPages={ordersPagination.totalPages}
+                          totalRows={filteredOrders.length}
+                          pageSize={ORDER_PAGE_SIZE}
+                          onPageChange={ordersPagination.setPage}
+                        />
+                      </>
+                    ) : (
+                      <div className="empty" style={{ minHeight: '150px' }}>
+                        <p className="emptyText">No {orderStrategyFilterLabel(orderStrategyFilter).toLowerCase()} orders match this scope</p>
+                      </div>
+                    )}
                   </>
                 ) : (
                   <div className="empty" style={{ minHeight: '150px' }}>
