@@ -40,7 +40,7 @@ services:
       - research:pm5m-touch
       - --
       - --assets
-      - btc,eth,sol,doge,xrp,hype
+      - btc
       - --min-price
       - "0.29"
       - --max-price
