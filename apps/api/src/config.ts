@@ -63,6 +63,22 @@ export type AppConfig = {
   pm5mAssetSelectorEnabled: boolean;
   pm5mAssetSelectorMaxAssets: number;
   pm5mAssetSelectorSinglePenalty: number;
+  pm5mTailEntryEnabled: boolean;
+  pm5mTailEntrySummaryPath: string;
+  pm5mTailEntryMaxSummaryAgeMs: number;
+  pm5mTailEntryMinRounds: number;
+  pm5mTailEntryMinEvPerShare: number;
+  pm5mTailEntryMinFillRate: number;
+  pm5mTailEntryCheckpoints: number[];
+  pm5mTailEntrySize: number;
+  pm5mTailEntryMaxVwap: number;
+  pm5mTailEntryMaxSpread: number;
+  pm5mTailEntryMaxOverround: number;
+  pm5mTailEntryMinMidpointGap: number;
+  pm5mTailEntryQuoteMaxAgeMs: number;
+  pm5mTailEntryMaxSlippage: number;
+  pm5mTailEntryPriceOffset: number;
+  pm5mTailEntryMaxOrdersPerRound: number;
   minLiveChopScore: number;
   bypassEntryScoreGating: boolean;
   bypassSingleFillCooldown: boolean;
@@ -174,6 +190,22 @@ export function loadConfig(): AppConfig {
     pm5mAssetSelectorEnabled: booleanEnv('PM5M_ASSET_SELECTOR_ENABLED', false),
     pm5mAssetSelectorMaxAssets: parsePositiveInteger(process.env.PM5M_ASSET_SELECTOR_MAX_ASSETS, 1),
     pm5mAssetSelectorSinglePenalty: numberEnv('PM5M_ASSET_SELECTOR_SINGLE_PENALTY', 0.05),
+    pm5mTailEntryEnabled: booleanEnv('PM5M_TAIL_ENTRY_ENABLED', false),
+    pm5mTailEntrySummaryPath: process.env.PM5M_TAIL_ENTRY_SUMMARY_PATH || process.env.PM5M_TAIL_SUMMARY_PATH || 'data-lab/pm-5m-tail/summary.json',
+    pm5mTailEntryMaxSummaryAgeMs: parsePositiveInteger(process.env.PM5M_TAIL_ENTRY_MAX_SUMMARY_AGE_MS, 10 * 60_000),
+    pm5mTailEntryMinRounds: parsePositiveInteger(process.env.PM5M_TAIL_ENTRY_MIN_ROUNDS, 100),
+    pm5mTailEntryMinEvPerShare: numberEnv('PM5M_TAIL_ENTRY_MIN_EV_PER_SHARE', 0.03),
+    pm5mTailEntryMinFillRate: numberEnv('PM5M_TAIL_ENTRY_MIN_FILL_RATE', 0.45),
+    pm5mTailEntryCheckpoints: numberListEnv('PM5M_TAIL_ENTRY_CHECKPOINTS', [60, 45]),
+    pm5mTailEntrySize: numberEnv('PM5M_TAIL_ENTRY_SIZE', 5),
+    pm5mTailEntryMaxVwap: numberEnv('PM5M_TAIL_ENTRY_MAX_VWAP', 0.85),
+    pm5mTailEntryMaxSpread: numberEnv('PM5M_TAIL_ENTRY_MAX_SPREAD', 0.02),
+    pm5mTailEntryMaxOverround: numberEnv('PM5M_TAIL_ENTRY_MAX_OVERROUND', 1.03),
+    pm5mTailEntryMinMidpointGap: numberEnv('PM5M_TAIL_ENTRY_MIN_MIDPOINT_GAP', 0.08),
+    pm5mTailEntryQuoteMaxAgeMs: parsePositiveInteger(process.env.PM5M_TAIL_ENTRY_QUOTE_MAX_AGE_MS, 1_500),
+    pm5mTailEntryMaxSlippage: numberEnv('PM5M_TAIL_ENTRY_MAX_SLIPPAGE', 0.02),
+    pm5mTailEntryPriceOffset: numberEnv('PM5M_TAIL_ENTRY_PRICE_OFFSET', 0.001),
+    pm5mTailEntryMaxOrdersPerRound: parsePositiveInteger(process.env.PM5M_TAIL_ENTRY_MAX_ORDERS_PER_ROUND, 1),
     minLiveChopScore: numberEnv('MIN_LIVE_CHOP_SCORE', 70),
     bypassEntryScoreGating: booleanEnv('BYPASS_ENTRY_SCORE_GATING', true),
     bypassSingleFillCooldown: booleanEnv('BYPASS_SINGLE_FILL_COOLDOWN', false),
@@ -421,6 +453,13 @@ function booleanEnv(name: string, fallback: boolean): boolean {
   if (['1', 'true', 'yes', 'on'].includes(raw)) return true;
   if (['0', 'false', 'no', 'off'].includes(raw)) return false;
   return fallback;
+}
+
+function numberListEnv(name: string, fallback: number[]): number[] {
+  const raw = process.env[name]?.trim();
+  if (!raw) return fallback;
+  const values = raw.split(',').map((item) => Number(item.trim())).filter((item) => Number.isFinite(item) && item > 0);
+  return values.length ? [...new Set(values)].sort((a, b) => b - a) : fallback;
 }
 
 function binanceWsUrl(value: string | undefined, profiles: MarketProfile[]): string {

@@ -11,6 +11,7 @@ import type { ParticipationService } from './participation';
 import type { RecurringCryptoRoundDiscovery } from './roundDiscovery';
 import type { InMemoryStore, SingleFillCooldownRecord } from './store';
 import { rankFiveMinuteAssetCandidates, selectFiveMinuteEntryPrice, type FiveMinuteAssetSelection } from './simPriceSelector';
+import { evaluateTailEntry, executeTailEntry } from './tailEntry';
 
 export async function runAllProfilesTick(appConfig: AppConfig, store: InMemoryStore, data: MarketDataService, adapter: PolymarketAdapter, discovery: RecurringCryptoRoundDiscovery, participationService: ParticipationService): Promise<StateSnapshot[]> {
   const enabledProfiles = appConfig.marketProfiles.filter((profile) => profile.status !== 'disabled');
@@ -102,6 +103,8 @@ export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, dat
     risk,
     experimentRunStartedAt: classicActive ? undefined : store.getExperimentRunStartedAt(),
   });
+  const tailEntry = classicActive ? evaluateTailEntry(snapshot, appConfig, store) : null;
+  const tailEntryDiagnostics = tailEntry ? await executeTailEntry({ appConfig, adapter, store, snapshot, evaluation: tailEntry }) : [];
   const fillCooldowns = await reconcileFills(appConfig, adapter, store, roundSnapshot, tokenLabels, diagnostics, profile);
   const orderCooldowns = await reconcileTrackedOrders(appConfig, adapter, store, diagnostics, profile);
   const crossProfileRiskDiagnostics = classicActive
@@ -141,9 +144,9 @@ export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, dat
   const lossExitCheck = classicActive ? buildCurrentRoundLossExitCheck(appConfig, store, snapshot, [...orderbooks, ...hedgeOrderbooks]) : disabledClassicCheck(snapshot, 'UPDOWN_SINGLE_FILL_LOSS_EXIT', 'Up/Down Single-Fill Loss Exit', 'Disabled while experimental profile is active.');
   await reconcileSettlements(appConfig, store, diagnostics, profile);
   maybeRecordEstimatedSettlement(store, snapshot, profile);
-  const finalSnapshot = { ...snapshot, diagnostics: [...diagnostics, ...entry.diagnostics, ...executionDiagnostics, ...crossProfileRiskDiagnostics, ...hedgeDiagnostics, ...profitExitDiagnostics, ...lossExitDiagnostics] };
+  const finalSnapshot = { ...snapshot, diagnostics: [...diagnostics, ...entry.diagnostics, ...executionDiagnostics, ...tailEntryDiagnostics, ...crossProfileRiskDiagnostics, ...hedgeDiagnostics, ...profitExitDiagnostics, ...lossExitDiagnostics] };
   store.recordSnapshot(finalSnapshot, data.status(profile, [round.yesTokenId, round.noTokenId]));
-  store.recordStrategyChecks([...entry.checks, ...exit.checks, hedgeCheck, profitExitCheck, lossExitCheck].map((check) => withProfile(check, profile)), profile.id);
+  store.recordStrategyChecks([...entry.checks, ...(tailEntry ? [tailEntry.check] : []), ...exit.checks, hedgeCheck, profitExitCheck, lossExitCheck].map((check) => withProfile(check, profile)), profile.id);
   return finalSnapshot;
 }
 
