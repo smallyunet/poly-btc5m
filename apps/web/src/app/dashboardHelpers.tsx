@@ -593,6 +593,16 @@ export function strategySourceLabel(order: DashboardOrder): string {
   return order.strategy || 'UPDOWN_DUAL_ENTRY';
 }
 
+export function assetRouteLabel(selection: DashboardProfileState['dynamicEntryPrice']): string {
+  if (!selection?.assetSelectorEnabled) return 'off';
+  const rank = selection.assetSelectorRank ? `#${selection.assetSelectorRank}` : '-';
+  return selection.assetSelectorSelected ? rank : `skip ${rank}`;
+}
+
+export function assetSelectorScoreLabel(selection: DashboardProfileState['dynamicEntryPrice']): string {
+  return selection?.assetSelectorEnabled ? formatEv(selection.assetSelectorScore) : 'off';
+}
+
 export function orderFailureReason(order: DashboardOrder): string {
   if (order.error) return order.error;
   if (order.status === 'cancelled') return 'closed after round ended';

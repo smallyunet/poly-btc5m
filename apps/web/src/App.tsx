@@ -7,23 +7,26 @@ import {
   History,
   Terminal,
   Cpu,
-  Search,
-  Info,
   WalletCards,
-  PieChart,
   Target,
   BarChart3
 } from 'lucide-react';
 
-import type { BotRuntimeStatus, DashboardState, RuntimeLogRecord, StrategyCheck } from '../../../packages/shared/src';
+import type { DashboardState } from '../../../packages/shared/src';
 import { api, DASHBOARD_REFRESH_MS } from './lib/api';
 import { formatMoney, formatNumber, formatSeconds } from './lib/format';
 import { formatEtTime, outcomeLabel, outcomeTone, shortenTokenId } from './lib/dashboardFormat';
 
 import { RoundTimelinePipeline } from './components/RoundTimelinePipeline';
-import { OrderbookCapacityPanel, OrderbookExecutionSummary, OrderbookTable } from './components/dashboard/OrderbookPanels';
 import { Badge, DataTable, DecisionMetric, PaginationControls, Shell } from './components/dashboard/Ui';
 import { DynamicEntryPricePanel } from './app/DynamicEntryPricePanel';
+import { AllProfilesOverview } from './app/terminal/AllProfilesOverview';
+import { ProfileRail } from './app/terminal/ProfileRail';
+import { TailEntryPanel } from './app/terminal/TailEntryPanel';
+import { LogsTab } from './app/tabs/LogsTab';
+import { OrderbooksTab } from './app/tabs/OrderbooksTab';
+import { PortfolioTab } from './app/tabs/PortfolioTab';
+import { StrategyRulesTab } from './app/tabs/StrategyRulesTab';
 import {
   AssetIcon,
   AssetLabel,
@@ -59,7 +62,6 @@ import {
   orderFailureReason,
   orderMarketTitle,
   portfolioStatusLabel,
-  portfolioStatusTone,
   positionCost,
   positionPnl,
   positionValue,
@@ -414,7 +416,17 @@ export function App() {
   const feedLabel = `${viewState.feed.source.toUpperCase()} / CLOB ${viewState.feed.clobConnected ? 'ON' : 'OFF'}`;
   const hedgeCheck = viewState.strategyChecks.find((check) => check.strategy === 'UPDOWN_SINGLE_FILL_HEDGE');
   const profitExitCheck = viewState.strategyChecks.find((check) => check.strategy === 'UPDOWN_SINGLE_FILL_PROFIT_EXIT');
+  const tailEntryCheck = viewState.strategyChecks.find((check) => check.strategy === 'UPDOWN_TAIL_ENTRY');
+  const tailCondition = (label: string) => tailEntryCheck?.conditions.find((condition) => condition.label === label);
+  const tailCheckpointCondition = tailCondition('Tail checkpoint');
+  const tailSelectedSideCondition = tailCondition('Selected side');
+  const tailSummaryEvCondition = tailCondition('Summary EV/share');
+  const tailVwapCondition = tailCondition('VWAP depth');
+  const tailVwapCapCondition = tailCondition('VWAP cap');
+  const tailMidpointGapCondition = tailCondition('Midpoint gap');
+  const tailRoundOrderLimitCondition = tailCondition('Round order limit');
   const currentRoundOrders = viewState.orders.filter((order) => order.roundId === snapshot.round.id);
+  const currentRoundTailOrders = currentRoundOrders.filter((order) => order.strategy === 'UPDOWN_TAIL_ENTRY');
   const currentRoundOpenOrders = currentRoundOrders.filter((order) => (
     order.status === 'posted'
     || order.status === 'partially_filled'
@@ -425,22 +437,21 @@ export function App() {
   const entryPriceDisplay = entryLimit == null ? fixedLimitLabel : entryLimit.toFixed(3);
   const entrySharesDisplay = previewShares == null ? fixedSharesLabel : formatShares(previewShares);
   const dynamicEntryPrice = viewState.profileState.dynamicEntryPrice;
-  const assetRouteLabel = (selection: typeof dynamicEntryPrice): string => {
-    if (!selection?.assetSelectorEnabled) return 'off';
-    const rank = selection.assetSelectorRank ? `#${selection.assetSelectorRank}` : '-';
-    return selection.assetSelectorSelected ? rank : `skip ${rank}`;
-  };
-  const assetSelectorScoreLabel = (selection: typeof dynamicEntryPrice): string => (
-    selection?.assetSelectorEnabled ? formatEv(selection.assetSelectorScore) : 'off'
-  );
+  const tailEntryDetail = tailEntryCheck?.status === 'eligible'
+    ? `${tailSelectedSideCondition?.actual || 'selected side'} @ ${tailEntryCheck.limitPrice == null ? 'strategy limit' : tailEntryCheck.limitPrice.toFixed(3)}`
+    : tailEntryCheck?.conditions.filter((condition) => !condition.passed).slice(0, 2).map(blockerDetail).join(' / ')
+      || tailEntryCheck?.reason
+      || 'waiting for BTC 5m tail gate';
   const profileStatusRows = state.profiles.map((item) => {
     const itemEntryCheck = item.strategyChecks.find((check) => check.strategy === 'UPDOWN_DUAL_ENTRY');
+    const itemTailEntryCheck = item.strategyChecks.find((check) => check.strategy === 'UPDOWN_TAIL_ENTRY');
     const itemHedgeCheck = item.strategyChecks.find((check) => check.strategy === 'UPDOWN_SINGLE_FILL_HEDGE');
     const itemProfitExitCheck = item.strategyChecks.find((check) => check.strategy === 'UPDOWN_SINGLE_FILL_PROFIT_EXIT');
     const itemCooldownActive = Boolean(item.entryCooldownUntil && new Date(item.entryCooldownUntil).getTime() > Date.now());
     return {
       item,
       entryCheck: itemEntryCheck,
+      tailEntryCheck: itemTailEntryCheck,
       hedgeCheck: itemHedgeCheck,
       profitExitCheck: itemProfitExitCheck,
       cooldownActive: itemCooldownActive,
@@ -632,51 +643,19 @@ export function App() {
       {/* Main Tabbed Area */}
       <main>
         {activeTab === 'terminal' && (isAllProfiles ? (
-          <div className="scopeWorkspace">
-            <section className="panel scopePanel">
-              <div className="sectionHeader">
-                <div>
-                  <span className="sectionKicker">All Profiles</span>
-                  <h2>Runtime Overview</h2>
-                </div>
-                <Badge tone={state.runtime.executionMode === 'live' ? 'warn' : 'neutral'}>{executionLabel}</Badge>
-              </div>
-              <div className="scopeMetricGrid">
-                <DecisionMetric label="Enabled" value={`${enabledProfileCount}/${state.profiles.length}`} detail={`${liveProfileCount} live profiles`} tone={liveProfileCount > 0 ? 'warn' : 'neutral'} />
-                <DecisionMetric label="Orders" value={String(viewState.orders.length)} detail={`${viewState.fills.length} fills / ${viewState.settlements.length} settlements`} tone={viewState.orders.length > 0 ? 'good' : 'neutral'} />
-                <DecisionMetric label="Open Positions" value={String(displayedPositions.length)} detail="latest profile snapshots" tone={displayedPositions.length > 0 ? 'warn' : 'neutral'} />
-                <DecisionMetric label="Settled PnL" value={formatSignedMoney(portfolioPnl)} detail="filtered settlements" tone={portfolioPnl > 0 ? 'good' : portfolioPnl < 0 ? 'bad' : 'neutral'} />
-              </div>
-            </section>
-
-            <section className="profileGridPanel" aria-label="Profile runtime matrix">
-              {profileStatusRows.map(({ item, entryCheck: itemEntryCheck, hedgeCheck: itemHedgeCheck, profitExitCheck: itemProfitExitCheck, cooldownActive: itemCooldownActive }) => (
-                <button key={item.profile.id} type="button" className="profileRuntimeCard" onClick={() => setSelectedProfileId(item.profile.id)}>
-                  <div className="profileRuntimeHeader">
-                    <div>
-                      <strong><AssetLabel profileId={item.profile.id} label={item.profile.label} size="sm" /></strong>
-                      <span>{item.profile.status} · {item.latestSnapshot?.round.phase || 'pending'}</span>
-                    </div>
-                    <Badge tone={item.profile.status === 'live' ? 'warn' : item.profile.status === 'monitor' ? 'neutral' : 'bad'}>{item.profile.status}</Badge>
-                  </div>
-                  <div className="profileRuntimeStats">
-                    <div><span>Entry</span><strong>{strategyCheckLabel(itemEntryCheck)}</strong></div>
-                    <div><span>Price</span><strong>{item.dynamicEntryPrice ? formatPriceCents(item.dynamicEntryPrice.selectedPrice) : itemEntryCheck?.limitPrice != null ? formatPriceCents(itemEntryCheck.limitPrice) : '-'}</strong></div>
-                    <div><span>Route</span><strong>{assetRouteLabel(item.dynamicEntryPrice)}</strong></div>
-                    <div><span>Score</span><strong>{assetSelectorScoreLabel(item.dynamicEntryPrice)}</strong></div>
-                    <div><span>Exit</span><strong>{strategyCheckLabel(itemProfitExitCheck)}</strong></div>
-                    <div><span>Hedge</span><strong>{strategyCheckLabel(itemHedgeCheck)}</strong></div>
-                    <div><span>Cooldown</span><strong>{itemCooldownActive ? formatCooldownRemaining(item.entryCooldownUntil) : 'clear'}</strong></div>
-                  </div>
-                  <div className="profileRuntimeFooter">
-                    <span>{item.stats.orders} orders</span>
-                    <span>{item.stats.fills} fills</span>
-                    <strong className={item.stats.settledPnl >= 0 ? 'pass' : 'fail'}>{formatSignedMoney(item.stats.settledPnl)}</strong>
-                  </div>
-                </button>
-              ))}
-            </section>
-          </div>
+          <AllProfilesOverview
+            state={state}
+            enabledProfileCount={enabledProfileCount}
+            liveProfileCount={liveProfileCount}
+            executionLabel={executionLabel}
+            orderCount={viewState.orders.length}
+            fillCount={viewState.fills.length}
+            settlementCount={viewState.settlements.length}
+            displayedPositionCount={displayedPositions.length}
+            portfolioPnl={portfolioPnl}
+            profileStatusRows={profileStatusRows}
+            onSelectProfile={setSelectedProfileId}
+          />
         ) : (
           <div className="opsWorkspace">
             <section className="opsPrimary">
@@ -706,6 +685,12 @@ export function App() {
                   value={String(currentRoundOpenOrders.length)}
                   detail={`${currentRoundOrders.length} recorded in this round`}
                   tone={currentRoundOpenOrders.length ? 'warn' : 'neutral'}
+                />
+                <DecisionMetric
+                  label="Tail Entry"
+                  value={strategyCheckLabel(tailEntryCheck).toUpperCase()}
+                  detail={tailEntryDetail}
+                  tone={strategyCheckTone(tailEntryCheck)}
                 />
                 <DecisionMetric
                   label="Filled Exposure"
@@ -769,6 +754,18 @@ export function App() {
                 </div>
               </div>
 
+              <TailEntryPanel
+                tailEntryCheck={tailEntryCheck}
+                checkpointCondition={tailCheckpointCondition}
+                selectedSideCondition={tailSelectedSideCondition}
+                summaryEvCondition={tailSummaryEvCondition}
+                vwapCondition={tailVwapCondition}
+                vwapCapCondition={tailVwapCapCondition}
+                midpointGapCondition={tailMidpointGapCondition}
+                roundOrderLimitCondition={tailRoundOrderLimitCondition}
+                currentRoundTailOrderCount={currentRoundTailOrders.length}
+              />
+
               <div className="panel opsPanel">
                 <h2>
                   Active Positions
@@ -800,192 +797,48 @@ export function App() {
               </div>
             </section>
 
-            <aside className="opsRail">
-              <div className="panel opsPanel">
-                <h2>Profiles</h2>
-                <div className="opsProfileList">
-                  {profileStatusRows.map(({ item, entryCheck: itemEntryCheck, hedgeCheck: itemHedgeCheck, profitExitCheck: itemProfitExitCheck, cooldownActive: itemCooldownActive }) => (
-                    <button key={item.profile.id} type="button" className={`opsProfileRow ${selectedProfileId === item.profile.id ? 'active' : ''}`} onClick={() => setSelectedProfileId(item.profile.id)}>
-                      <div>
-                        <strong><AssetLabel profileId={item.profile.id} label={item.profile.label} size="sm" /></strong>
-                        <span>{item.latestSnapshot?.round.phase || 'pending'} · {item.profile.status}</span>
-                      </div>
-                      <div className="opsProfileBadges">
-                        <Badge tone={strategyCheckTone(itemEntryCheck)}>entry {strategyCheckLabel(itemEntryCheck)}</Badge>
-                        <Badge tone={strategyCheckTone(itemProfitExitCheck)}>exit {strategyCheckLabel(itemProfitExitCheck)}</Badge>
-                        <Badge tone={strategyCheckTone(itemHedgeCheck)}>hedge {strategyCheckLabel(itemHedgeCheck)}</Badge>
-                        {itemCooldownActive && <Badge tone="warn">{formatCooldownRemaining(item.entryCooldownUntil)}</Badge>}
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="panel opsPanel">
-                <h2>System</h2>
-                <div className="opsSystemList">
-                  <div><span>Feed</span><strong>{feedLabel}</strong></div>
-                  <div><span>Binance</span><strong>{viewState.feed.binanceConnected ? 'connected' : 'offline'}</strong></div>
-                  <div><span>Runtime</span><strong>{state.runtime.status}</strong></div>
-                  <div><span>Alerts</span><strong>{alertLogCount}</strong></div>
-                  <div><span>Signals</span><strong>{signalLogCount}</strong></div>
-                  <div><span>Portfolio PnL</span><strong>{formatSignedMoney(portfolioPnl)}</strong></div>
-                </div>
-              </div>
-
-              {snapshot.diagnostics.length > 0 && (
-                <details className="panel opsPanel opsDiagnostics">
-                  <summary>
-                    <span>Diagnostics</span>
-                    <strong>{snapshot.diagnostics.length}</strong>
-                  </summary>
-                  <div className="opsDiagnosticList">
-                    {snapshot.diagnostics.map((diag, index) => (
-                      <span key={`${diag}-${index}`}>{diag}</span>
-                    ))}
-                  </div>
-                </details>
-              )}
-            </aside>
+            <ProfileRail
+              profileStatusRows={profileStatusRows}
+              selectedProfileId={selectedProfileId}
+              feedLabel={feedLabel}
+              feed={viewState.feed}
+              runtimeStatus={state.runtime.status}
+              alertLogCount={alertLogCount}
+              signalLogCount={signalLogCount}
+              portfolioPnl={portfolioPnl}
+              diagnostics={snapshot.diagnostics}
+              onSelectProfile={setSelectedProfileId}
+            />
           </div>
         ))}
 
-	
-	        {activeTab === 'portfolio' && (
-	          <div className="portfolioWorkspace">
-	            <section className="panel">
-	              <h2>
-	                Account Portfolio
-	                <span className="panelSubTitle">{portfolio?.updatedAt ? `updated ${formatEtTime(portfolio.updatedAt)}` : 'waiting for snapshot'}</span>
-	              </h2>
+        {activeTab === 'portfolio' && (
+          <PortfolioTab
+            portfolio={portfolio}
+            portfolioAvatarUrl={portfolioAvatarUrl}
+            portfolioInitial={portfolioInitial}
+            portfolioProfileName={portfolioProfileName}
+            portfolioProfileHandle={portfolioProfileHandle}
+            displayedPositions={displayedPositions}
+            displayedPositionValue={displayedPositionValue}
+            displayedPositionCost={displayedPositionCost}
+            displayedUnrealizedPnl={displayedUnrealizedPnl}
+            displayedRoiPct={displayedRoiPct}
+            portfolioPnl={portfolioPnl}
+            isAllProfiles={isAllProfiles}
+            scopeLabel={scopeLabel}
+            settlementCount={viewState.settlements.length}
+          />
+        )}
 
-	              {portfolio ? (
-	                <>
-	                  <div className="portfolioHero">
-	                    <div className="portfolioIdentity">
-                        <div className="portfolioAvatar" aria-hidden="true">
-                          {portfolioAvatarUrl ? (
-                            <img src={portfolioAvatarUrl} alt="" loading="lazy" referrerPolicy="no-referrer" />
-                          ) : (
-                            <span>{portfolioInitial}</span>
-                          )}
-                        </div>
-                        <div className="portfolioIdentityText">
-	                        <span className="decisionKicker">Configured Account</span>
-	                        <strong title={portfolioProfileName || portfolio.accountAddress || ''}>{portfolioProfileName || (portfolio.accountAddress ? shortenTokenId(portfolio.accountAddress) : 'not configured')}</strong>
-                          {portfolioProfileHandle && <em>{portfolioProfileHandle}</em>}
-	                        <p title={portfolio.accountAddress || ''}>{portfolio.accountAddress ? shortenTokenId(portfolio.accountAddress) : 'not configured'} · {portfolio.hasOwnerPrivateKey ? 'CLOB balance reads enabled' : 'OWNER_PRIVATE_KEY missing; positions only'}</p>
-                        </div>
-	                    </div>
-	                    <Badge tone={portfolioStatusTone(portfolio.status)}>{portfolioStatusLabel(portfolio.status)}</Badge>
-	                  </div>
-
-	                  <div className="portfolioMetricGrid">
-		                    <DecisionMetric label="Collateral Balance" value={portfolio.collateralBalance == null ? 'n/a' : formatMoney(portfolio.collateralBalance)} detail="CLOB collateral" tone={portfolio.collateralBalance == null ? 'neutral' : 'good'} />
-		                    <DecisionMetric label="Position Value" value={formatMoney(displayedPositionValue)} detail={`${displayedPositions.length} scoped positions`} tone={displayedPositionValue > 0 ? 'good' : 'neutral'} />
-		                    <DecisionMetric label="Open Cost" value={formatMoney(displayedPositionCost)} detail="scoped entry basis" tone="neutral" />
-		                    <DecisionMetric label="Unrealized PnL" value={formatSignedMoney(displayedUnrealizedPnl)} detail="scoped positions" tone={displayedUnrealizedPnl > 0 ? 'good' : displayedUnrealizedPnl < 0 ? 'bad' : 'neutral'} />
-		                    <DecisionMetric label="Settled PnL" value={formatSignedMoney(portfolio.settledPnl)} detail={`${viewState.settlements.length} records`} tone={portfolio.settledPnl > 0 ? 'good' : portfolio.settledPnl < 0 ? 'bad' : 'neutral'} />
-		                    <DecisionMetric label="Total PnL" value={formatSignedMoney(portfolioPnl + displayedUnrealizedPnl)} detail="scoped settled + unrealized" tone={(portfolioPnl + displayedUnrealizedPnl) > 0 ? 'good' : (portfolioPnl + displayedUnrealizedPnl) < 0 ? 'bad' : 'neutral'} />
-		                    <DecisionMetric label="ROI" value={formatPercentValue(displayedRoiPct)} detail="scoped PnL / open cost" tone={displayedRoiPct == null ? 'neutral' : displayedRoiPct > 0 ? 'good' : displayedRoiPct < 0 ? 'bad' : 'neutral'} />
-	                  </div>
-
-	                  {portfolio.diagnostics.length > 0 && (
-	                    <div className="portfolioDiagnostics">
-	                      {portfolio.diagnostics.map((item) => (
-	                        <span key={item}>{item}</span>
-	                      ))}
-	                    </div>
-	                  )}
-	                </>
-	              ) : (
-	                <div className="empty" style={{ minHeight: '120px' }}>
-	                  <Info size={20} style={{ color: 'var(--text-muted)' }} />
-	                  <p className="emptyText">No portfolio snapshot has been captured yet</p>
-	                </div>
-	              )}
-	            </section>
-
-		            <section className="panel">
-		              <h2>
-		                Active Positions
-		                <span className="panelSubTitle">{displayedPositions.length ? `${displayedPositions.length} positions in ${scopeLabel}` : 'no scoped positions'}</span>
-		              </h2>
-	              {displayedPositions.length > 0 ? (
-	                <DataTable headers={isAllProfiles ? ['Profile', 'Market', 'Outcome', 'Shares', 'Avg', 'Value', 'PnL', 'ROI'] : ['Market', 'Outcome', 'Shares', 'Avg', 'Value', 'PnL', 'ROI']}>
-	                  {displayedPositions.map((position) => {
-	                    const value = positionValue(position);
-	                    const cost = positionCost(position);
-	                    const pnlValue = positionPnl(position);
-	                    const roi = cost > 0 ? (pnlValue / cost) * 100 : null;
-	                    return (
-	                      <tr key={`${position.profileId}:${position.tokenId}`}>
-	                        {isAllProfiles && <td><Badge tone="neutral"><AssetLabel profileId={position.profileId} label={position.profileLabel} /></Badge></td>}
-	                        <td>
-	                          <div className="marketCell compact">
-	                            <AssetIcon profileId={position.profileId} size="sm" />
-	                            <div>
-	                              <span className="marketTitle">{position.title || 'Polymarket position'}</span>
-	                              <span className="mutedBlock mono">{shortenTokenId(position.tokenId)}</span>
-	                            </div>
-	                          </div>
-	                        </td>
-	                        <td><Badge tone={outcomeTone(position.label)}>{outcomeLabel(position.label)}</Badge></td>
-	                        <td className="mono">{formatNumber(position.shares, 2)}</td>
-	                        <td className="mono">${position.avgPrice.toFixed(3)}</td>
-	                        <td className="mono">{formatMoney(value)}</td>
-	                        <td className={`mono ${pnlValue >= 0 ? 'pass' : 'fail'}`}>{formatSignedMoney(pnlValue)}</td>
-	                        <td className={`mono ${roi == null ? '' : roi >= 0 ? 'pass' : 'fail'}`}>{formatPercentValue(roi)}</td>
-	                      </tr>
-	                    );
-	                  })}
-	                </DataTable>
-	              ) : (
-	                <div className="empty" style={{ minHeight: '140px' }}>
-	                  <PieChart size={22} style={{ color: 'var(--text-muted)' }} />
-	                  <p className="emptyText">{portfolio?.status === 'disabled' ? 'Configure POLYMARKET_DEPOSIT_WALLET to load account positions' : 'No active positions found for this account'}</p>
-	                </div>
-	              )}
-	            </section>
-	          </div>
-	        )}
-
-	        {activeTab === 'orderbooks' && (
-	          <div className="panel">
-	            <div className="sectionHeader">
-	              <div>
-	                <span className="sectionKicker">{scopeLabel}</span>
-	                <h2>Polymarket CLOB Order Books</h2>
-	              </div>
-	            </div>
-            {isAllProfiles ? (
-              <div className="profileGridPanel compact">
-                {state.profiles.map((item) => (
-                  <button key={item.profile.id} type="button" className="profileRuntimeCard" onClick={() => setSelectedProfileId(item.profile.id)}>
-                    <div className="profileRuntimeHeader">
-                      <div>
-                        <strong><AssetLabel profileId={item.profile.id} label={item.profile.label} size="sm" /></strong>
-                        <span>{item.latestSnapshot?.round.id || 'waiting for round'}</span>
-                      </div>
-                      <Badge tone={item.feed.clobConnected ? 'good' : 'bad'}>CLOB {item.feed.clobConnected ? 'on' : 'off'}</Badge>
-                    </div>
-                    <div className="profileRuntimeStats">
-                      <div><span>Round</span><strong>{item.latestSnapshot?.round.phase || 'pending'}</strong></div>
-                      <div><span>Orderbooks</span><strong>{item.latestSnapshot?.orderbooks.length || 0}</strong></div>
-                      <div><span>Depth</span><strong>{item.latestSnapshot?.orderbookDepth ? 'loaded' : 'empty'}</strong></div>
-                      <div><span>Updated</span><strong>{item.feed.lastOrderbookAt ? formatEtTime(item.feed.lastOrderbookAt) : 'n/a'}</strong></div>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            ) : (
-              <>
-                <OrderbookExecutionSummary quotes={snapshot.orderbooks} yesTokenId={snapshot.round.yesTokenId} noTokenId={snapshot.round.noTokenId} />
-                <OrderbookCapacityPanel depth={snapshot.orderbookDepth} />
-                <OrderbookTable quotes={snapshot.orderbooks} yesTokenId={snapshot.round.yesTokenId} noTokenId={snapshot.round.noTokenId} />
-              </>
-            )}
-          </div>
+        {activeTab === 'orderbooks' && (
+          <OrderbooksTab
+            state={state}
+            snapshot={snapshot}
+            isAllProfiles={isAllProfiles}
+            scopeLabel={scopeLabel}
+            onSelectProfile={setSelectedProfileId}
+          />
         )}
 
         {activeTab === 'activity' && (
@@ -1759,132 +1612,28 @@ export function App() {
           </div>
         )}
 
-        {activeTab === 'strategy' && (
-          <div className="panel">
-            <h2>Trading Strategy & Configured Rules</h2>
-            <div className="rulesGrid">
-              {state.rules && state.rules.length > 0 ? (
-                state.rules.map((rule) => (
-                  <div key={rule.id} className="ruleCard">
-                    <div className="ruleHeader">
-                      <span className="ruleTitle">{rule.title} ({rule.id})</span>
-                      <span className="ruleAllocation">{rule.allocationPct}% ALLOCATION</span>
-                    </div>
-                    <p className="ruleSummary">{rule.summary}</p>
-                    <div className="ruleLists">
-                      <div className="ruleSection">
-                        <h4>Entry triggers</h4>
-                        <ul>
-                          {rule.entryRules.map((entry, idx) => (
-                            <li key={idx}>{entry}</li>
-                          ))}
-                        </ul>
-                      </div>
-                      <div className="ruleSection">
-                        <h4>Exit parameters</h4>
-                        <ul>
-                          {rule.exitRules.map((exit, idx) => (
-                            <li key={idx}>{exit}</li>
-                          ))}
-                        </ul>
-                      </div>
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <div className="empty" style={{ width: '100%' }}>
-                  <p className="emptyText">No strategy rules loaded in bot configuration</p>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
+        {activeTab === 'strategy' && <StrategyRulesTab rules={state.rules} />}
 
         {activeTab === 'logs' && (
-          <div className="panel">
-            <h2>Runtime Logs & System Output</h2>
-            <div className="logsViewContainer">
-              
-              {/* Logs filter controls */}
-              <div className="logsControlBar">
-                <div className="searchWrapper">
-                  <Search size={14} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-secondary)' }} />
-                  <input 
-                    type="text" 
-                    className="logSearchInput" 
-                    style={{ paddingLeft: '34px' }}
-                    placeholder="Search logs by message or source..." 
-                    value={logSearch} 
-                    onChange={(e) => setLogSearch(e.target.value)}
-                  />
-                </div>
-                
-                <select 
-                  className="logFilterSelect" 
-                  value={logLevel} 
-                  onChange={(e) => setLogLevel(e.target.value)}
-                >
-                  <option value="all">All Levels</option>
-                  <option value="info">Info</option>
-                  <option value="warn">Warning</option>
-                  <option value="error">Error</option>
-                </select>
-
-                <select 
-                  className="logFilterSelect" 
-                  value={logSource} 
-                  onChange={(e) => setLogSource(e.target.value)}
-                >
-                  <option value="all">All Sources</option>
-                  <option value="worker">Worker</option>
-                  <option value="api">API</option>
-                  <option value="execution">Execution</option>
-                  <option value="market-data">Market Data</option>
-                  <option value="operator">Operator</option>
-                </select>
-
-                <button
-                  type="button"
-                  className={`logModeButton ${hideRoutineLogs ? 'active' : ''}`}
-                  onClick={() => setHideRoutineLogs((value) => !value)}
-                >
-                  {hideRoutineLogs ? 'Signal View' : 'Raw View'}
-                </button>
-
-                {/* Counter */}
-                <div className="logCounters">
-                  <span>{filteredLogs.length} of {state.runtimeLogs.length} logs</span>
-                  <strong>{alertLogCount} alerts</strong>
-                  <span>{signalLogCount} signal</span>
-                </div>
-              </div>
-
-              {/* Console log box */}
-              <div className="consoleWindow" ref={consoleRef}>
-                {filteredLogs.length > 0 ? (
-                  logsPagination.pageRows.map((log) => (
-                    <div key={log.id} className={`consoleLogLine ${log.level}`}>
-                      <span className="logTime">{formatEtTime(log.createdAt)}</span>
-                      <span className="logSource">[{log.source}]</span>
-                      <span className={`logLevelTag ${log.level}`}>{log.level}</span>
-                      <span className="logMessage">{log.message}</span>
-                    </div>
-                  ))
-                ) : (
-                  <div className="empty" style={{ minHeight: '200px' }}>
-                    <p className="emptyText">No log records matches your filters</p>
-                  </div>
-                )}
-              </div>
-              <PaginationControls
-                page={logsPagination.page}
-                totalPages={logsPagination.totalPages}
-                totalRows={filteredLogs.length}
-                pageSize={LOG_PAGE_SIZE}
-                onPageChange={logsPagination.setPage}
-              />
-            </div>
-          </div>
+          <LogsTab
+            allLogCount={state.runtimeLogs.length}
+            filteredLogs={filteredLogs}
+            pageRows={logsPagination.pageRows}
+            page={logsPagination.page}
+            totalPages={logsPagination.totalPages}
+            logSearch={logSearch}
+            logLevel={logLevel}
+            logSource={logSource}
+            hideRoutineLogs={hideRoutineLogs}
+            alertLogCount={alertLogCount}
+            signalLogCount={signalLogCount}
+            consoleRef={consoleRef}
+            onSearchChange={setLogSearch}
+            onLevelChange={setLogLevel}
+            onSourceChange={setLogSource}
+            onToggleRoutineLogs={() => setHideRoutineLogs((value) => !value)}
+            onPageChange={logsPagination.setPage}
+          />
         )}
       </main>
     </Shell>
