@@ -12,6 +12,7 @@ type Props = {
   checkpointCondition?: StrategyCondition;
   selectedSummaryRowCondition?: StrategyCondition;
   selectedSideCondition?: StrategyCondition;
+  summaryPnlCondition?: StrategyCondition;
   summaryEvCondition?: StrategyCondition;
   summaryMinVwapCondition?: StrategyCondition;
   vwapCondition?: StrategyCondition;
@@ -26,6 +27,7 @@ export function TailEntryPanel({
   checkpointCondition,
   selectedSummaryRowCondition,
   selectedSideCondition,
+  summaryPnlCondition,
   summaryEvCondition,
   summaryMinVwapCondition,
   vwapCondition,
@@ -84,7 +86,7 @@ export function TailEntryPanel({
         <div>
           <span>Simulation row</span>
           <strong>{selectedSummaryRowCondition?.actual || '-'}</strong>
-          <em>{summaryEvCondition?.actual || 'EV unavailable'}</em>
+          <em>{summaryPnlCondition?.actual || '12h PnL unavailable'}</em>
         </div>
       </div>
 
@@ -100,6 +102,7 @@ export function TailEntryPanel({
         <div><span>Selected side</span><strong>{selectedSideCondition?.actual || '-'}</strong></div>
         <div><span>Limit</span><strong>{tailEntryCheck?.limitPrice == null ? '-' : tailEntryCheck.limitPrice.toFixed(3)}</strong></div>
         <div><span>Amount</span><strong>{tailEntryCheck?.amountUsd == null ? '-' : formatMoney(tailEntryCheck.amountUsd)}</strong></div>
+        <div><span>12h PnL gate</span><strong>{summaryPnlCondition?.actual || '-'}</strong></div>
         <div><span>Summary EV</span><strong>{summaryEvCondition?.actual || '-'}</strong></div>
         <div><span>Min price</span><strong>{summaryMinVwapCondition?.actual || '-'}</strong></div>
         <div><span>Live VWAP</span><strong>{vwapCondition?.actual || vwapFloorCondition?.actual || '-'}</strong></div>

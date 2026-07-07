@@ -26,6 +26,7 @@ type TailSummaryRow = {
   fillRate?: number | null;
   winRate?: number | null;
   avgPnlPerShare?: number | null;
+  totalPnl?: number | null;
   avgVwap?: number | null;
 };
 
@@ -56,7 +57,8 @@ export function evaluateTailEntry(snapshot: StateSnapshot, appConfig: AppConfig,
   const no = quoteSnapshot(snapshot, snapshot.round.noTokenId, appConfig);
   const selectedLabel = selectStrongSide(yes, no);
   const selected = selectedLabel === 'YES' ? yes : selectedLabel === 'NO' ? no : null;
-  const plan = selected ? buyVwap(selected.quote.asks || [], appConfig.pm5mTailEntrySize) : null;
+  const liveSize = selectedSummaryRow?.size ?? appConfig.pm5mTailEntrySize;
+  const plan = selected ? buyVwap(selected.quote.asks || [], liveSize) : null;
   const overroundAsk = yes?.quote.bestAsk != null && no?.quote.bestAsk != null ? roundMoney(yes.quote.bestAsk + no.quote.bestAsk) : null;
   const midpointGap = yes?.quote.midpoint != null && no?.quote.midpoint != null ? roundMoney(Math.abs(yes.quote.midpoint - no.quote.midpoint)) : null;
   const existingOrders = store.roundOrders(snapshot.profileId, snapshot.round.id, TAIL_ENTRY_STRATEGY)
@@ -69,7 +71,8 @@ export function evaluateTailEntry(snapshot: StateSnapshot, appConfig: AppConfig,
   if (checkpoint == null) blockers.push('NOT_IN_TAIL_CHECKPOINT_WINDOW');
   if (!summary.ok) blockers.push(summary.reason);
   if (row && (row.rows ?? 0) < appConfig.pm5mTailEntryMinRounds) blockers.push('TAIL_SUMMARY_SAMPLE_TOO_SMALL');
-  if (row && (row.avgPnlPerShare ?? Number.NEGATIVE_INFINITY) < appConfig.pm5mTailEntryMinEvPerShare) blockers.push('TAIL_SUMMARY_EV_TOO_LOW');
+  if (summary.ok && !row) blockers.push('TAIL_SUMMARY_12H_PNL_NOT_POSITIVE');
+  if (row && (row.totalPnl ?? Number.NEGATIVE_INFINITY) <= 0) blockers.push('TAIL_SUMMARY_12H_PNL_NOT_POSITIVE');
   if (row && (row.fillRate ?? 0) < appConfig.pm5mTailEntryMinFillRate) blockers.push('TAIL_SUMMARY_FILL_RATE_TOO_LOW');
   if (!yes || !no) blockers.push('ORDERBOOK_MISSING');
   if (selectedLabel == null || !selected) blockers.push('TAIL_SIDE_NOT_SELECTABLE');
@@ -85,16 +88,17 @@ export function evaluateTailEntry(snapshot: StateSnapshot, appConfig: AppConfig,
     condition('Tail entry enabled', enabled, enabled ? 'btc-5m live path enabled' : 'disabled or non-btc-5m profile'),
     condition('Tail checkpoint', checkpoint != null, selectedSummaryRow?.checkpointSeconds == null ? 'no summary-selected checkpoint' : checkpoint == null ? `${selectedSummaryRow.checkpointSeconds}s selected / ${snapshot.round.secondsToEnd.toFixed(1)}s to end` : `${checkpoint}s checkpoint / ${snapshot.round.secondsToEnd.toFixed(1)}s to end`),
     condition('Summary freshness', summary.ok, summary.label),
-    condition('Summary selected row', Boolean(selectedSummaryRow), selectedSummaryRow ? `${selectedSummaryRow.checkpointSeconds}s / ${selectedSummaryRow.size} shares / EV ${formatNullable(selectedSummaryRow.avgPnlPerShare)}` : 'missing'),
+    condition('Summary selected row', Boolean(selectedSummaryRow), selectedSummaryRow ? `${selectedSummaryRow.checkpointSeconds}s / ${selectedSummaryRow.size} shares / PnL ${formatMoney(selectedSummaryRow.totalPnl)}` : 'missing positive 12h PnL row'),
     condition('Summary sample size', Boolean(row && (row.rows ?? 0) >= appConfig.pm5mTailEntryMinRounds), row ? `${row.rows ?? 0} / min ${appConfig.pm5mTailEntryMinRounds}` : 'missing'),
-    condition('Summary EV/share', Boolean(row && (row.avgPnlPerShare ?? Number.NEGATIVE_INFINITY) >= appConfig.pm5mTailEntryMinEvPerShare), row?.avgPnlPerShare == null ? 'missing' : `${row.avgPnlPerShare.toFixed(4)} / min ${appConfig.pm5mTailEntryMinEvPerShare.toFixed(4)}`),
+    condition('Summary 12h PnL', Boolean(row && (row.totalPnl ?? Number.NEGATIVE_INFINITY) > 0), row?.totalPnl == null ? 'missing' : `${formatMoney(row.totalPnl)} / must be > 0`),
+    condition('Summary EV/share', row?.avgPnlPerShare != null, row?.avgPnlPerShare == null ? 'missing' : `${row.avgPnlPerShare.toFixed(4)} reference`),
     condition('Summary fill rate', Boolean(row && (row.fillRate ?? 0) >= appConfig.pm5mTailEntryMinFillRate), row?.fillRate == null ? 'missing' : `${formatPct(row.fillRate)} / min ${formatPct(appConfig.pm5mTailEntryMinFillRate)}`),
     condition('Summary min VWAP', liveVwapFloor != null, `${liveVwapFloor.toFixed(3)} min strength floor`),
     condition('YES quote fresh', Boolean(yes), yes ? `${yes.ageMs}ms old` : 'missing/stale'),
     condition('NO quote fresh', Boolean(no), no ? `${no.ageMs}ms old` : 'missing/stale'),
     condition('Selected side', selectedLabel != null, selectedLabel ?? 'none'),
     condition('Midpoint gap', (midpointGap ?? 0) + EPSILON >= appConfig.pm5mTailEntryMinMidpointGap, midpointGap == null ? 'missing' : `${midpointGap.toFixed(3)} / min ${appConfig.pm5mTailEntryMinMidpointGap.toFixed(3)}`),
-    condition('VWAP depth', Boolean(plan?.fillable), plan?.vwap == null ? `${plan?.filledShares ?? 0}/${appConfig.pm5mTailEntrySize}` : `${plan.filledShares}/${appConfig.pm5mTailEntrySize} @ ${plan.vwap.toFixed(3)}`),
+    condition('VWAP depth', Boolean(plan?.fillable), plan?.vwap == null ? `${plan?.filledShares ?? 0}/${liveSize}` : `${plan.filledShares}/${liveSize} @ ${plan.vwap.toFixed(3)}`),
     condition('VWAP floor', plan?.vwap != null && plan.vwap + EPSILON >= liveVwapFloor, plan?.vwap == null ? 'missing' : `${plan.vwap.toFixed(3)} / min ${liveVwapFloor.toFixed(3)}`),
     condition('Spread cap', selected?.quote.spread != null && selected.quote.spread <= appConfig.pm5mTailEntryMaxSpread + EPSILON, selected?.quote.spread == null ? 'missing' : `${selected.quote.spread.toFixed(3)} / max ${appConfig.pm5mTailEntryMaxSpread.toFixed(3)}`),
     condition('Overround cap', overroundAsk != null && overroundAsk <= appConfig.pm5mTailEntryMaxOverround + EPSILON, overroundAsk == null ? 'missing' : `${overroundAsk.toFixed(3)} / max ${appConfig.pm5mTailEntryMaxOverround.toFixed(3)}`),
@@ -109,8 +113,8 @@ export function evaluateTailEntry(snapshot: StateSnapshot, appConfig: AppConfig,
     roundId: snapshot.round.id,
     title: '5m Tail Entry',
     status: blockers.length ? 'blocked' : 'eligible',
-    summary: 'Buy the stronger BTC 5m side near expiry when the tail-entry simulator and current orderbook both pass configured gates.',
-    reason: blockers.length ? blockers.join(', ') : `Tail entry eligible: buy ${selectedLabel} ${appConfig.pm5mTailEntrySize.toFixed(2)} @ ${plan!.vwap!.toFixed(3)} VWAP.`,
+    summary: 'Buy the stronger BTC 5m side near expiry only when the 12h tail simulator has positive PnL and current orderbook gates pass.',
+    reason: blockers.length ? blockers.join(', ') : `Tail entry eligible: buy ${selectedLabel} ${liveSize.toFixed(2)} @ ${plan!.vwap!.toFixed(3)} VWAP from best 12h PnL row.`,
     blockers,
     amountUsd: plan?.cost,
     limitPrice: plan?.vwap == null ? undefined : cappedPrice(plan.vwap + appConfig.pm5mTailEntryPriceOffset),
@@ -133,8 +137,8 @@ export function evaluateTailEntry(snapshot: StateSnapshot, appConfig: AppConfig,
     side: 'BUY',
     orderType: 'LIMIT',
     limitPrice: cappedPrice(plan.vwap + appConfig.pm5mTailEntryPriceOffset),
-    shares: appConfig.pm5mTailEntrySize,
-    reason: `BTC 5m tail entry at ${checkpoint}s: selected ${selectedLabel}, simulator EV ${(row?.avgPnlPerShare ?? 0).toFixed(4)}/share, live VWAP ${plan.vwap.toFixed(3)} >= min ${liveVwapFloor.toFixed(3)}.`,
+    shares: liveSize,
+    reason: `BTC 5m tail entry at ${checkpoint}s: selected ${selectedLabel}, simulator 12h PnL ${formatMoney(row?.totalPnl)} at ${liveSize} shares, live VWAP ${plan.vwap.toFixed(3)} >= min ${liveVwapFloor.toFixed(3)}.`,
     status: 'generated',
     ttlSeconds: Math.max(1, Math.ceil(snapshot.round.secondsToEnd)),
     createdAt: snapshot.capturedAt,
@@ -297,25 +301,18 @@ function readTailSummary(appConfig: AppConfig): { ok: true; value: TailSummary; 
 function selectSummaryRow(summary: TailSummary, appConfig: AppConfig): TailSummaryRow | null {
   const allowedCheckpoints = new Set(appConfig.pm5mTailEntryCheckpoints);
   const rows = summary.completed?.byCheckpointSize || [];
-  const referenceSize = summaryReferenceSize(rows, appConfig.pm5mTailEntrySize);
-  if (referenceSize == null) return null;
   return rows
-    .filter((row) => row.size === referenceSize)
+    .filter((row) => row.size != null && Number.isFinite(row.size) && row.size > 0)
     .filter((row) => !allowedCheckpoints.size || (row.checkpointSeconds != null && allowedCheckpoints.has(row.checkpointSeconds)))
     .filter((row) => (row.rows ?? 0) >= appConfig.pm5mTailEntryMinRounds)
     .filter((row) => (row.fillRate ?? 0) >= appConfig.pm5mTailEntryMinFillRate)
-    .filter((row) => (row.avgPnlPerShare ?? Number.NEGATIVE_INFINITY) >= appConfig.pm5mTailEntryMinEvPerShare)
+    .filter((row) => (row.totalPnl ?? Number.NEGATIVE_INFINITY) > 0)
     .sort((left, right) => (
-      (right.avgPnlPerShare ?? Number.NEGATIVE_INFINITY) - (left.avgPnlPerShare ?? Number.NEGATIVE_INFINITY)
+      (right.totalPnl ?? Number.NEGATIVE_INFINITY) - (left.totalPnl ?? Number.NEGATIVE_INFINITY)
+      || (right.avgPnlPerShare ?? Number.NEGATIVE_INFINITY) - (left.avgPnlPerShare ?? Number.NEGATIVE_INFINITY)
       || (right.fillRate ?? 0) - (left.fillRate ?? 0)
       || (right.checkpointSeconds ?? 0) - (left.checkpointSeconds ?? 0)
     ))[0] ?? null;
-}
-
-function summaryReferenceSize(rows: TailSummaryRow[], orderSize: number): number | null {
-  const sizes = [...new Set(rows.map((row) => row.size).filter((size): size is number => size != null && Number.isFinite(size) && size > 0))].sort((left, right) => left - right);
-  if (!sizes.length) return null;
-  return sizes.find((size) => size >= orderSize) ?? sizes.at(-1) ?? null;
 }
 
 function summaryMinVwapFloor(summary: TailSummary, selectedRow: TailSummaryRow, appConfig: AppConfig): number {
@@ -323,7 +320,7 @@ function summaryMinVwapFloor(summary: TailSummary, selectedRow: TailSummaryRow, 
     .filter((row) => row.checkpointSeconds === selectedRow.checkpointSeconds && row.size === selectedRow.size)
     .filter((row) => (row.rows ?? 0) >= appConfig.pm5mTailEntryMinBandRows)
     .filter((row) => (row.fillRate ?? 0) >= appConfig.pm5mTailEntryMinFillRate)
-    .filter((row) => (row.avgPnlPerShare ?? Number.NEGATIVE_INFINITY) >= appConfig.pm5mTailEntryMinEvPerShare)
+    .filter((row) => (row.totalPnl ?? Number.NEGATIVE_INFINITY) > 0)
     .map((row) => ({ row, floor: askBandFloor(row.askBand) }))
     .filter((item): item is { row: TailSummaryRow; floor: number } => item.floor != null)
     .sort((left, right) => left.floor - right.floor);
@@ -431,8 +428,8 @@ function formatPct(value: number): string {
   return `${(value * 100).toFixed(1)}%`;
 }
 
-function formatNullable(value: number | null | undefined): string {
-  return value == null || !Number.isFinite(value) ? 'n/a' : value.toFixed(4);
+function formatMoney(value: number | null | undefined): string {
+  return value == null || !Number.isFinite(value) ? 'n/a' : `$${value.toFixed(2)}`;
 }
 
 function isFakNoMatchError(error: string | undefined): boolean {

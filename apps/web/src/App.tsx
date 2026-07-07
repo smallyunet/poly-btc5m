@@ -446,6 +446,7 @@ export function App() {
   const tailCheckpointCondition = tailCondition('Tail checkpoint');
   const tailSelectedSummaryRowCondition = tailCondition('Summary selected row');
   const tailSelectedSideCondition = tailCondition('Selected side');
+  const tailSummaryPnlCondition = tailCondition('Summary 12h PnL');
   const tailSummaryEvCondition = tailCondition('Summary EV/share');
   const tailSummaryMinVwapCondition = tailCondition('Summary min VWAP');
   const tailVwapCondition = tailCondition('VWAP depth');
@@ -567,7 +568,7 @@ export function App() {
       kicker: 'Research Calibration',
       title: simulationResearchTab === 'tail' ? 'Tail Entry simulation results' : 'Touch-fill simulation results',
       summary: simulationResearchTab === 'tail'
-        ? 'Use this view to choose BTC 5m tail checkpoint and acceptable entry price from recorded market behavior.'
+        ? 'Use this view to choose BTC 5m tail live parameters from the most recent 12h simulation PnL.'
         : 'Use this view to calibrate pre-round entry price levels across 5m assets.',
     },
     strategy: {
@@ -593,7 +594,7 @@ export function App() {
         ? { title: 'Asset x price matrix', summary: 'Check whether a price level works broadly or only on specific 5m assets.' }
         : { title: 'Current round touch strip', summary: 'Watch active recorder observations without mixing them into live bot execution.' })
     : (tailSimulationSubTab === 'checkpoint'
-      ? { title: 'Checkpoint x size EV', summary: 'Primary input for live BTC 5m tail: choose the best seconds-to-end checkpoint and reference size row.' }
+      ? { title: 'Checkpoint x size PnL', summary: 'Primary live BTC 5m tail gate: use the best positive 12h PnL row, otherwise keep live tail stopped.' }
       : tailSimulationSubTab === 'bands'
         ? { title: 'Ask-band performance', summary: 'Check which live entry price bands historically retained enough EV after fill and win rates.' }
         : { title: 'Recent tail sample strip', summary: 'Inspect how recent markets were sampled at each checkpoint and what side/price would have been selected.' });
@@ -928,6 +929,7 @@ export function App() {
                 checkpointCondition={tailCheckpointCondition}
                 selectedSummaryRowCondition={tailSelectedSummaryRowCondition}
                 selectedSideCondition={tailSelectedSideCondition}
+                summaryPnlCondition={tailSummaryPnlCondition}
                 summaryEvCondition={tailSummaryEvCondition}
                 summaryMinVwapCondition={tailSummaryMinVwapCondition}
                 vwapCondition={tailVwapCondition}
@@ -1729,7 +1731,7 @@ export function App() {
                     <div className="sectionHeader compact">
                       <div>
                         <span className="sectionKicker">Completed samples</span>
-                        <h3>Checkpoint x Size EV</h3>
+                        <h3>Checkpoint x Size PnL Gate</h3>
                       </div>
                       <span className="panelSubTitle">{tailSim.completed?.rows ?? 0} finalized rows / {tailLookbackLabel}</span>
                     </div>
