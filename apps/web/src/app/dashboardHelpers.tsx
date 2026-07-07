@@ -175,6 +175,90 @@ export type TouchSimSummary = {
 
 export type TouchOutcome = 'paired' | 'single' | 'none';
 
+export type TailSimAggregateRow = {
+  checkpointSeconds: number;
+  size: number;
+  askBand?: string;
+  rows: number;
+  fillable: number;
+  wins: number;
+  fillRate: number | null;
+  winRate: number | null;
+  avgVwap: number | null;
+  avgSpread: number | null;
+  avgOverroundAsk: number | null;
+  avgPnlPerShare: number | null;
+  totalPnl: number;
+};
+
+export type TailSimSummary = {
+  ok?: boolean;
+  model?: string;
+  generatedAt?: string;
+  message?: string;
+  config?: {
+    assets: string[];
+    interval: string;
+    checkpoints: number[];
+    sizes: number[];
+    topLevels: number;
+    quoteMaxAgeMs: number;
+    lookbackHours?: number | null;
+    lookbackStartAt?: string | null;
+  };
+  status?: {
+    websocketConnected?: boolean;
+    subscribedTokens?: number;
+    activeRounds?: number;
+    sampledRounds?: number;
+    completedRows?: number;
+    completedAllTimeRows?: number;
+    historicalRows?: number;
+  } | string;
+  active?: {
+    rounds: number;
+    samples: number;
+    latestSampleAt: string | null;
+  };
+  completed?: {
+    rows: number;
+    byCheckpointSize: TailSimAggregateRow[];
+    byAskBand: TailSimAggregateRow[];
+  };
+  completedAllTime?: {
+    rows: number;
+    byCheckpointSize: TailSimAggregateRow[];
+    byAskBand: TailSimAggregateRow[];
+  };
+  recentRounds?: Array<{
+    asset: string;
+    slug: string;
+    title: string;
+    startAt: string;
+    endAt: string;
+    finalized: boolean;
+    winner: 'YES' | 'NO' | null;
+    samples: Array<{
+      recordedAt: string;
+      checkpointSeconds: number;
+      status: string;
+      selectedSide: 'YES' | 'NO' | null;
+      yesMidpoint: number | null;
+      noMidpoint: number | null;
+      selectedBestAsk: number | null;
+      overroundAsk: number | null;
+      sizePlans: Array<{
+        size: number;
+        fillable: boolean;
+        vwap: number | null;
+        cost: number | null;
+        filledShares: number;
+        slippage: number | null;
+      }>;
+    }>;
+  }>;
+};
+
 export function isTabType(value: string | null): value is TabType {
   return TAB_TYPES.includes(value as TabType);
 }

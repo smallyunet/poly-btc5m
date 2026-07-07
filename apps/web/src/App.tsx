@@ -33,6 +33,7 @@ import {
   ROUND_PAGE_SIZE,
   STATS_WINDOW_MS,
   type ActivitySubTab,
+  type TailSimSummary,
   type TabType,
   type TouchSimSummary,
   type VisibleState,
@@ -74,7 +75,9 @@ import {
   usePaginatedRows,
 } from './app/dashboardHelpers';
 
+type SimulationResearchTab = 'touch' | 'tail';
 type SimulationSubTab = 'price' | 'matrix' | 'rounds';
+type TailSimulationSubTab = 'checkpoint' | 'bands' | 'rounds';
 
 export function App() {
   const [state, setState] = React.useState<DashboardState | null>(null);
@@ -85,11 +88,15 @@ export function App() {
   const [nowMs, setNowMs] = React.useState(() => Date.now());
   const [touchSim, setTouchSim] = React.useState<TouchSimSummary | null>(null);
   const [touchSimError, setTouchSimError] = React.useState<string | null>(null);
+  const [tailSim, setTailSim] = React.useState<TailSimSummary | null>(null);
+  const [tailSimError, setTailSimError] = React.useState<string | null>(null);
   
   // Navigation Tab State
   const [activeTab, setActiveTab] = React.useState<TabType>(() => tabFromUrl());
   const [activitySubTab, setActivitySubTab] = React.useState<ActivitySubTab>('daily');
+  const [simulationResearchTab, setSimulationResearchTab] = React.useState<SimulationResearchTab>('touch');
   const [simulationSubTab, setSimulationSubTab] = React.useState<SimulationSubTab>('price');
+  const [tailSimulationSubTab, setTailSimulationSubTab] = React.useState<TailSimulationSubTab>('checkpoint');
   const [simulationAssetTab, setSimulationAssetTab] = React.useState<string>('btc');
   const [selectedProfileId, setSelectedProfileId] = React.useState<string>('all');
 
@@ -126,6 +133,15 @@ export function App() {
     }
   }, []);
 
+  const loadTailSim = React.useCallback(async () => {
+    try {
+      setTailSim(await api<TailSimSummary>('/api/research/pm5m-tail/summary'));
+      setTailSimError(null);
+    } catch (err) {
+      setTailSimError(err instanceof Error ? err.message : String(err));
+    }
+  }, []);
+
   React.useEffect(() => {
     void load();
     const timer = setInterval(() => void load(true), DASHBOARD_REFRESH_MS);
@@ -134,9 +150,13 @@ export function App() {
 
   React.useEffect(() => {
     void loadTouchSim();
-    const timer = setInterval(() => void loadTouchSim(), DASHBOARD_REFRESH_MS);
+    void loadTailSim();
+    const timer = setInterval(() => {
+      void loadTouchSim();
+      void loadTailSim();
+    }, DASHBOARD_REFRESH_MS);
     return () => clearInterval(timer);
-  }, [loadTouchSim]);
+  }, [loadTailSim, loadTouchSim]);
 
   React.useEffect(() => {
     const timer = setInterval(() => setNowMs(Date.now()), 1000);
@@ -451,6 +471,22 @@ export function App() {
   const touchLookbackHours = touchSim?.config?.lookbackHours;
   const touchLookbackLabel = touchLookbackHours && Number.isFinite(touchLookbackHours) ? `${touchLookbackHours}h` : 'all-time';
   const touchAllTimeRounds = touchSimStatus?.completedAllTimeRounds ?? touchSim?.completedAllTime?.rounds;
+  const tailSimStatus = typeof tailSim?.status === 'object' ? tailSim.status : undefined;
+  const tailSimStatusLabel = typeof tailSim?.status === 'string'
+    ? tailSim.status
+    : tailSimStatus?.websocketConnected
+      ? 'recording'
+      : tailSim?.ok
+        ? 'waiting'
+        : 'unavailable';
+  const tailCheckpointRows = tailSim?.completed?.byCheckpointSize ?? [];
+  const tailBandRows = tailSim?.completed?.byAskBand ?? [];
+  const tailRecentRounds = tailSim?.recentRounds ?? [];
+  const tailCommand = 'npm run research:pm5m-tail -- --assets btc --checkpoints 60,45,30,20,15,10,5 --sizes 5,10,25 --lookback-hours 12';
+  const tailGeneratedAtMs = tailSim?.generatedAt ? new Date(tailSim.generatedAt).getTime() : 0;
+  const tailGeneratedLabel = tailGeneratedAtMs ? formatRelativeAge(tailGeneratedAtMs, nowMs) : 'not generated';
+  const tailLookbackHours = tailSim?.config?.lookbackHours;
+  const tailLookbackLabel = tailLookbackHours && Number.isFinite(tailLookbackHours) ? `${tailLookbackHours}h` : 'all-time';
   const isResearchTab = activeTab === 'simulation';
 
   return (
@@ -1303,6 +1339,25 @@ export function App() {
 
         {activeTab === 'simulation' && (
           <div className="simulationWorkspace">
+            <div className="subTabBar simulationSubTabs" aria-label="Research simulator">
+              <button
+                type="button"
+                className={`subTabBtn ${simulationResearchTab === 'touch' ? 'active' : ''}`}
+                onClick={() => setSimulationResearchTab('touch')}
+              >
+                Touch Fill
+                <span>{touchSimStatus?.completedRounds ?? touchSim?.completed?.rounds ?? 0}</span>
+              </button>
+              <button
+                type="button"
+                className={`subTabBtn ${simulationResearchTab === 'tail' ? 'active' : ''}`}
+                onClick={() => setSimulationResearchTab('tail')}
+              >
+                Tail Entry
+                <span>{tailSimStatus?.completedRows ?? tailSim?.completed?.rows ?? 0}</span>
+              </button>
+            </div>
+            {simulationResearchTab === 'touch' && (
             <section className="panel simulationPanel">
               <div className="sectionHeader">
                 <div>
@@ -1504,6 +1559,203 @@ export function App() {
                 </>
               )}
             </section>
+            )}
+
+            {simulationResearchTab === 'tail' && (
+            <section className="panel simulationPanel">
+              <div className="sectionHeader">
+                <div>
+                  <span className="sectionKicker">Research Recorder</span>
+                  <h2>5m Tail Entry Simulation</h2>
+                </div>
+                <Badge tone={tailSim?.ok ? (tailSimStatus?.websocketConnected ? 'good' : 'warn') : 'neutral'}>
+                  {tailSimStatusLabel}
+                </Badge>
+              </div>
+
+              <div className="listScopeBar">
+                <span>{tailSim?.model || 'tail-entry: buy stronger side by midpoint using ask-book VWAP'}</span>
+                <strong>{tailSim?.config?.assets?.join(', ') || 'btc'}</strong>
+                <strong>{tailSim?.config?.checkpoints?.map((item) => `${item}s`).join(', ') || '60s, 45s, 30s, 20s, 15s, 10s, 5s'}</strong>
+                <strong>updated {tailGeneratedLabel}</strong>
+              </div>
+
+              {tailSimError ? (
+                <div className="empty simulationEmpty">
+                  <AlertTriangle size={22} className="fail" />
+                  <p className="emptyText">{tailSimError}</p>
+                </div>
+              ) : !tailSim?.ok ? (
+                <div className="simulationStartState">
+                  <div>
+                    <span className="sectionKicker">No summary file</span>
+                    <strong>{tailSim?.message || 'Start the independent tail-entry recorder to populate this tab.'}</strong>
+                    <p>The recorder writes ignored files under data-lab and only observes Gamma plus CLOB orderbooks.</p>
+                  </div>
+                  <code>{tailCommand}</code>
+                </div>
+              ) : (
+                <>
+                  <div className="simulationMetricGrid">
+                    <DecisionMetric
+                      label="WebSocket"
+                      value={tailSimStatus?.websocketConnected ? 'CONNECTED' : 'WAITING'}
+                      detail={`${tailSimStatus?.subscribedTokens ?? 0} subscribed token ids`}
+                      tone={tailSimStatus?.websocketConnected ? 'good' : 'warn'}
+                    />
+                    <DecisionMetric
+                      label="Active rounds"
+                      value={String(tailSimStatus?.activeRounds ?? tailSim.active?.rounds ?? 0)}
+                      detail={`${tailSim.active?.samples ?? 0} captured checkpoints`}
+                      tone={(tailSimStatus?.activeRounds ?? tailSim.active?.rounds ?? 0) > 0 ? 'good' : 'neutral'}
+                    />
+                    <DecisionMetric
+                      label="Window rows"
+                      value={String(tailSimStatus?.completedRows ?? tailSim.completed?.rows ?? 0)}
+                      detail={`${tailLookbackLabel} lookback / ${tailCheckpointRows.length} checkpoint rows`}
+                      tone={(tailSimStatus?.completedRows ?? tailSim.completed?.rows ?? 0) > 0 ? 'good' : 'warn'}
+                    />
+                    <DecisionMetric
+                      label="All-time rows"
+                      value={String(tailSimStatus?.completedAllTimeRows ?? tailSim.completedAllTime?.rows ?? 0)}
+                      detail={`${tailSim.config?.sizes?.join(', ') || '5, 10, 25'} shares`}
+                      tone="neutral"
+                    />
+                  </div>
+
+                  <div className="subTabBar simulationSubTabs" aria-label="Tail simulation result views">
+                    <button
+                      type="button"
+                      className={`subTabBtn ${tailSimulationSubTab === 'checkpoint' ? 'active' : ''}`}
+                      onClick={() => setTailSimulationSubTab('checkpoint')}
+                    >
+                      Checkpoints
+                      <span>{tailCheckpointRows.length}</span>
+                    </button>
+                    <button
+                      type="button"
+                      className={`subTabBtn ${tailSimulationSubTab === 'bands' ? 'active' : ''}`}
+                      onClick={() => setTailSimulationSubTab('bands')}
+                    >
+                      Ask Bands
+                      <span>{tailBandRows.length}</span>
+                    </button>
+                    <button
+                      type="button"
+                      className={`subTabBtn ${tailSimulationSubTab === 'rounds' ? 'active' : ''}`}
+                      onClick={() => setTailSimulationSubTab('rounds')}
+                    >
+                      Round Strip
+                      <span>{tailRecentRounds.length}</span>
+                    </button>
+                  </div>
+
+                  {tailSimulationSubTab === 'checkpoint' && (
+                  <section className="simulationSection">
+                    <div className="sectionHeader compact">
+                      <div>
+                        <span className="sectionKicker">Completed samples</span>
+                        <h3>Checkpoint x Size EV</h3>
+                      </div>
+                      <span className="panelSubTitle">{tailSim.completed?.rows ?? 0} finalized rows / {tailLookbackLabel}</span>
+                    </div>
+                    {tailCheckpointRows.length > 0 ? (
+                      <DataTable headers={['T-End', 'Size', 'Rows', 'Fill', 'Win', 'VWAP', 'Spread', 'Overround', 'EV/share', 'PnL']}>
+                        {tailCheckpointRows.map((row) => (
+                          <tr key={`tail-checkpoint-${row.checkpointSeconds}-${row.size}`}>
+                            <td className="mono">{row.checkpointSeconds}s</td>
+                            <td className="mono">{formatShares(row.size)}</td>
+                            <td className="mono">{row.rows}</td>
+                            <td><Badge tone={row.fillRate && row.fillRate >= 0.9 ? 'good' : 'warn'}>{row.fillable} / {formatRate(row.fillRate)}</Badge></td>
+                            <td><Badge tone={row.winRate && row.avgVwap != null && row.winRate > row.avgVwap ? 'good' : 'warn'}>{row.wins} / {formatRate(row.winRate)}</Badge></td>
+                            <td className="mono">{row.avgVwap == null ? '-' : row.avgVwap.toFixed(3)}</td>
+                            <td className="mono">{row.avgSpread == null ? '-' : row.avgSpread.toFixed(3)}</td>
+                            <td className="mono">{row.avgOverroundAsk == null ? '-' : row.avgOverroundAsk.toFixed(3)}</td>
+                            <td className={`mono ${(row.avgPnlPerShare ?? 0) >= 0 ? 'pass' : 'fail'}`}>{formatEv(row.avgPnlPerShare)}</td>
+                            <td className={`mono ${row.totalPnl >= 0 ? 'pass' : 'fail'}`}>{formatSignedMoney(row.totalPnl)}</td>
+                          </tr>
+                        ))}
+                      </DataTable>
+                    ) : (
+                      <div className="opsEmptyState">Waiting for finalized tail-entry samples.</div>
+                    )}
+                  </section>
+                  )}
+
+                  {tailSimulationSubTab === 'bands' && (
+                  <section className="simulationSection">
+                    <div className="sectionHeader compact">
+                      <div>
+                        <span className="sectionKicker">Execution price split</span>
+                        <h3>Selected Ask Bands</h3>
+                      </div>
+                      <span className="panelSubTitle">{tailBandRows.length} rows</span>
+                    </div>
+                    {tailBandRows.length > 0 ? (
+                      <DataTable headers={['T-End', 'Size', 'Ask band', 'Rows', 'Fill', 'Win', 'VWAP', 'EV/share', 'PnL']}>
+                        {tailBandRows.map((row) => (
+                          <tr key={`tail-band-${row.checkpointSeconds}-${row.size}-${row.askBand}`}>
+                            <td className="mono">{row.checkpointSeconds}s</td>
+                            <td className="mono">{formatShares(row.size)}</td>
+                            <td><Badge tone="neutral">{row.askBand || '-'}</Badge></td>
+                            <td className="mono">{row.rows}</td>
+                            <td><Badge tone={row.fillRate && row.fillRate >= 0.9 ? 'good' : 'warn'}>{formatRate(row.fillRate)}</Badge></td>
+                            <td><Badge tone={row.winRate && row.avgVwap != null && row.winRate > row.avgVwap ? 'good' : 'warn'}>{formatRate(row.winRate)}</Badge></td>
+                            <td className="mono">{row.avgVwap == null ? '-' : row.avgVwap.toFixed(3)}</td>
+                            <td className={`mono ${(row.avgPnlPerShare ?? 0) >= 0 ? 'pass' : 'fail'}`}>{formatEv(row.avgPnlPerShare)}</td>
+                            <td className={`mono ${row.totalPnl >= 0 ? 'pass' : 'fail'}`}>{formatSignedMoney(row.totalPnl)}</td>
+                          </tr>
+                        ))}
+                      </DataTable>
+                    ) : (
+                      <div className="opsEmptyState">Ask-band rows will appear after finalized samples are aggregated.</div>
+                    )}
+                  </section>
+                  )}
+
+                  {tailSimulationSubTab === 'rounds' && (
+                  <section className="simulationSection">
+                    <div className="sectionHeader compact">
+                      <div>
+                        <span className="sectionKicker">Recent markets</span>
+                        <h3>Tail Sample Strip</h3>
+                      </div>
+                    </div>
+                    {tailRecentRounds.length > 0 ? (
+                      <div className="touchRecentGrid">
+                        {tailRecentRounds.map((round) => (
+                          <div key={round.slug} className="touchRoundCard">
+                            <div className="touchRoundHeader">
+                              <AssetLabel profileId={`${round.asset}-5m`} label={round.asset.toUpperCase()} size="sm" />
+                              <Badge tone={round.finalized ? 'neutral' : 'warn'}>{round.finalized ? `winner ${round.winner || '-'}` : 'active'}</Badge>
+                            </div>
+                            <strong>{round.title || round.slug}</strong>
+                            <span className="mutedBlock">{formatEtTime(round.startAt)} - {formatEtTime(round.endAt)}</span>
+                            <div className="touchOutcomeStrip">
+                              {round.samples.map((sample) => {
+                                const firstPlan = sample.sizePlans[0];
+                                return (
+                                  <span key={`${round.slug}-${sample.checkpointSeconds}`} className={`touchOutcomePill ${sample.status === 'sampled' ? 'paired' : sample.status === 'insufficient_depth' ? 'single' : 'none'}`} title={`YES mid ${sample.yesMidpoint ?? '-'} / NO mid ${sample.noMidpoint ?? '-'}`}>
+                                    <em>{sample.checkpointSeconds}s</em>
+                                    <Badge tone={sample.status === 'sampled' ? 'good' : sample.status === 'insufficient_depth' ? 'warn' : 'neutral'}>
+                                      {sample.selectedSide || 'none'} {firstPlan?.vwap == null ? '' : `@ ${firstPlan.vwap.toFixed(3)}`}
+                                    </Badge>
+                                  </span>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="opsEmptyState">Tail sample strips will appear once the recorder observes active markets.</div>
+                    )}
+                  </section>
+                  )}
+                </>
+              )}
+            </section>
+            )}
           </div>
         )}
 

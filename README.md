@@ -64,6 +64,21 @@ research files under `data-lab/pm-5m-touch/`. The dashboard Simulation tab reads
 Docker Compose starts the recorder as a separate `pm5m-touch-recorder` service
 and shares `./data-lab` with the API container.
 
+Run the independent tail-entry recorder when you want to evaluate buying the
+higher-probability side near round end using live orderbook VWAP:
+
+```bash
+npm run research:pm5m-tail -- --assets btc --checkpoints 60,45,30,20,15,10,5 --sizes 5,10,25
+```
+
+This recorder is separate from the touch-fill simulator. It samples YES/NO
+orderbooks at configured seconds-to-end checkpoints, selects the stronger side
+by midpoint, computes ask-book VWAP for each target size, waits for final Gamma
+resolution, and writes summary data under `data-lab/pm-5m-tail/`. The dashboard
+Tail Entry view reads `data-lab/pm-5m-tail/summary.json`; set
+`PM5M_TAIL_SUMMARY_PATH` to override the path. Production Docker Compose starts
+it as a separate `pm5m-tail-recorder` service.
+
 ## Runtime Model
 
 The worker runs every `BOT_TICK_MS` and produces a multi-profile `DashboardState`:

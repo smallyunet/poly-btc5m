@@ -65,6 +65,27 @@ export function createServer(appConfig: AppConfig, store: InMemoryStore, manualT
       });
     }
   });
+  app.get('/api/research/pm5m-tail/summary', (_req, res) => {
+    const summaryPath = path.resolve(process.cwd(), process.env.PM5M_TAIL_SUMMARY_PATH || 'data-lab/pm-5m-tail/summary.json');
+    try {
+      if (!fs.existsSync(summaryPath)) {
+        return res.json({
+          ok: false,
+          status: 'unavailable',
+          message: 'PM 5m tail-entry simulator summary not found. Start npm run research:pm5m-tail to generate data.',
+          summaryPath,
+        });
+      }
+      return res.json(JSON.parse(fs.readFileSync(summaryPath, 'utf8')));
+    } catch (error) {
+      return res.status(500).json({
+        ok: false,
+        status: 'error',
+        message: error instanceof Error ? error.message : String(error),
+        summaryPath,
+      });
+    }
+  });
 
   app.post('/api/tick', async (_req, res, next) => {
     try {

@@ -48,6 +48,31 @@ services:
     volumes:
       - ./data-lab:/app/data-lab
 
+  pm5m-tail-recorder:
+    build:
+      context: .
+      target: api
+      args:
+        APP_VERSION: ${APP_VERSION:-0.1.0}
+        GIT_SHA: ${GIT_SHA:-unknown}
+        BUILD_TIME: ${BUILD_TIME:-unknown}
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+    command:
+      - npm
+      - run
+      - research:pm5m-tail
+      - --
+      - --assets
+      - btc
+      - --checkpoints
+      - "60,45,30,20,15,10,5"
+      - --sizes
+      - "5,10,25"
+    volumes:
+      - ./data-lab:/app/data-lab
+
   caddy:
     image: caddy:2.10-alpine
     restart: unless-stopped
