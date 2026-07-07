@@ -695,6 +695,147 @@
   overflow-wrap: anywhere;
 }
 
+.tailEntrySummary {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  margin: 2px 0 14px;
+  padding: 14px;
+  border: 1px solid var(--border-color);
+  border-left: 4px solid var(--color-neutral);
+  border-radius: 8px;
+  background: rgba(248, 250, 252, 0.86);
+}
+
+.tailEntrySummary.good {
+  border-left-color: var(--color-success);
+  background: rgba(240, 253, 244, 0.72);
+}
+
+.tailEntrySummary.warn {
+  border-left-color: var(--color-warning);
+  background: rgba(255, 251, 235, 0.72);
+}
+
+.tailEntrySummary.bad {
+  border-left-color: var(--color-danger);
+  background: rgba(255, 241, 242, 0.72);
+}
+
+.tailEntrySummary > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.tailEntrySummaryKicker,
+.tailEntryOrderHeader span {
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.tailEntrySummary strong {
+  color: var(--text-primary);
+  font-size: 20px;
+  line-height: 1.05;
+}
+
+.tailEntrySummary p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.tailEntryOrderBlock {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.tailEntryOrderHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.tailEntryOrderHeader strong {
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.tailEntryOrders {
+  display: grid;
+  gap: 8px;
+}
+
+.tailEntryOrderRow {
+  display: grid;
+  grid-template-columns: minmax(130px, 0.8fr) minmax(120px, 0.8fr) minmax(180px, 1fr) minmax(160px, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.tailEntryOrderRow div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.tailEntryOrderRow strong,
+.tailEntryOrderRow span,
+.tailEntryOrderRow em {
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.tailEntryOrderRow strong {
+  color: var(--text-primary);
+}
+
+.tailEntryOrderRow span,
+.tailEntryOrderRow em {
+  color: var(--text-secondary);
+  font-style: normal;
+}
+
+.tailEntryNoOrder {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px dashed rgba(245, 158, 11, 0.36);
+  border-radius: 7px;
+  background: rgba(255, 251, 235, 0.58);
+}
+
+.tailEntryNoOrder strong {
+  color: #9a3412;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.tailEntryNoOrder span {
+  color: var(--text-secondary);
+  font-size: 12px;
+  text-align: right;
+}
+
 .opsPositionGrid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

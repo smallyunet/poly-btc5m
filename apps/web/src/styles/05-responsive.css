@@ -72,6 +72,10 @@
   .positionCard {
     grid-template-columns: minmax(180px, 1.5fr) repeat(3, minmax(110px, 1fr));
   }
+
+  .tailEntryOrderRow {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 768px) {
@@ -487,5 +491,18 @@
   .consoleWindow {
     min-height: 360px;
   }
-}
 
+  .tailEntrySummary,
+  .tailEntryNoOrder {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .tailEntryNoOrder span {
+    text-align: left;
+  }
+
+  .tailEntryOrderRow {
+    grid-template-columns: 1fr;
+  }
+}

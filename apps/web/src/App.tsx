@@ -426,7 +426,11 @@ export function App() {
   const tailMidpointGapCondition = tailCondition('Midpoint gap');
   const tailRoundOrderLimitCondition = tailCondition('Round order limit');
   const currentRoundOrders = viewState.orders.filter((order) => order.roundId === snapshot.round.id);
-  const currentRoundTailOrders = currentRoundOrders.filter((order) => order.strategy === 'UPDOWN_TAIL_ENTRY');
+  const tailEntryOrders = viewState.orders
+    .filter((order) => order.strategy === 'UPDOWN_TAIL_ENTRY')
+    .slice()
+    .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime());
+  const currentRoundTailOrders = tailEntryOrders.filter((order) => order.roundId === snapshot.round.id);
   const currentRoundOpenOrders = currentRoundOrders.filter((order) => (
     order.status === 'posted'
     || order.status === 'partially_filled'
@@ -763,7 +767,9 @@ export function App() {
                 vwapCapCondition={tailVwapCapCondition}
                 midpointGapCondition={tailMidpointGapCondition}
                 roundOrderLimitCondition={tailRoundOrderLimitCondition}
-                currentRoundTailOrderCount={currentRoundTailOrders.length}
+                currentRoundTailOrders={currentRoundTailOrders}
+                recentTailOrders={tailEntryOrders}
+                secondsToStart={secondsToStart}
               />
 
               <div className="panel opsPanel">
