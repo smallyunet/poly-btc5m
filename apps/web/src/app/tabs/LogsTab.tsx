@@ -48,7 +48,13 @@ export function LogsTab({
 }: Props) {
   return (
     <div className="panel">
-      <h2>Runtime Logs & System Output</h2>
+      <div className="sectionHeader">
+        <div>
+          <span className="sectionKicker">{hideRoutineLogs ? 'Signal view' : 'Raw stream'}</span>
+          <h2>Runtime Logs & System Output</h2>
+        </div>
+        <span className="panelSubTitle">{filteredLogs.length} of {allLogCount} rows</span>
+      </div>
       <div className="logsViewContainer">
         <div className="logsControlBar">
           <div className="searchWrapper">

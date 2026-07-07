@@ -1,6 +1,6 @@
 const apiKey = import.meta.env.VITE_DASHBOARD_INTERNAL_API_KEY || '';
 
-export const DASHBOARD_REFRESH_MS = 5_000;
+export const DASHBOARD_REFRESH_MS = 1_000;
 
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {

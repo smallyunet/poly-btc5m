@@ -357,6 +357,7 @@ export type StrategyCheck = {
   asset: MarketAsset;
   interval: MarketInterval;
   strategy: StrategyId;
+  roundId?: string;
   title: string;
   status: 'eligible' | 'blocked' | 'not-applicable';
   summary: string;

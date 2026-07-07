@@ -71,6 +71,8 @@ export type AppConfig = {
   pm5mTailEntryMinFillRate: number;
   pm5mTailEntryCheckpoints: number[];
   pm5mTailEntrySize: number;
+  pm5mTailEntryMinVwap: number;
+  pm5mTailEntryMinBandRows: number;
   pm5mTailEntryMaxVwap: number;
   pm5mTailEntryMaxSpread: number;
   pm5mTailEntryMaxOverround: number;
@@ -198,6 +200,8 @@ export function loadConfig(): AppConfig {
     pm5mTailEntryMinFillRate: numberEnv('PM5M_TAIL_ENTRY_MIN_FILL_RATE', 0.45),
     pm5mTailEntryCheckpoints: numberListEnv('PM5M_TAIL_ENTRY_CHECKPOINTS', [60, 45]),
     pm5mTailEntrySize: numberEnv('PM5M_TAIL_ENTRY_SIZE', 5),
+    pm5mTailEntryMinVwap: numberEnv('PM5M_TAIL_ENTRY_MIN_VWAP', 0.55),
+    pm5mTailEntryMinBandRows: parsePositiveInteger(process.env.PM5M_TAIL_ENTRY_MIN_BAND_ROWS, 2),
     pm5mTailEntryMaxVwap: numberEnv('PM5M_TAIL_ENTRY_MAX_VWAP', 0.85),
     pm5mTailEntryMaxSpread: numberEnv('PM5M_TAIL_ENTRY_MAX_SPREAD', 0.02),
     pm5mTailEntryMaxOverround: numberEnv('PM5M_TAIL_ENTRY_MAX_OVERROUND', 1.03),

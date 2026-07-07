@@ -77,6 +77,57 @@ export function DecisionMetric({
   );
 }
 
+export function PageIntro({
+  kicker,
+  title,
+  summary,
+  meta,
+  tone = 'neutral',
+  children,
+}: {
+  kicker: string;
+  title: string;
+  summary: string;
+  meta?: React.ReactNode;
+  tone?: Tone;
+  children?: React.ReactNode;
+}) {
+  return (
+    <section className={`pageIntro ${tone}`} aria-label={title}>
+      <div className="pageIntroMain">
+        <span className="sectionKicker">{kicker}</span>
+        <h2>{title}</h2>
+        <p>{summary}</p>
+      </div>
+      {meta && <div className="pageIntroMeta">{meta}</div>}
+      {children && <div className="pageIntroMetrics">{children}</div>}
+    </section>
+  );
+}
+
+export function ViewHeader({
+  kicker,
+  title,
+  summary,
+  meta,
+}: {
+  kicker: string;
+  title: string;
+  summary: string;
+  meta?: React.ReactNode;
+}) {
+  return (
+    <div className="viewHeader">
+      <div>
+        <span className="sectionKicker">{kicker}</span>
+        <h3>{title}</h3>
+        <p>{summary}</p>
+      </div>
+      {meta && <div className="viewHeaderMeta">{meta}</div>}
+    </div>
+  );
+}
+
 export function DataTable({ headers, children, className = '' }: { headers: string[]; children: React.ReactNode; className?: string }) {
   return (
     <div className="tableWrap">

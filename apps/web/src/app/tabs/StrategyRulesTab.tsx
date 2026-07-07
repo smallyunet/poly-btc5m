@@ -7,7 +7,13 @@ type Props = {
 export function StrategyRulesTab({ rules }: Props) {
   return (
     <div className="panel">
-      <h2>Trading Strategy & Configured Rules</h2>
+      <div className="sectionHeader">
+        <div>
+          <span className="sectionKicker">Executable contract</span>
+          <h2>Trading Strategy & Configured Rules</h2>
+        </div>
+        <span className="panelSubTitle">{rules.length} loaded</span>
+      </div>
       <div className="rulesGrid">
         {rules && rules.length > 0 ? (
           rules.map((rule) => (

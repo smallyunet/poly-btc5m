@@ -41,6 +41,19 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .pageIntro {
+    grid-template-columns: 1fr;
+  }
+
+  .pageIntroMeta {
+    justify-content: flex-start;
+  }
+
+  .pageIntroMetrics,
+  .tailEntryKeyGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .simulationStartState {
     grid-template-columns: 1fr;
   }
@@ -74,6 +87,10 @@
   }
 
   .tailEntryOrderRow {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .tailEntryTechnicalGrid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
@@ -209,6 +226,28 @@
 
   .panelSubTitle {
     line-height: 1.35;
+  }
+
+  .pageIntro {
+    padding: 14px;
+  }
+
+  .pageIntroMain h2 {
+    font-size: 18px;
+  }
+
+  .pageIntroMetrics,
+  .tailEntryKeyGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .viewHeader {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .viewHeaderMeta {
+    justify-content: flex-start;
   }
 
   .terminalCommandPrimary strong {
@@ -503,6 +542,10 @@
   }
 
   .tailEntryOrderRow {
+    grid-template-columns: 1fr;
+  }
+
+  .tailEntryTechnicalGrid {
     grid-template-columns: 1fr;
   }
 }

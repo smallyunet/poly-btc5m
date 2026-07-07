@@ -37,6 +37,16 @@ export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, dat
   });
   diagnostics.push(...discovered.diagnostics);
   const round = captureOpeningStrike(discovered.round, store, data.latestPrice(profile));
+  const tailDiscovered = classicActive && shouldEvaluateCurrentTailEntry(appConfig, profile)
+    ? await discovery.discover({
+      profile,
+      latestPrice: data.latestPrice(profile),
+      persistedStrike: (roundId) => store.getRoundStrike(roundId),
+      target: 'current',
+    })
+    : null;
+  if (tailDiscovered?.diagnostics.length) diagnostics.push(...tailDiscovered.diagnostics.map((item) => `Tail entry current round: ${item}`));
+  const tailRound = tailDiscovered ? captureOpeningStrike(tailDiscovered.round, store, data.latestPrice(profile)) : null;
   const hedgeWatchTokenIds = classicActive && appConfig.singleFillHedgeEnabled
     ? store.hedgeWatchTokenIds(profile.id, activeHedgeWindowSeconds(appConfig), appConfig.singleFillHedgeMinSecondsToEnd)
     : [];
@@ -46,8 +56,10 @@ export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, dat
   const lossExitWatchTokenIds = classicActive && appConfig.singleFillLossExitEnabled
     ? store.profitExitWatchTokenIds(profile.id, appConfig.singleFillLossExitMaxSecondsToEnd, appConfig.singleFillLossExitMinSecondsToEnd)
     : [];
-  data.syncClobRound(round, [...hedgeWatchTokenIds, ...profitExitWatchTokenIds, ...lossExitWatchTokenIds]);
+  const tailTokenIds = tailRound ? [tailRound.yesTokenId, tailRound.noTokenId] : [];
+  data.syncClobRound(round, [...tailTokenIds, ...hedgeWatchTokenIds, ...profitExitWatchTokenIds, ...lossExitWatchTokenIds]);
   const orderbooks = await data.refreshOrderbooks(round);
+  const tailOrderbooks = tailRound ? await data.refreshOrderbooks(tailRound) : [];
   const participation = await participationService.refresh(round);
   diagnostics.push(...participation.diagnostics);
   const features = data.features(round, profile);
@@ -103,8 +115,16 @@ export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, dat
     risk,
     experimentRunStartedAt: classicActive ? undefined : store.getExperimentRunStartedAt(),
   });
-  const tailEntry = classicActive ? evaluateTailEntry(snapshot, appConfig, store) : null;
-  const tailEntryDiagnostics = tailEntry ? await executeTailEntry({ appConfig, adapter, store, snapshot, evaluation: tailEntry }) : [];
+  const tailSnapshot = tailRound ? {
+    ...snapshot,
+    id: `tail-snapshot-${Date.now()}`,
+    round: roundToSnapshot(appConfig, store, tailRound),
+    features: data.features(tailRound, profile),
+    orderbooks: tailOrderbooks,
+  } satisfies StateSnapshot : null;
+  if (tailSnapshot) tailSnapshot.orderbookDepth = buildOrderbookDepthSnapshot(tailSnapshot, entryAppConfig);
+  const tailEntry = classicActive && tailSnapshot ? evaluateTailEntry(tailSnapshot, appConfig, store) : null;
+  const tailEntryDiagnostics = tailEntry && tailSnapshot ? await executeTailEntry({ appConfig, adapter, store, snapshot: tailSnapshot, evaluation: tailEntry }) : [];
   const fillCooldowns = await reconcileFills(appConfig, adapter, store, roundSnapshot, tokenLabels, diagnostics, profile);
   const orderCooldowns = await reconcileTrackedOrders(appConfig, adapter, store, diagnostics, profile);
   const crossProfileRiskDiagnostics = classicActive
@@ -148,6 +168,10 @@ export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, dat
   store.recordSnapshot(finalSnapshot, data.status(profile, [round.yesTokenId, round.noTokenId]));
   store.recordStrategyChecks([...entry.checks, ...(tailEntry ? [tailEntry.check] : []), ...exit.checks, hedgeCheck, profitExitCheck, lossExitCheck].map((check) => withProfile(check, profile)), profile.id);
   return finalSnapshot;
+}
+
+function shouldEvaluateCurrentTailEntry(appConfig: AppConfig, profile: MarketProfile): boolean {
+  return appConfig.pm5mTailEntryEnabled && profile.id === 'btc-5m' && profile.asset === 'btc' && profile.interval === '5m';
 }
 
 function appConfigForProfile(appConfig: AppConfig, profile: MarketProfile): AppConfig {

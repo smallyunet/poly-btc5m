@@ -54,14 +54,132 @@ test('executes live tail entries as FAK orders', async () => {
   assert.equal(postedOptions?.execute, true);
 });
 
-function tailConfig() {
+test('retries tail entry FAK no-match errors before recording the outcome', async () => {
+  const config = tailConfig();
+  config.ownerPrivateKey = '0xabc';
+  config.depositWallet = '0xwallet';
+  const store = new InMemoryStore('live', 2_000, { persistencePath: false });
+  const currentSnapshot = snapshot();
+  const evaluation = evaluateTailEntry(currentSnapshot, config, store);
+  assert.equal(evaluation.ok, true, evaluation.check.reason);
+
+  let attempts = 0;
+  const noMatch = 'no orders found to match with FAK order. FAK orders are partially filled or killed if no match is found.';
+  const adapter = {
+    async getCollateralBalanceAllowance() {
+      return { balance: 100, allowance: 100 };
+    },
+    async getOpenOrders() {
+      return [];
+    },
+    async executeLimitIntent(_intent: TradeIntent, options: { execute: boolean; orderType?: string }) {
+      attempts += 1;
+      assert.equal(options.orderType, 'FAK');
+      if (attempts < 3) {
+        return { ok: false, price: 0.611, size: 5, error: noMatch, raw: { error: noMatch } };
+      }
+      return { ok: true, orderId: 'tail-order-after-retry', price: 0.611, size: 5, raw: { orderID: 'tail-order-after-retry' } };
+    },
+  } as unknown as PolymarketAdapter;
+
+  const diagnostics = await executeTailEntry({ appConfig: config, adapter, store, snapshot: currentSnapshot, evaluation });
+
+  assert.deepEqual(diagnostics, []);
+  assert.equal(attempts, 3);
+  const orders = store.roundOrders(currentSnapshot.profileId, currentSnapshot.round.id, 'UPDOWN_TAIL_ENTRY');
+  assert.equal(orders.length, 1);
+  assert.equal(orders[0]?.status, 'posted');
+  assert.equal(orders[0]?.clobOrderId, 'tail-order-after-retry');
+});
+
+test('selects the best simulator checkpoint while keeping static order size', () => {
+  const config = tailConfig({
+    rows: [
+      { checkpointSeconds: 60, size: 5, rows: 40, fillable: 24, fillRate: 0.6, avgPnlPerShare: 0.08, avgVwap: 0.55 },
+      { checkpointSeconds: 45, size: 5, rows: 40, fillable: 28, fillRate: 0.7, avgPnlPerShare: 0.16, avgVwap: 0.49 },
+      { checkpointSeconds: 45, size: 10, rows: 40, fillable: 30, fillRate: 0.75, avgPnlPerShare: 0.22, avgVwap: 0.48 },
+    ],
+    checkpoints: [60, 45, 30],
+  });
+  const store = new InMemoryStore('monitor', 2_000, { persistencePath: false });
+  const currentSnapshot = snapshot({ secondsToEnd: 44 });
+  const evaluation = evaluateTailEntry(currentSnapshot, config, store);
+
+  assert.equal(evaluation.ok, true, evaluation.check.reason);
+  if (!evaluation.ok) return;
+  assert.equal(evaluation.check.conditions.find((condition) => condition.label === 'Summary selected row')?.actual, '45s / 5 shares / EV 0.1600');
+  assert.equal(evaluation.intent.shares, 5);
+  assert.equal(evaluation.check.reason, 'Tail entry eligible: buy YES 5.00 @ 0.610 VWAP.');
+});
+
+test('uses the nearest larger simulator size row while keeping configured order size', () => {
+  const config = tailConfig({
+    rows: [
+      { checkpointSeconds: 45, size: 5, rows: 40, fillable: 28, fillRate: 0.7, avgPnlPerShare: 0.16, avgVwap: 0.49 },
+      { checkpointSeconds: 45, size: 10, rows: 40, fillable: 30, fillRate: 0.75, avgPnlPerShare: 0.22, avgVwap: 0.48 },
+    ],
+    checkpoints: [45],
+  });
+  config.pm5mTailEntrySize = 2;
+  const store = new InMemoryStore('monitor', 2_000, { persistencePath: false });
+  const currentSnapshot = snapshot({ secondsToEnd: 44 });
+  const evaluation = evaluateTailEntry(currentSnapshot, config, store);
+
+  assert.equal(evaluation.ok, true, evaluation.check.reason);
+  if (!evaluation.ok) return;
+  assert.equal(evaluation.check.conditions.find((condition) => condition.label === 'Summary selected row')?.actual, '45s / 5 shares / EV 0.1600');
+  assert.equal(evaluation.intent.shares, 2);
+  assert.equal(evaluation.intent.limitPrice, 0.611);
+});
+
+test('blocks tail entry when live VWAP is below the simulator strength floor', () => {
+  const config = tailConfig({
+    rows: [
+      { checkpointSeconds: 60, size: 5, rows: 40, fillable: 28, fillRate: 0.7, avgPnlPerShare: 0.1, avgVwap: 0.55 },
+    ],
+    askBandRows: [
+      { checkpointSeconds: 60, size: 5, askBand: '65-75c', rows: 4, fillable: 4, fillRate: 1, avgPnlPerShare: 0.12, avgVwap: 0.7 },
+    ],
+    checkpoints: [60],
+  });
+  const store = new InMemoryStore('monitor', 2_000, { persistencePath: false });
+  const evaluation = evaluateTailEntry(snapshot({ yesAsk: 0.61 }), config, store);
+
+  assert.equal(evaluation.ok, false);
+  assert.equal(evaluation.check.blockers.includes('TAIL_VWAP_TOO_LOW'), true, evaluation.check.reason);
+  assert.equal(evaluation.check.conditions.find((condition) => condition.label === 'VWAP floor')?.actual, '0.610 / min 0.650');
+});
+
+function tailConfig(options: {
+  rows?: Array<{
+    checkpointSeconds: number;
+    size: number;
+    askBand?: string;
+    rows: number;
+    fillable: number;
+    fillRate: number;
+    avgPnlPerShare: number;
+    avgVwap: number;
+  }>;
+  askBandRows?: Array<{
+    checkpointSeconds: number;
+    size: number;
+    askBand: string;
+    rows: number;
+    fillable: number;
+    fillRate: number;
+    avgPnlPerShare: number;
+    avgVwap: number;
+  }>;
+  checkpoints?: number[];
+} = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pm5m-tail-test-'));
   const summaryPath = path.join(dir, 'summary.json');
   fs.writeFileSync(summaryPath, JSON.stringify({
     ok: true,
     generatedAt: new Date().toISOString(),
     completed: {
-      byCheckpointSize: [{
+      byCheckpointSize: options.rows || [{
         checkpointSeconds: 60,
         size: 5,
         rows: 25,
@@ -69,6 +187,16 @@ function tailConfig() {
         fillRate: 0.52,
         avgPnlPerShare: 0.13,
         avgVwap: 0.66,
+      }],
+      byAskBand: options.askBandRows || [{
+        checkpointSeconds: 60,
+        size: 5,
+        askBand: '55-65c',
+        rows: 4,
+        fillable: 4,
+        fillRate: 1,
+        avgPnlPerShare: 0.13,
+        avgVwap: 0.61,
       }],
     },
   }));
@@ -79,8 +207,10 @@ function tailConfig() {
   config.pm5mTailEntryMinRounds = 20;
   config.pm5mTailEntryMinEvPerShare = 0.03;
   config.pm5mTailEntryMinFillRate = 0.45;
-  config.pm5mTailEntryCheckpoints = [60];
+  config.pm5mTailEntryCheckpoints = options.checkpoints || [60];
   config.pm5mTailEntrySize = 5;
+  config.pm5mTailEntryMinVwap = 0.55;
+  config.pm5mTailEntryMinBandRows = 2;
   config.pm5mTailEntryMaxVwap = 0.85;
   config.pm5mTailEntryMaxSpread = 0.02;
   config.pm5mTailEntryMaxOverround = 1.03;
@@ -92,10 +222,11 @@ function tailConfig() {
   return config;
 }
 
-function snapshot(): StateSnapshot {
+function snapshot(options: { secondsToEnd?: number; yesAsk?: number } = {}): StateSnapshot {
   const now = Date.now();
-  const startAt = new Date(now - 240_000).toISOString();
-  const endAt = new Date(now + 59_000).toISOString();
+  const secondsToEnd = options.secondsToEnd ?? 59;
+  const startAt = new Date(now - (300 - secondsToEnd) * 1000).toISOString();
+  const endAt = new Date(now + secondsToEnd * 1000).toISOString();
   return {
     id: 'snapshot-tail',
     profileId: 'btc-5m',
@@ -109,8 +240,8 @@ function snapshot(): StateSnapshot {
       title: 'BTC 5m test',
       startAt,
       endAt,
-      secondsToStart: -240,
-      secondsToEnd: 59,
+      secondsToStart: -(300 - secondsToEnd),
+      secondsToEnd,
       strike: 100000,
       strikeStatus: 'locked',
       yesTokenId: 'yes-token',
@@ -149,7 +280,7 @@ function snapshot(): StateSnapshot {
     },
     regime: 'UNKNOWN',
     orderbooks: [
-      quote('yes-token', 0.59, 0.61, [{ price: 0.61, size: 5 }]),
+      quote('yes-token', 0.59, options.yesAsk ?? 0.61, [{ price: options.yesAsk ?? 0.61, size: 5 }]),
       quote('no-token', 0.39, 0.41, [{ price: 0.41, size: 5 }]),
     ],
     positions: [],

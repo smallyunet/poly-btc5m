@@ -9,6 +9,8 @@ import type { InMemoryStore } from './store';
 const TAIL_ENTRY_STRATEGY: StrategyId = 'UPDOWN_TAIL_ENTRY';
 const MIN_MARKETABLE_BUY_NOTIONAL_USD = 1;
 const FAILED_ORDER_COOLDOWN_MS = 5 * 60_000;
+const FAK_NO_MATCH_RETRY_LIMIT = 2;
+const FAK_NO_MATCH_RETRY_DELAY_MS = 750;
 const EPSILON = 0.000001;
 
 export type TailEntryEvaluation =
@@ -18,9 +20,11 @@ export type TailEntryEvaluation =
 type TailSummaryRow = {
   checkpointSeconds?: number;
   size?: number;
+  askBand?: string;
   rows?: number;
   fillable?: number;
   fillRate?: number | null;
+  winRate?: number | null;
   avgPnlPerShare?: number | null;
   avgVwap?: number | null;
 };
@@ -30,6 +34,7 @@ type TailSummary = {
   generatedAt?: string;
   completed?: {
     byCheckpointSize?: TailSummaryRow[];
+    byAskBand?: TailSummaryRow[];
   };
 };
 
@@ -42,9 +47,11 @@ export function evaluateTailEntry(snapshot: StateSnapshot, appConfig: AppConfig,
   const blockers: string[] = [];
   const conditions: StrategyCondition[] = [];
   const enabled = appConfig.pm5mTailEntryEnabled && snapshot.profileId === 'btc-5m' && snapshot.interval === '5m' && snapshot.asset === 'btc';
-  const checkpoint = matchingCheckpoint(snapshot.round.secondsToEnd, appConfig);
   const summary = readTailSummary(appConfig);
-  const row = checkpoint == null || !summary.value ? null : summaryRow(summary.value, checkpoint, appConfig.pm5mTailEntrySize);
+  const selectedSummaryRow = summary.value ? selectSummaryRow(summary.value, appConfig) : null;
+  const checkpoint = selectedSummaryRow?.checkpointSeconds == null ? null : matchingCheckpoint(snapshot.round.secondsToEnd, selectedSummaryRow.checkpointSeconds, appConfig);
+  const row = selectedSummaryRow;
+  const liveVwapFloor = selectedSummaryRow && summary.value ? summaryMinVwapFloor(summary.value, selectedSummaryRow, appConfig) : appConfig.pm5mTailEntryMinVwap;
   const yes = quoteSnapshot(snapshot, snapshot.round.yesTokenId, appConfig);
   const no = quoteSnapshot(snapshot, snapshot.round.noTokenId, appConfig);
   const selectedLabel = selectStrongSide(yes, no);
@@ -58,16 +65,16 @@ export function evaluateTailEntry(snapshot: StateSnapshot, appConfig: AppConfig,
   if (!enabled) blockers.push('TAIL_ENTRY_DISABLED');
   if (snapshot.round.secondsToStart > 0) blockers.push('ROUND_NOT_STARTED');
   if (snapshot.round.secondsToEnd <= snapshot.round.secondsToStart) blockers.push('INVALID_ROUND_TIMING');
+  if (summary.ok && !selectedSummaryRow) blockers.push('TAIL_SUMMARY_ROW_MISSING');
   if (checkpoint == null) blockers.push('NOT_IN_TAIL_CHECKPOINT_WINDOW');
   if (!summary.ok) blockers.push(summary.reason);
-  if (checkpoint != null && summary.ok && !row) blockers.push('TAIL_SUMMARY_ROW_MISSING');
   if (row && (row.rows ?? 0) < appConfig.pm5mTailEntryMinRounds) blockers.push('TAIL_SUMMARY_SAMPLE_TOO_SMALL');
   if (row && (row.avgPnlPerShare ?? Number.NEGATIVE_INFINITY) < appConfig.pm5mTailEntryMinEvPerShare) blockers.push('TAIL_SUMMARY_EV_TOO_LOW');
   if (row && (row.fillRate ?? 0) < appConfig.pm5mTailEntryMinFillRate) blockers.push('TAIL_SUMMARY_FILL_RATE_TOO_LOW');
   if (!yes || !no) blockers.push('ORDERBOOK_MISSING');
   if (selectedLabel == null || !selected) blockers.push('TAIL_SIDE_NOT_SELECTABLE');
   if (plan && !plan.fillable) blockers.push('TAIL_DEPTH_INSUFFICIENT');
-  if (plan?.vwap != null && plan.vwap > appConfig.pm5mTailEntryMaxVwap + EPSILON) blockers.push('TAIL_VWAP_TOO_HIGH');
+  if (plan?.vwap != null && plan.vwap + EPSILON < liveVwapFloor) blockers.push('TAIL_VWAP_TOO_LOW');
   if (selected?.quote.spread != null && selected.quote.spread > appConfig.pm5mTailEntryMaxSpread + EPSILON) blockers.push('TAIL_SPREAD_TOO_WIDE');
   if (overroundAsk != null && overroundAsk > appConfig.pm5mTailEntryMaxOverround + EPSILON) blockers.push('TAIL_OVERROUND_TOO_HIGH');
   if ((midpointGap ?? 0) + EPSILON < appConfig.pm5mTailEntryMinMidpointGap) blockers.push('TAIL_MIDPOINT_GAP_TOO_SMALL');
@@ -76,17 +83,19 @@ export function evaluateTailEntry(snapshot: StateSnapshot, appConfig: AppConfig,
 
   conditions.push(
     condition('Tail entry enabled', enabled, enabled ? 'btc-5m live path enabled' : 'disabled or non-btc-5m profile'),
-    condition('Tail checkpoint', checkpoint != null, checkpoint == null ? `${snapshot.round.secondsToEnd.toFixed(1)}s to end` : `${checkpoint}s checkpoint / ${snapshot.round.secondsToEnd.toFixed(1)}s to end`),
+    condition('Tail checkpoint', checkpoint != null, selectedSummaryRow?.checkpointSeconds == null ? 'no summary-selected checkpoint' : checkpoint == null ? `${selectedSummaryRow.checkpointSeconds}s selected / ${snapshot.round.secondsToEnd.toFixed(1)}s to end` : `${checkpoint}s checkpoint / ${snapshot.round.secondsToEnd.toFixed(1)}s to end`),
     condition('Summary freshness', summary.ok, summary.label),
+    condition('Summary selected row', Boolean(selectedSummaryRow), selectedSummaryRow ? `${selectedSummaryRow.checkpointSeconds}s / ${selectedSummaryRow.size} shares / EV ${formatNullable(selectedSummaryRow.avgPnlPerShare)}` : 'missing'),
     condition('Summary sample size', Boolean(row && (row.rows ?? 0) >= appConfig.pm5mTailEntryMinRounds), row ? `${row.rows ?? 0} / min ${appConfig.pm5mTailEntryMinRounds}` : 'missing'),
     condition('Summary EV/share', Boolean(row && (row.avgPnlPerShare ?? Number.NEGATIVE_INFINITY) >= appConfig.pm5mTailEntryMinEvPerShare), row?.avgPnlPerShare == null ? 'missing' : `${row.avgPnlPerShare.toFixed(4)} / min ${appConfig.pm5mTailEntryMinEvPerShare.toFixed(4)}`),
     condition('Summary fill rate', Boolean(row && (row.fillRate ?? 0) >= appConfig.pm5mTailEntryMinFillRate), row?.fillRate == null ? 'missing' : `${formatPct(row.fillRate)} / min ${formatPct(appConfig.pm5mTailEntryMinFillRate)}`),
+    condition('Summary min VWAP', liveVwapFloor != null, `${liveVwapFloor.toFixed(3)} min strength floor`),
     condition('YES quote fresh', Boolean(yes), yes ? `${yes.ageMs}ms old` : 'missing/stale'),
     condition('NO quote fresh', Boolean(no), no ? `${no.ageMs}ms old` : 'missing/stale'),
     condition('Selected side', selectedLabel != null, selectedLabel ?? 'none'),
     condition('Midpoint gap', (midpointGap ?? 0) + EPSILON >= appConfig.pm5mTailEntryMinMidpointGap, midpointGap == null ? 'missing' : `${midpointGap.toFixed(3)} / min ${appConfig.pm5mTailEntryMinMidpointGap.toFixed(3)}`),
     condition('VWAP depth', Boolean(plan?.fillable), plan?.vwap == null ? `${plan?.filledShares ?? 0}/${appConfig.pm5mTailEntrySize}` : `${plan.filledShares}/${appConfig.pm5mTailEntrySize} @ ${plan.vwap.toFixed(3)}`),
-    condition('VWAP cap', plan?.vwap != null && plan.vwap <= appConfig.pm5mTailEntryMaxVwap + EPSILON, plan?.vwap == null ? 'missing' : `${plan.vwap.toFixed(3)} / max ${appConfig.pm5mTailEntryMaxVwap.toFixed(3)}`),
+    condition('VWAP floor', plan?.vwap != null && plan.vwap + EPSILON >= liveVwapFloor, plan?.vwap == null ? 'missing' : `${plan.vwap.toFixed(3)} / min ${liveVwapFloor.toFixed(3)}`),
     condition('Spread cap', selected?.quote.spread != null && selected.quote.spread <= appConfig.pm5mTailEntryMaxSpread + EPSILON, selected?.quote.spread == null ? 'missing' : `${selected.quote.spread.toFixed(3)} / max ${appConfig.pm5mTailEntryMaxSpread.toFixed(3)}`),
     condition('Overround cap', overroundAsk != null && overroundAsk <= appConfig.pm5mTailEntryMaxOverround + EPSILON, overroundAsk == null ? 'missing' : `${overroundAsk.toFixed(3)} / max ${appConfig.pm5mTailEntryMaxOverround.toFixed(3)}`),
     condition('Round order limit', existingOrders.length < appConfig.pm5mTailEntryMaxOrdersPerRound, `${existingOrders.length} / max ${appConfig.pm5mTailEntryMaxOrdersPerRound}`),
@@ -97,6 +106,7 @@ export function evaluateTailEntry(snapshot: StateSnapshot, appConfig: AppConfig,
     asset: snapshot.asset,
     interval: snapshot.interval,
     strategy: TAIL_ENTRY_STRATEGY,
+    roundId: snapshot.round.id,
     title: '5m Tail Entry',
     status: blockers.length ? 'blocked' : 'eligible',
     summary: 'Buy the stronger BTC 5m side near expiry when the tail-entry simulator and current orderbook both pass configured gates.',
@@ -124,7 +134,7 @@ export function evaluateTailEntry(snapshot: StateSnapshot, appConfig: AppConfig,
     orderType: 'LIMIT',
     limitPrice: cappedPrice(plan.vwap + appConfig.pm5mTailEntryPriceOffset),
     shares: appConfig.pm5mTailEntrySize,
-    reason: `BTC 5m tail entry at ${checkpoint}s: selected ${selectedLabel}, simulator EV ${(row?.avgPnlPerShare ?? 0).toFixed(4)}/share, live VWAP ${plan.vwap.toFixed(3)}.`,
+    reason: `BTC 5m tail entry at ${checkpoint}s: selected ${selectedLabel}, simulator EV ${(row?.avgPnlPerShare ?? 0).toFixed(4)}/share, live VWAP ${plan.vwap.toFixed(3)} >= min ${liveVwapFloor.toFixed(3)}.`,
     status: 'generated',
     ttlSeconds: Math.max(1, Math.ceil(snapshot.round.secondsToEnd)),
     createdAt: snapshot.capturedAt,
@@ -159,23 +169,23 @@ export async function executeTailEntry(params: {
   }
 
   try {
-    const posted = await params.adapter.executeLimitIntent(intent, { execute: true, orderType: 'FAK' });
+    const { posted, intent: postedIntent, attempts, retryReasons } = await postTailEntryWithFakNoMatchRetry(params, intent);
     params.store.recordOrder({
-      ...localOrder(params.snapshot, intent, executionKey, posted.ok ? 'posted' : 'failed'),
+      ...localOrder(params.snapshot, postedIntent, executionKey, posted.ok ? 'posted' : 'failed'),
       clobOrderId: posted.orderId,
       price: posted.price,
       size: posted.size,
       error: posted.error,
-      rawResponse: posted.raw,
+      rawResponse: retryReasons.length ? { response: posted.raw, retryReasons, attempts } : posted.raw,
     });
-    params.store.updateIntent(intent.id, { status: posted.ok ? 'executed' : 'failed', rejectionReason: posted.ok ? undefined : posted.error || 'CLOB_POST_FAILED' });
+    params.store.updateIntent(postedIntent.id, { status: posted.ok ? 'executed' : 'failed', rejectionReason: posted.ok ? undefined : posted.error || 'CLOB_POST_FAILED' });
     params.store.recordRuntimeLog({
       level: posted.ok ? 'warn' : 'error',
       source: 'execution',
-      message: posted.ok ? `Tail entry posted for ${intent.label} at ${posted.price.toFixed(3)}.` : `Tail entry failed for ${intent.label}: ${posted.error || 'CLOB_POST_FAILED'}.`,
-      details: { intentId: intent.id, roundId: intent.roundId, tokenId: intent.tokenId, price: posted.price, size: posted.size },
+      message: posted.ok ? `Tail entry posted for ${postedIntent.label} at ${posted.price.toFixed(3)}${attempts > 1 ? ` after ${attempts} FAK attempts` : ''}.` : `Tail entry failed for ${postedIntent.label}: ${posted.error || 'CLOB_POST_FAILED'}.`,
+      details: { intentId: postedIntent.id, roundId: postedIntent.roundId, tokenId: postedIntent.tokenId, price: posted.price, size: posted.size, attempts, retryReasons },
     });
-    return posted.ok ? [] : [`Tail entry failed for ${intent.label}: ${posted.error || 'CLOB_POST_FAILED'}.`];
+    return posted.ok ? [] : [`Tail entry failed for ${postedIntent.label}: ${posted.error || 'CLOB_POST_FAILED'}.`];
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     params.store.recordOrder(failedOrder(params.snapshot, intent, executionKey, message));
@@ -193,7 +203,7 @@ async function tailExecutionGate(params: { appConfig: AppConfig; adapter: Polyma
   if (!params.appConfig.ownerPrivateKey?.trim() && params.store.getRuntime().executionMode === 'live') return reject('OWNER_PRIVATE_KEY_MISSING', true);
   if (!params.appConfig.depositWallet?.trim() && params.store.getRuntime().executionMode === 'live') return reject('POLYMARKET_DEPOSIT_WALLET_MISSING', true);
   if (params.store.hasNonFailedOrder(executionKey)) return reject('LOCAL_TAIL_ORDER_EXISTS');
-  if (params.store.hasRecentFailedOrder(executionKey, FAILED_ORDER_COOLDOWN_MS)) return reject('LOCAL_RECENT_FAILED_ORDER');
+  if (hasRecentBlockingFailedTailOrder(params.store, intent, executionKey)) return reject('LOCAL_RECENT_FAILED_ORDER');
   const notional = roundDownShares(intent.shares) * intent.limitPrice;
   if (notional < MIN_MARKETABLE_BUY_NOTIONAL_USD) return reject('ORDER_NOTIONAL_BELOW_MIN');
 
@@ -213,9 +223,59 @@ async function tailExecutionGate(params: { appConfig: AppConfig; adapter: Polyma
   }
 }
 
-function matchingCheckpoint(secondsToEnd: number, appConfig: AppConfig): number | null {
+async function postTailEntryWithFakNoMatchRetry(
+  params: {
+    appConfig: AppConfig;
+    adapter: PolymarketAdapter;
+    store: InMemoryStore;
+    snapshot: StateSnapshot;
+    evaluation: TailEntryEvaluation;
+  },
+  initialIntent: TradeIntent,
+): Promise<{ posted: Awaited<ReturnType<PolymarketAdapter['executeLimitIntent']>>; intent: TradeIntent; attempts: number; retryReasons: string[] }> {
+  let intent = initialIntent;
+  const retryReasons: string[] = [];
+  for (let attempt = 1; attempt <= FAK_NO_MATCH_RETRY_LIMIT + 1; attempt += 1) {
+    const posted = await params.adapter.executeLimitIntent(intent, { execute: true, orderType: 'FAK' });
+    if (posted.ok || !isFakNoMatchError(posted.error) || attempt > FAK_NO_MATCH_RETRY_LIMIT) {
+      return { posted, intent, attempts: attempt, retryReasons };
+    }
+
+    retryReasons.push(posted.error || 'FAK_NO_MATCH');
+    await delay(FAK_NO_MATCH_RETRY_DELAY_MS);
+    const nextEvaluation = evaluateTailEntry(params.snapshot, params.appConfig, params.store);
+    if (!nextEvaluation.ok) {
+      return {
+        posted: {
+          ok: false,
+          price: intent.limitPrice,
+          size: roundDownShares(intent.shares),
+          error: `FAK_RETRY_REPLAN_BLOCKED: ${nextEvaluation.check.reason}`,
+          raw: { retryReasons },
+        },
+        intent,
+        attempts: attempt,
+        retryReasons,
+      };
+    }
+    intent = { ...nextEvaluation.intent, id: initialIntent.id };
+  }
+  throw new Error('unreachable');
+}
+
+function hasRecentBlockingFailedTailOrder(store: InMemoryStore, intent: TradeIntent, executionKey: string): boolean {
+  const cutoffMs = Date.now() - FAILED_ORDER_COOLDOWN_MS;
+  return store.roundOrders(intent.profileId, intent.roundId, TAIL_ENTRY_STRATEGY).some((order) => {
+    if (order.executionKey !== executionKey || order.status !== 'failed') return false;
+    if (isFakNoMatchError(order.error)) return false;
+    const createdMs = new Date(order.createdAt).getTime();
+    return Number.isFinite(createdMs) && createdMs >= cutoffMs;
+  });
+}
+
+function matchingCheckpoint(secondsToEnd: number, checkpoint: number, appConfig: AppConfig): number | null {
   const windowSeconds = Math.max(2, Math.min(5, appConfig.pm5mTailEntryQuoteMaxAgeMs / 1000 + 1));
-  return appConfig.pm5mTailEntryCheckpoints.find((checkpoint) => secondsToEnd <= checkpoint && secondsToEnd > checkpoint - windowSeconds) ?? null;
+  return secondsToEnd <= checkpoint && secondsToEnd > checkpoint - windowSeconds ? checkpoint : null;
 }
 
 function readTailSummary(appConfig: AppConfig): { ok: true; value: TailSummary; label: string } | { ok: false; reason: string; label: string; value?: undefined } {
@@ -234,8 +294,50 @@ function readTailSummary(appConfig: AppConfig): { ok: true; value: TailSummary; 
   }
 }
 
-function summaryRow(summary: TailSummary, checkpointSeconds: number, size: number): TailSummaryRow | null {
-  return summary.completed?.byCheckpointSize?.find((row) => row.checkpointSeconds === checkpointSeconds && row.size === size) ?? null;
+function selectSummaryRow(summary: TailSummary, appConfig: AppConfig): TailSummaryRow | null {
+  const allowedCheckpoints = new Set(appConfig.pm5mTailEntryCheckpoints);
+  const rows = summary.completed?.byCheckpointSize || [];
+  const referenceSize = summaryReferenceSize(rows, appConfig.pm5mTailEntrySize);
+  if (referenceSize == null) return null;
+  return rows
+    .filter((row) => row.size === referenceSize)
+    .filter((row) => !allowedCheckpoints.size || (row.checkpointSeconds != null && allowedCheckpoints.has(row.checkpointSeconds)))
+    .filter((row) => (row.rows ?? 0) >= appConfig.pm5mTailEntryMinRounds)
+    .filter((row) => (row.fillRate ?? 0) >= appConfig.pm5mTailEntryMinFillRate)
+    .filter((row) => (row.avgPnlPerShare ?? Number.NEGATIVE_INFINITY) >= appConfig.pm5mTailEntryMinEvPerShare)
+    .sort((left, right) => (
+      (right.avgPnlPerShare ?? Number.NEGATIVE_INFINITY) - (left.avgPnlPerShare ?? Number.NEGATIVE_INFINITY)
+      || (right.fillRate ?? 0) - (left.fillRate ?? 0)
+      || (right.checkpointSeconds ?? 0) - (left.checkpointSeconds ?? 0)
+    ))[0] ?? null;
+}
+
+function summaryReferenceSize(rows: TailSummaryRow[], orderSize: number): number | null {
+  const sizes = [...new Set(rows.map((row) => row.size).filter((size): size is number => size != null && Number.isFinite(size) && size > 0))].sort((left, right) => left - right);
+  if (!sizes.length) return null;
+  return sizes.find((size) => size >= orderSize) ?? sizes.at(-1) ?? null;
+}
+
+function summaryMinVwapFloor(summary: TailSummary, selectedRow: TailSummaryRow, appConfig: AppConfig): number {
+  const bandRows = (summary.completed?.byAskBand || [])
+    .filter((row) => row.checkpointSeconds === selectedRow.checkpointSeconds && row.size === selectedRow.size)
+    .filter((row) => (row.rows ?? 0) >= appConfig.pm5mTailEntryMinBandRows)
+    .filter((row) => (row.fillRate ?? 0) >= appConfig.pm5mTailEntryMinFillRate)
+    .filter((row) => (row.avgPnlPerShare ?? Number.NEGATIVE_INFINITY) >= appConfig.pm5mTailEntryMinEvPerShare)
+    .map((row) => ({ row, floor: askBandFloor(row.askBand) }))
+    .filter((item): item is { row: TailSummaryRow; floor: number } => item.floor != null)
+    .sort((left, right) => left.floor - right.floor);
+  return bandRows[0]?.floor ?? appConfig.pm5mTailEntryMinVwap;
+}
+
+function askBandFloor(askBand: string | undefined): number | null {
+  if (!askBand) return null;
+  if (askBand === '<55c') return 0;
+  if (askBand === '55-65c') return 0.55;
+  if (askBand === '65-75c') return 0.65;
+  if (askBand === '75-85c') return 0.75;
+  if (askBand === '85c+') return 0.85;
+  return null;
 }
 
 function quoteSnapshot(snapshot: StateSnapshot, tokenId: string, appConfig: AppConfig): QuoteSnapshot | null {
@@ -327,4 +429,17 @@ function roundMoney(value: number): number {
 
 function formatPct(value: number): string {
   return `${(value * 100).toFixed(1)}%`;
+}
+
+function formatNullable(value: number | null | undefined): string {
+  return value == null || !Number.isFinite(value) ? 'n/a' : value.toFixed(4);
+}
+
+function isFakNoMatchError(error: string | undefined): boolean {
+  const normalized = (error || '').toLowerCase();
+  return normalized.includes('no orders found to match') && normalized.includes('fak');
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

@@ -18,7 +18,7 @@ import { formatMoney, formatNumber, formatSeconds } from './lib/format';
 import { formatEtTime, outcomeLabel, outcomeTone, shortenTokenId } from './lib/dashboardFormat';
 
 import { RoundTimelinePipeline } from './components/RoundTimelinePipeline';
-import { Badge, DataTable, DecisionMetric, PaginationControls, Shell } from './components/dashboard/Ui';
+import { Badge, DataTable, DecisionMetric, PageIntro, PaginationControls, Shell, ViewHeader } from './components/dashboard/Ui';
 import { DynamicEntryPricePanel } from './app/DynamicEntryPricePanel';
 import { AllProfilesOverview } from './app/terminal/AllProfilesOverview';
 import { ProfileRail } from './app/terminal/ProfileRail';
@@ -419,10 +419,12 @@ export function App() {
   const tailEntryCheck = viewState.strategyChecks.find((check) => check.strategy === 'UPDOWN_TAIL_ENTRY');
   const tailCondition = (label: string) => tailEntryCheck?.conditions.find((condition) => condition.label === label);
   const tailCheckpointCondition = tailCondition('Tail checkpoint');
+  const tailSelectedSummaryRowCondition = tailCondition('Summary selected row');
   const tailSelectedSideCondition = tailCondition('Selected side');
   const tailSummaryEvCondition = tailCondition('Summary EV/share');
+  const tailSummaryMinVwapCondition = tailCondition('Summary min VWAP');
   const tailVwapCondition = tailCondition('VWAP depth');
-  const tailVwapCapCondition = tailCondition('VWAP cap');
+  const tailVwapFloorCondition = tailCondition('VWAP floor');
   const tailMidpointGapCondition = tailCondition('Midpoint gap');
   const tailRoundOrderLimitCondition = tailCondition('Round order limit');
   const currentRoundOrders = viewState.orders.filter((order) => order.roundId === snapshot.round.id);
@@ -430,7 +432,8 @@ export function App() {
     .filter((order) => order.strategy === 'UPDOWN_TAIL_ENTRY')
     .slice()
     .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime());
-  const currentRoundTailOrders = tailEntryOrders.filter((order) => order.roundId === snapshot.round.id);
+  const tailEntryRoundId = tailEntryCheck?.roundId || snapshot.round.id;
+  const currentRoundTailOrders = tailEntryOrders.filter((order) => order.roundId === tailEntryRoundId);
   const currentRoundOpenOrders = currentRoundOrders.filter((order) => (
     order.status === 'posted'
     || order.status === 'partially_filled'
@@ -503,6 +506,72 @@ export function App() {
   const tailLookbackHours = tailSim?.config?.lookbackHours;
   const tailLookbackLabel = tailLookbackHours && Number.isFinite(tailLookbackHours) ? `${tailLookbackHours}h` : 'all-time';
   const isResearchTab = activeTab === 'simulation';
+  const pageTone = activeTab === 'terminal'
+    ? scopedDecisionState.tone
+    : activeTab === 'portfolio'
+      ? (portfolioPnl + displayedUnrealizedPnl > 0 ? 'good' as const : portfolioPnl + displayedUnrealizedPnl < 0 ? 'bad' as const : 'neutral' as const)
+      : activeTab === 'logs'
+        ? (alertLogCount > 0 ? 'warn' as const : 'neutral' as const)
+        : 'neutral' as const;
+  const pageCopy: Record<TabType, { kicker: string; title: string; summary: string }> = {
+    terminal: {
+      kicker: 'Live Operations',
+      title: isAllProfiles ? 'Profile health and routing overview' : `${scopeLabel} execution cockpit`,
+      summary: isAllProfiles
+        ? 'Use this view to identify which markets are live, cooled down, blocked, or ready before drilling into one profile.'
+        : 'This is the primary action view: current round state, entry readiness, BTC 5m tail order state, open exposure, and hedge/profit-exit readiness.',
+    },
+    portfolio: {
+      kicker: 'Account Risk',
+      title: 'Collateral, positions, and PnL',
+      summary: 'Use this view to separate available collateral from open exposure and realized performance for the selected scope.',
+    },
+    orderbooks: {
+      kicker: 'Market Microstructure',
+      title: 'Executable depth and live CLOB quality',
+      summary: isAllProfiles
+        ? 'Use this view to compare feed health and orderbook readiness across profiles before selecting a market.'
+        : 'Use this view to inspect the active round books behind entry, tail, hedge, and exit decisions.',
+    },
+    activity: {
+      kicker: 'Execution Audit',
+      title: 'Orders, fills, and settlement outcomes',
+      summary: 'Use this view after trades happen: daily PnL, per-round fill quality, failed orders, and submitted CLOB IDs.',
+    },
+    simulation: {
+      kicker: 'Research Calibration',
+      title: simulationResearchTab === 'tail' ? 'Tail Entry simulation results' : 'Touch-fill simulation results',
+      summary: simulationResearchTab === 'tail'
+        ? 'Use this view to choose BTC 5m tail checkpoint and acceptable entry price from recorded market behavior.'
+        : 'Use this view to calibrate pre-round entry price levels across 5m assets.',
+    },
+    strategy: {
+      kicker: 'Configured Rules',
+      title: 'Runtime strategy contract',
+      summary: 'Use this view to read the exact entry/exit behaviors the bot is allowed to execute.',
+    },
+    logs: {
+      kicker: 'Diagnostics',
+      title: 'Runtime events and operator signals',
+      summary: 'Use this view when something looks wrong: filter to execution, market-data, warnings, or raw worker output.',
+    },
+  };
+  const activityViewCopy = activitySubTab === 'daily'
+    ? { title: 'Daily execution rollup', summary: 'Best for answering whether the strategy is making money and whether single-fill risk is contained across a day.' }
+    : activitySubTab === 'rounds'
+      ? { title: 'Round-level fill quality', summary: 'Best for debugging a market lifecycle: submitted orders, filled shares, unfilled shares, and settlement result.' }
+      : { title: 'Raw order ledger', summary: 'Best for checking individual CLOB order IDs, failed FAKs, prices, sizes, and strategy source.' };
+  const simulationViewCopy = simulationResearchTab === 'touch'
+    ? (simulationSubTab === 'price'
+      ? { title: 'Price-level outcome rates', summary: 'Compare paired, single, no-fill, and EV/share by target entry price.' }
+      : simulationSubTab === 'matrix'
+        ? { title: 'Asset x price matrix', summary: 'Check whether a price level works broadly or only on specific 5m assets.' }
+        : { title: 'Current round touch strip', summary: 'Watch active recorder observations without mixing them into live bot execution.' })
+    : (tailSimulationSubTab === 'checkpoint'
+      ? { title: 'Checkpoint x size EV', summary: 'Primary input for live BTC 5m tail: choose the best seconds-to-end checkpoint and reference size row.' }
+      : tailSimulationSubTab === 'bands'
+        ? { title: 'Ask-band performance', summary: 'Check which live entry price bands historically retained enough EV after fill and win rates.' }
+        : { title: 'Recent tail sample strip', summary: 'Inspect how recent markets were sampled at each checkpoint and what side/price would have been selected.' });
 
   return (
     <Shell>
@@ -646,6 +715,77 @@ export function App() {
 
       {/* Main Tabbed Area */}
       <main>
+        <PageIntro
+          kicker={pageCopy[activeTab].kicker}
+          title={pageCopy[activeTab].title}
+          summary={pageCopy[activeTab].summary}
+          tone={pageTone}
+          meta={(
+            <>
+              <Badge tone={state.runtime.executionMode === 'live' ? 'warn' : 'neutral'}>{executionLabel}</Badge>
+              <Badge tone={state.runtime.status === 'running' ? 'good' : 'bad'}>{state.runtime.status}</Badge>
+              <Badge tone="neutral">{scopeLabel}</Badge>
+            </>
+          )}
+        >
+          {activeTab === 'terminal' && (
+            <>
+              <DecisionMetric label="Primary state" value={scopedDecisionState.label} detail={scopedDecisionState.detail} tone={scopedDecisionState.tone} />
+              <DecisionMetric label="Tail Entry" value={strategyCheckLabel(tailEntryCheck).toUpperCase()} detail={tailEntryDetail} tone={strategyCheckTone(tailEntryCheck)} />
+              <DecisionMetric label="Current orders" value={String(currentRoundOpenOrders.length)} detail={`${currentRoundOrders.length} current-round records`} tone={currentRoundOpenOrders.length ? 'warn' : 'neutral'} />
+              <DecisionMetric label="Portfolio PnL" value={formatSignedMoney(portfolioPnl)} detail={`${displayedPositions.length} open positions`} tone={portfolioPnl > 0 ? 'good' : portfolioPnl < 0 ? 'bad' : 'neutral'} />
+            </>
+          )}
+          {activeTab === 'portfolio' && (
+            <>
+              <DecisionMetric label="Collateral" value={portfolio?.collateralBalance == null ? 'n/a' : formatMoney(portfolio.collateralBalance)} detail={portfolioStatusLabel(portfolio?.status || 'disabled')} tone={portfolio?.collateralBalance == null ? 'neutral' : 'good'} />
+              <DecisionMetric label="Open value" value={formatMoney(displayedPositionValue)} detail={`${displayedPositions.length} positions`} tone={displayedPositionValue > 0 ? 'good' : 'neutral'} />
+              <DecisionMetric label="Unrealized" value={formatSignedMoney(displayedUnrealizedPnl)} detail="marked from current prices" tone={displayedUnrealizedPnl > 0 ? 'good' : displayedUnrealizedPnl < 0 ? 'bad' : 'neutral'} />
+              <DecisionMetric label="Total PnL" value={formatSignedMoney(portfolioPnl + displayedUnrealizedPnl)} detail={`ROI ${formatPercentValue(displayedRoiPct)}`} tone={portfolioPnl + displayedUnrealizedPnl > 0 ? 'good' : portfolioPnl + displayedUnrealizedPnl < 0 ? 'bad' : 'neutral'} />
+            </>
+          )}
+          {activeTab === 'orderbooks' && (
+            <>
+              <DecisionMetric label="CLOB feed" value={isAllProfiles ? `${state.profiles.filter((item) => item.feed.clobConnected).length}/${state.profiles.length}` : (viewState.feed.clobConnected ? 'ON' : 'OFF')} detail={isAllProfiles ? 'profiles connected' : `updated ${viewState.feed.lastOrderbookAt ? formatRelativeAge(new Date(viewState.feed.lastOrderbookAt).getTime(), nowMs) : 'n/a'}`} tone={viewState.feed.clobConnected ? 'good' : 'bad'} />
+              <DecisionMetric label="Orderbooks" value={String(isAllProfiles ? state.profiles.reduce((sum, item) => sum + (item.latestSnapshot?.orderbooks.length || 0), 0) : snapshot.orderbooks.length)} detail="live quotes loaded" tone={snapshot.orderbooks.length ? 'good' : 'warn'} />
+              <DecisionMetric label="Depth model" value={snapshot.orderbookDepth ? 'READY' : 'EMPTY'} detail={snapshot.orderbookDepth ? `${snapshot.orderbookDepth.levels.length} price levels` : 'waiting for snapshot'} tone={snapshot.orderbookDepth ? 'good' : 'warn'} />
+              <DecisionMetric label="Round" value={snapshot.round.phase.toUpperCase()} detail={roundPhaseDetail} tone={isRoundStarted ? 'warn' : 'neutral'} />
+            </>
+          )}
+          {activeTab === 'activity' && (
+            <>
+              <DecisionMetric label="View" value={activityViewCopy.title} detail={activityViewCopy.summary} tone="neutral" />
+              <DecisionMetric label="Orders" value={String(viewState.orders.length)} detail={`${viewState.fills.length} fills`} tone={viewState.orders.length ? 'good' : 'neutral'} />
+              <DecisionMetric label="Settlements" value={String(viewState.settlements.length)} detail={formatSignedMoney(portfolioPnl)} tone={portfolioPnl > 0 ? 'good' : portfolioPnl < 0 ? 'bad' : 'neutral'} />
+              <DecisionMetric label="Alerts" value={String(alertLogCount)} detail={`${signalLogCount} signal logs`} tone={alertLogCount ? 'warn' : 'good'} />
+            </>
+          )}
+          {activeTab === 'simulation' && (
+            <>
+              <DecisionMetric label="Recorder" value={simulationResearchTab === 'tail' ? tailSimStatusLabel.toUpperCase() : touchSimStatusLabel.toUpperCase()} detail={simulationResearchTab === 'tail' ? `updated ${tailGeneratedLabel}` : `updated ${touchGeneratedLabel}`} tone={(simulationResearchTab === 'tail' ? tailSim?.ok : touchSim?.ok) ? 'good' : 'warn'} />
+              <DecisionMetric label="Current view" value={simulationViewCopy.title} detail={simulationViewCopy.summary} tone="neutral" />
+              <DecisionMetric label="Window rows" value={String(simulationResearchTab === 'tail' ? tailSimStatus?.completedRows ?? tailSim?.completed?.rows ?? 0 : touchSimStatus?.completedRounds ?? touchSim?.completed?.rounds ?? 0)} detail={simulationResearchTab === 'tail' ? tailLookbackLabel : touchLookbackLabel} tone="neutral" />
+              <DecisionMetric label="Live use" value={simulationResearchTab === 'tail' ? 'TAIL PARAMS' : 'ENTRY PRICE'} detail={simulationResearchTab === 'tail' ? 'checkpoint + min strength price' : 'price routing reference'} tone="warn" />
+            </>
+          )}
+          {activeTab === 'strategy' && (
+            <>
+              <DecisionMetric label="Loaded rules" value={String(state.rules.length)} detail="runtime strategy contracts" tone={state.rules.length ? 'good' : 'warn'} />
+              <DecisionMetric label="Classic entry" value={strategyCheckLabel(entryCheck).toUpperCase()} detail={entryActionDetail} tone={strategyCheckTone(entryCheck)} />
+              <DecisionMetric label="Tail Entry" value={strategyCheckLabel(tailEntryCheck).toUpperCase()} detail={tailEntryDetail} tone={strategyCheckTone(tailEntryCheck)} />
+              <DecisionMetric label="Execution mode" value={executionLabel} detail={runtimeBuildLabel(state.runtime)} tone={state.runtime.executionMode === 'live' ? 'warn' : 'neutral'} />
+            </>
+          )}
+          {activeTab === 'logs' && (
+            <>
+              <DecisionMetric label="Filtered logs" value={String(filteredLogs.length)} detail={`${state.runtimeLogs.length} total records`} tone={filteredLogs.length ? 'neutral' : 'warn'} />
+              <DecisionMetric label="Alerts" value={String(alertLogCount)} detail="warn + error" tone={alertLogCount ? 'warn' : 'good'} />
+              <DecisionMetric label="Signals" value={String(signalLogCount)} detail={hideRoutineLogs ? 'routine hidden' : 'raw view'} tone="neutral" />
+              <DecisionMetric label="Filter" value={logLevel.toUpperCase()} detail={`${logSource} / ${logSearch ? 'search active' : 'no search'}`} tone="neutral" />
+            </>
+          )}
+        </PageIntro>
+
         {activeTab === 'terminal' && (isAllProfiles ? (
           <AllProfilesOverview
             state={state}
@@ -761,15 +901,15 @@ export function App() {
               <TailEntryPanel
                 tailEntryCheck={tailEntryCheck}
                 checkpointCondition={tailCheckpointCondition}
+                selectedSummaryRowCondition={tailSelectedSummaryRowCondition}
                 selectedSideCondition={tailSelectedSideCondition}
                 summaryEvCondition={tailSummaryEvCondition}
+                summaryMinVwapCondition={tailSummaryMinVwapCondition}
                 vwapCondition={tailVwapCondition}
-                vwapCapCondition={tailVwapCapCondition}
+                vwapFloorCondition={tailVwapFloorCondition}
                 midpointGapCondition={tailMidpointGapCondition}
                 roundOrderLimitCondition={tailRoundOrderLimitCondition}
                 currentRoundTailOrders={currentRoundTailOrders}
-                recentTailOrders={tailEntryOrders}
-                secondsToStart={secondsToStart}
               />
 
               <div className="panel opsPanel">
@@ -958,6 +1098,13 @@ export function App() {
                   <span>{viewState.orders.length}</span>
                 </button>
               </div>
+
+              <ViewHeader
+                kicker="Selected view"
+                title={activityViewCopy.title}
+                summary={activityViewCopy.summary}
+                meta={<span>{activitySubTab}</span>}
+              />
 
               {activitySubTab === 'daily' && (
                 dailySummaries.length > 0 ? (
@@ -1305,6 +1452,13 @@ export function App() {
                     </button>
                   </div>
 
+                  <ViewHeader
+                    kicker="Selected view"
+                    title={simulationViewCopy.title}
+                    summary={simulationViewCopy.summary}
+                    meta={<span>{simulationSubTab}</span>}
+                  />
+
                   {simulationSubTab === 'price' && (
                   <section className="simulationSection">
                     <div className="sectionHeader compact">
@@ -1508,6 +1662,13 @@ export function App() {
                       <span>{tailRecentRounds.length}</span>
                     </button>
                   </div>
+
+                  <ViewHeader
+                    kicker="Selected view"
+                    title={simulationViewCopy.title}
+                    summary={simulationViewCopy.summary}
+                    meta={<span>{tailSimulationSubTab}</span>}
+                  />
 
                   {tailSimulationSubTab === 'checkpoint' && (
                   <section className="simulationSection">

@@ -39,12 +39,14 @@ export class RecurringCryptoRoundDiscovery {
     profile?: MarketProfile;
     latestPrice?: number | null;
     persistedStrike?: (roundId: string) => number | undefined;
+    target?: 'current' | 'next';
   } = {}): Promise<DiscoveryResult> {
     const diagnostics: string[] = [];
     const profile = params.profile || this.config.marketProfiles[0];
     const nowSec = Math.floor(Date.now() / 1000);
-    const nextRoundStartSec = Math.floor(nowSec / profile.roundDurationSeconds) * profile.roundDurationSeconds + profile.roundDurationSeconds;
-    const candidates = upcomingRoundWindow(profile, nextRoundStartSec, 6);
+    const currentRoundStartSec = Math.floor(nowSec / profile.roundDurationSeconds) * profile.roundDurationSeconds;
+    const targetRoundStartSec = params.target === 'current' ? currentRoundStartSec : currentRoundStartSec + profile.roundDurationSeconds;
+    const candidates = upcomingRoundWindow(profile, targetRoundStartSec, params.target === 'current' ? 0 : 6);
     for (const candidate of candidates) {
       const result = await this.marketFromSlug(candidate.slug);
       if (!isUsableMarket(result.market, profile, candidate.slug)) continue;
@@ -54,9 +56,9 @@ export class RecurringCryptoRoundDiscovery {
       };
     }
 
-    diagnostics.push(`No usable ${profile.label} Gamma market found in ${candidates.length} deterministic slug candidates.`);
+    diagnostics.push(`No usable ${profile.label} Gamma market found in ${candidates.length} deterministic ${params.target === 'current' ? 'current' : 'upcoming'} slug candidates.`);
     return {
-      round: fallbackRound(profile, nextRoundStartSec, params.latestPrice ?? undefined),
+      round: fallbackRound(profile, targetRoundStartSec, params.latestPrice ?? undefined),
       diagnostics,
     };
   }

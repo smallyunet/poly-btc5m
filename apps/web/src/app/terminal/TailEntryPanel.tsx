@@ -10,29 +10,29 @@ type TailOrder = DashboardState['orders'][number];
 type Props = {
   tailEntryCheck?: StrategyCheck;
   checkpointCondition?: StrategyCondition;
+  selectedSummaryRowCondition?: StrategyCondition;
   selectedSideCondition?: StrategyCondition;
   summaryEvCondition?: StrategyCondition;
+  summaryMinVwapCondition?: StrategyCondition;
   vwapCondition?: StrategyCondition;
-  vwapCapCondition?: StrategyCondition;
+  vwapFloorCondition?: StrategyCondition;
   midpointGapCondition?: StrategyCondition;
   roundOrderLimitCondition?: StrategyCondition;
   currentRoundTailOrders: TailOrder[];
-  recentTailOrders: TailOrder[];
-  secondsToStart: number;
 };
 
 export function TailEntryPanel({
   tailEntryCheck,
   checkpointCondition,
+  selectedSummaryRowCondition,
   selectedSideCondition,
   summaryEvCondition,
+  summaryMinVwapCondition,
   vwapCondition,
-  vwapCapCondition,
+  vwapFloorCondition,
   midpointGapCondition,
   roundOrderLimitCondition,
   currentRoundTailOrders,
-  recentTailOrders,
-  secondsToStart,
 }: Props) {
   const hasCurrentTailOrder = currentRoundTailOrders.length > 0;
   const latestCurrentOrder = currentRoundTailOrders[0];
@@ -41,18 +41,16 @@ export function TailEntryPanel({
   const primaryBlocker = tailEntryCheck?.blockers[0] || tailEntryCheck?.reason || 'waiting for strategy check';
   const decisionTone = hasCurrentTailOrder ? orderTone : tailEntryCheck?.status === 'eligible' ? 'good' : 'warn';
   const decisionLabel = hasCurrentTailOrder ? 'ORDER PLACED' : tailEntryCheck?.status === 'eligible' ? 'READY' : 'NO ORDER';
+  const evaluatedRoundId = tailEntryCheck?.roundId;
   const decisionDetail = hasCurrentTailOrder && latestCurrentOrder
     ? `${outcomeLabel(latestCurrentOrder.label)} ${latestCurrentOrder.side} ${latestCurrentOrder.size.toFixed(2)} @ ${latestCurrentOrder.price.toFixed(3)} (${latestCurrentOrder.status})`
     : tailEntryCheck?.status === 'eligible'
       ? 'Tail entry gates are eligible; waiting for execution record.'
       : primaryBlocker;
-  const checkpointActual = secondsToStart > 0
-    ? `${secondsToStart.toFixed(1)}s to start`
-    : checkpointCondition?.actual || '-';
-  const visibleOrders = currentRoundTailOrders.length > 0 ? currentRoundTailOrders : recentTailOrders.slice(0, 3);
+  const checkpointActual = checkpointCondition?.actual || '-';
 
   return (
-    <div className="panel opsPanel">
+    <div className="panel opsPanel tailEntryPanel">
       <h2>
         BTC 5m Tail Entry
         <span className="panelSubTitle">{tailEntryCheck ? strategyCheckLabel(tailEntryCheck) : 'pending'}</span>
@@ -60,21 +58,51 @@ export function TailEntryPanel({
 
       <div className={`tailEntrySummary ${decisionTone}`}>
         <div>
-          <span className="tailEntrySummaryKicker">Current round order state</span>
+          <span className="tailEntrySummaryKicker">Current tail decision</span>
           <strong>{decisionLabel}</strong>
           <p>{decisionDetail}</p>
         </div>
         <Badge tone={decisionTone}>{hasCurrentTailOrder ? `${currentRoundTailOrders.length} order${currentRoundTailOrders.length === 1 ? '' : 's'}` : tailEntryCheck?.status || 'pending'}</Badge>
       </div>
 
-      <div className="opsSystemList">
+      <div className="tailEntryKeyGrid" aria-label="Tail entry key gates">
+        <div>
+          <span>When</span>
+          <strong>{checkpointActual}</strong>
+          <em>{checkpointCondition?.passed ? 'inside selected window' : 'waiting for selected window'}</em>
+        </div>
+        <div>
+          <span>What side</span>
+          <strong>{selectedSideCondition?.actual || '-'}</strong>
+          <em>{midpointGapCondition?.actual || 'midpoint gap unavailable'}</em>
+        </div>
+        <div>
+          <span>Live price</span>
+          <strong>{vwapCondition?.actual || '-'}</strong>
+          <em>{vwapFloorCondition?.actual || 'VWAP floor unavailable'}</em>
+        </div>
+        <div>
+          <span>Simulation row</span>
+          <strong>{selectedSummaryRowCondition?.actual || '-'}</strong>
+          <em>{summaryEvCondition?.actual || 'EV unavailable'}</em>
+        </div>
+      </div>
+
+      <div className="tailEntryDetailHeader">
+        <span>Technical gates</span>
+        <strong>{roundOrderLimitCondition?.actual || '-'}</strong>
+      </div>
+      <div className="tailEntryTechnicalGrid">
         <div><span>Status</span><strong>{tailEntryCheck?.status || 'pending'}</strong></div>
+        <div><span>Tail round</span><strong>{evaluatedRoundId || '-'}</strong></div>
         <div><span>Checkpoint</span><strong>{checkpointActual}</strong></div>
+        <div><span>Summary row</span><strong>{selectedSummaryRowCondition?.actual || '-'}</strong></div>
         <div><span>Selected side</span><strong>{selectedSideCondition?.actual || '-'}</strong></div>
         <div><span>Limit</span><strong>{tailEntryCheck?.limitPrice == null ? '-' : tailEntryCheck.limitPrice.toFixed(3)}</strong></div>
         <div><span>Amount</span><strong>{tailEntryCheck?.amountUsd == null ? '-' : formatMoney(tailEntryCheck.amountUsd)}</strong></div>
         <div><span>Summary EV</span><strong>{summaryEvCondition?.actual || '-'}</strong></div>
-        <div><span>Live VWAP</span><strong>{vwapCondition?.actual || vwapCapCondition?.actual || '-'}</strong></div>
+        <div><span>Min price</span><strong>{summaryMinVwapCondition?.actual || '-'}</strong></div>
+        <div><span>Live VWAP</span><strong>{vwapCondition?.actual || vwapFloorCondition?.actual || '-'}</strong></div>
         <div><span>Midpoint gap</span><strong>{midpointGapCondition?.actual || '-'}</strong></div>
         <div><span>Round limit</span><strong>{roundOrderLimitCondition?.actual || '-'}</strong></div>
         <div><span>Tail orders</span><strong>{currentRoundTailOrders.length}</strong></div>
@@ -82,12 +110,12 @@ export function TailEntryPanel({
 
       <div className="tailEntryOrderBlock">
         <div className="tailEntryOrderHeader">
-          <span>{currentRoundTailOrders.length > 0 ? 'Current round order records' : 'Latest tail order records'}</span>
-          <strong>{visibleOrders.length ? `${visibleOrders.length} shown` : 'none'}</strong>
+          <span>Current tail round orders</span>
+          <strong>{currentRoundTailOrders.length ? `${currentRoundTailOrders.length} shown` : 'none'}</strong>
         </div>
-        {visibleOrders.length > 0 ? (
+        {currentRoundTailOrders.length > 0 ? (
           <div className="tailEntryOrders">
-            {visibleOrders.map((order) => (
+            {currentRoundTailOrders.map((order) => (
               <div key={order.id} className="tailEntryOrderRow">
                 <div>
                   <Badge tone={order.status === 'failed' ? 'bad' : order.status === 'filled' ? 'good' : order.status === 'posted' ? 'warn' : 'neutral'}>{order.status}</Badge>
@@ -102,7 +130,7 @@ export function TailEntryPanel({
         ) : (
           <div className="tailEntryNoOrder">
             <strong>{primaryBlocker}</strong>
-            <span>No BTC 5m tail order is recorded for the current round.</span>
+            <span>No Tail Entry order is recorded for this evaluated round. See Activity → Orders for older Tail attempts.</span>
           </div>
         )}
       </div>

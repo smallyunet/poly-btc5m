@@ -54,10 +54,13 @@ export function PortfolioTab({
   return (
     <div className="portfolioWorkspace">
       <section className="panel">
-        <h2>
-          Account Portfolio
+        <div className="sectionHeader">
+          <div>
+            <span className="sectionKicker">{scopeLabel}</span>
+            <h2>Account Portfolio</h2>
+          </div>
           <span className="panelSubTitle">{portfolio?.updatedAt ? `updated ${formatEtTime(portfolio.updatedAt)}` : 'waiting for snapshot'}</span>
-        </h2>
+        </div>
 
         {portfolio ? (
           <>
@@ -107,10 +110,13 @@ export function PortfolioTab({
       </section>
 
       <section className="panel">
-        <h2>
-          Active Positions
+        <div className="sectionHeader">
+          <div>
+            <span className="sectionKicker">Exposure detail</span>
+            <h2>Active Positions</h2>
+          </div>
           <span className="panelSubTitle">{displayedPositions.length ? `${displayedPositions.length} positions in ${scopeLabel}` : 'no scoped positions'}</span>
-        </h2>
+        </div>
         {displayedPositions.length > 0 ? (
           <DataTable headers={isAllProfiles ? ['Profile', 'Market', 'Outcome', 'Shares', 'Avg', 'Value', 'PnL', 'ROI'] : ['Market', 'Outcome', 'Shares', 'Avg', 'Value', 'PnL', 'ROI']}>
             {displayedPositions.map((position) => {
