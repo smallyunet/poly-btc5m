@@ -149,6 +149,22 @@ test('does not require simulator fill rate when 12h PnL is positive', () => {
   assert.equal(evaluation.intent.shares, 25);
 });
 
+test('caps tail entry limit price at the CLOB maximum', () => {
+  const config = tailConfig({
+    rows: [
+      { checkpointSeconds: 60, size: 5, rows: 40, fillable: 20, fillRate: 0.5, avgPnlPerShare: 0.02, totalPnl: 5, avgVwap: 0.99 },
+    ],
+    checkpoints: [60],
+  });
+  const store = new InMemoryStore('monitor', 2_000, { persistencePath: false });
+  const evaluation = evaluateTailEntry(snapshot({ yesBid: 0.98, yesAsk: 0.99, noAsk: 0.02 }), config, store);
+
+  assert.equal(evaluation.ok, true, evaluation.check.reason);
+  if (!evaluation.ok) return;
+  assert.equal(evaluation.intent.limitPrice, 0.99);
+  assert.equal(evaluation.check.limitPrice, 0.99);
+});
+
 test('blocks tail entry when every 12h simulator parameter is losing', () => {
   const config = tailConfig({
     rows: [
@@ -258,7 +274,7 @@ function tailConfig(options: {
   return config;
 }
 
-function snapshot(options: { secondsToEnd?: number; yesAsk?: number; yesAskSize?: number } = {}): StateSnapshot {
+function snapshot(options: { secondsToEnd?: number; yesBid?: number; yesAsk?: number; yesAskSize?: number; noAsk?: number } = {}): StateSnapshot {
   const now = Date.now();
   const secondsToEnd = options.secondsToEnd ?? 59;
   const startAt = new Date(now - (300 - secondsToEnd) * 1000).toISOString();
@@ -316,8 +332,8 @@ function snapshot(options: { secondsToEnd?: number; yesAsk?: number; yesAskSize?
     },
     regime: 'UNKNOWN',
     orderbooks: [
-      quote('yes-token', 0.59, options.yesAsk ?? 0.61, [{ price: options.yesAsk ?? 0.61, size: options.yesAskSize ?? 5 }]),
-      quote('no-token', 0.39, 0.41, [{ price: 0.41, size: 5 }]),
+      quote('yes-token', options.yesBid ?? 0.59, options.yesAsk ?? 0.61, [{ price: options.yesAsk ?? 0.61, size: options.yesAskSize ?? 5 }]),
+      quote('no-token', 0.01, options.noAsk ?? 0.41, [{ price: options.noAsk ?? 0.41, size: 5 }]),
     ],
     positions: [],
     positionReadStatus: 'disabled',

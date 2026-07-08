@@ -12,6 +12,8 @@ const FAILED_ORDER_COOLDOWN_MS = 5 * 60_000;
 const FAK_NO_MATCH_RETRY_LIMIT = 2;
 const FAK_NO_MATCH_RETRY_DELAY_MS = 750;
 const EPSILON = 0.000001;
+const CLOB_MIN_LIMIT_PRICE = 0.01;
+const CLOB_MAX_LIMIT_PRICE = 0.99;
 
 export type TailEntryEvaluation =
   | { ok: true; intent: TradeIntent; check: StrategyCheck; checkpointSeconds: number; vwap: number; bestAsk: number; midpointGap: number }
@@ -410,7 +412,7 @@ function failedOrder(snapshot: StateSnapshot, intent: TradeIntent, executionKey:
 }
 
 function cappedPrice(price: number): number {
-  return Math.max(0.001, Math.min(0.999, roundMoney(price)));
+  return Math.max(CLOB_MIN_LIMIT_PRICE, Math.min(CLOB_MAX_LIMIT_PRICE, roundMoney(price)));
 }
 
 function roundDownShares(shares: number): number {
