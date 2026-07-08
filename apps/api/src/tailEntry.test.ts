@@ -132,6 +132,23 @@ test('uses the best positive-PnL simulator size row for live order size', () => 
   assert.equal(evaluation.intent.limitPrice, 0.611);
 });
 
+test('does not require simulator fill rate when 12h PnL is positive', () => {
+  const config = tailConfig({
+    rows: [
+      { checkpointSeconds: 20, size: 25, rows: 40, fillable: 8, fillRate: 0.2, avgPnlPerShare: 0.03, totalPnl: 18, avgVwap: 0.7 },
+    ],
+    checkpoints: [20],
+  });
+  const store = new InMemoryStore('monitor', 2_000, { persistencePath: false });
+  const currentSnapshot = snapshot({ secondsToEnd: 19, yesAskSize: 25 });
+  const evaluation = evaluateTailEntry(currentSnapshot, config, store);
+
+  assert.equal(evaluation.ok, true, evaluation.check.reason);
+  if (!evaluation.ok) return;
+  assert.equal(evaluation.check.conditions.find((condition) => condition.label === 'Summary fill rate')?.actual, '20.0% reference only');
+  assert.equal(evaluation.intent.shares, 25);
+});
+
 test('blocks tail entry when every 12h simulator parameter is losing', () => {
   const config = tailConfig({
     rows: [
@@ -226,7 +243,6 @@ function tailConfig(options: {
   config.pm5mTailEntryMaxSummaryAgeMs = 60_000;
   config.pm5mTailEntryMinRounds = 20;
   config.pm5mTailEntryMinEvPerShare = 0.03;
-  config.pm5mTailEntryMinFillRate = 0.45;
   config.pm5mTailEntryCheckpoints = options.checkpoints || [60];
   config.pm5mTailEntrySize = 5;
   config.pm5mTailEntryMinVwap = 0.55;

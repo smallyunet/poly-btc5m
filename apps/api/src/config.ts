@@ -68,7 +68,6 @@ export type AppConfig = {
   pm5mTailEntryMaxSummaryAgeMs: number;
   pm5mTailEntryMinRounds: number;
   pm5mTailEntryMinEvPerShare: number;
-  pm5mTailEntryMinFillRate: number;
   pm5mTailEntryCheckpoints: number[];
   pm5mTailEntrySize: number;
   pm5mTailEntryMinVwap: number;
@@ -197,7 +196,6 @@ export function loadConfig(): AppConfig {
     pm5mTailEntryMaxSummaryAgeMs: parsePositiveInteger(process.env.PM5M_TAIL_ENTRY_MAX_SUMMARY_AGE_MS, 10 * 60_000),
     pm5mTailEntryMinRounds: parsePositiveInteger(process.env.PM5M_TAIL_ENTRY_MIN_ROUNDS, 100),
     pm5mTailEntryMinEvPerShare: numberEnv('PM5M_TAIL_ENTRY_MIN_EV_PER_SHARE', 0),
-    pm5mTailEntryMinFillRate: numberEnv('PM5M_TAIL_ENTRY_MIN_FILL_RATE', 0.45),
     pm5mTailEntryCheckpoints: numberListEnv('PM5M_TAIL_ENTRY_CHECKPOINTS', [60, 45]),
     pm5mTailEntrySize: numberEnv('PM5M_TAIL_ENTRY_SIZE', 5),
     pm5mTailEntryMinVwap: numberEnv('PM5M_TAIL_ENTRY_MIN_VWAP', 0.55),

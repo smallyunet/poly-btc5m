@@ -73,7 +73,6 @@ export function evaluateTailEntry(snapshot: StateSnapshot, appConfig: AppConfig,
   if (row && (row.rows ?? 0) < appConfig.pm5mTailEntryMinRounds) blockers.push('TAIL_SUMMARY_SAMPLE_TOO_SMALL');
   if (summary.ok && !row) blockers.push('TAIL_SUMMARY_12H_PNL_NOT_POSITIVE');
   if (row && (row.totalPnl ?? Number.NEGATIVE_INFINITY) <= 0) blockers.push('TAIL_SUMMARY_12H_PNL_NOT_POSITIVE');
-  if (row && (row.fillRate ?? 0) < appConfig.pm5mTailEntryMinFillRate) blockers.push('TAIL_SUMMARY_FILL_RATE_TOO_LOW');
   if (!yes || !no) blockers.push('ORDERBOOK_MISSING');
   if (selectedLabel == null || !selected) blockers.push('TAIL_SIDE_NOT_SELECTABLE');
   if (plan && !plan.fillable) blockers.push('TAIL_DEPTH_INSUFFICIENT');
@@ -92,7 +91,7 @@ export function evaluateTailEntry(snapshot: StateSnapshot, appConfig: AppConfig,
     condition('Summary sample size', Boolean(row && (row.rows ?? 0) >= appConfig.pm5mTailEntryMinRounds), row ? `${row.rows ?? 0} / min ${appConfig.pm5mTailEntryMinRounds}` : 'missing'),
     condition('Summary 12h PnL', Boolean(row && (row.totalPnl ?? Number.NEGATIVE_INFINITY) > 0), row?.totalPnl == null ? 'missing' : `${formatMoney(row.totalPnl)} / must be > 0`),
     condition('Summary EV/share', row?.avgPnlPerShare != null, row?.avgPnlPerShare == null ? 'missing' : `${row.avgPnlPerShare.toFixed(4)} reference`),
-    condition('Summary fill rate', Boolean(row && (row.fillRate ?? 0) >= appConfig.pm5mTailEntryMinFillRate), row?.fillRate == null ? 'missing' : `${formatPct(row.fillRate)} / min ${formatPct(appConfig.pm5mTailEntryMinFillRate)}`),
+    condition('Summary fill rate', row?.fillRate != null, row?.fillRate == null ? 'missing' : `${formatPct(row.fillRate)} reference only`),
     condition('Summary min VWAP', liveVwapFloor != null, `${liveVwapFloor.toFixed(3)} min strength floor`),
     condition('YES quote fresh', Boolean(yes), yes ? `${yes.ageMs}ms old` : 'missing/stale'),
     condition('NO quote fresh', Boolean(no), no ? `${no.ageMs}ms old` : 'missing/stale'),
@@ -305,7 +304,6 @@ function selectSummaryRow(summary: TailSummary, appConfig: AppConfig): TailSumma
     .filter((row) => row.size != null && Number.isFinite(row.size) && row.size > 0)
     .filter((row) => !allowedCheckpoints.size || (row.checkpointSeconds != null && allowedCheckpoints.has(row.checkpointSeconds)))
     .filter((row) => (row.rows ?? 0) >= appConfig.pm5mTailEntryMinRounds)
-    .filter((row) => (row.fillRate ?? 0) >= appConfig.pm5mTailEntryMinFillRate)
     .filter((row) => (row.totalPnl ?? Number.NEGATIVE_INFINITY) > 0)
     .sort((left, right) => (
       (right.totalPnl ?? Number.NEGATIVE_INFINITY) - (left.totalPnl ?? Number.NEGATIVE_INFINITY)
@@ -319,7 +317,6 @@ function summaryMinVwapFloor(summary: TailSummary, selectedRow: TailSummaryRow, 
   const bandRows = (summary.completed?.byAskBand || [])
     .filter((row) => row.checkpointSeconds === selectedRow.checkpointSeconds && row.size === selectedRow.size)
     .filter((row) => (row.rows ?? 0) >= appConfig.pm5mTailEntryMinBandRows)
-    .filter((row) => (row.fillRate ?? 0) >= appConfig.pm5mTailEntryMinFillRate)
     .filter((row) => (row.totalPnl ?? Number.NEGATIVE_INFINITY) > 0)
     .map((row) => ({ row, floor: askBandFloor(row.askBand) }))
     .filter((item): item is { row: TailSummaryRow; floor: number } => item.floor != null)
