@@ -18,7 +18,7 @@ if (args.help) {
 const config = {
   assets: args.assets || DEFAULT_ASSETS,
   checkpoints: args.checkpoints || numberListFromEnv('PM5M_TAIL_CHECKPOINTS_SECONDS', [60, 45, 30, 20, 15, 10, 5]),
-  sizes: args.sizes || numberListFromEnv('PM5M_TAIL_SIZES', [5, 10, 25]),
+  size: args.size ?? firstNumberFromEnv(['PM5M_TAIL_SIZE', 'PM5M_TAIL_SIZES'], 5),
   topLevels: args.topLevels ?? numberFromEnv('PM5M_TAIL_TOP_LEVELS', 10),
   quoteMaxAgeMs: args.quoteMaxAgeMs ?? numberFromEnv('PM5M_TAIL_QUOTE_MAX_AGE_MS', 2_500),
   outDir: path.resolve(args.outDir || 'data-lab/pm-5m-tail'),
@@ -31,7 +31,7 @@ const config = {
 };
 
 config.checkpoints = [...new Set(config.checkpoints.filter((value) => value > 0))].sort((a, b) => b - a);
-config.sizes = [...new Set(config.sizes.filter((value) => value > 0))].sort((a, b) => a - b);
+config.size = Number.isFinite(config.size) && config.size > 0 ? config.size : 5;
 
 const rounds = new Map();
 const tokenIndex = new Map();
@@ -46,7 +46,7 @@ let summaryTimer;
 fs.mkdirSync(config.outDir, { recursive: true });
 
 log('starting Polymarket 5m tail-entry recorder');
-log(`assets=${config.assets.join(',')} checkpoints=${config.checkpoints.join(',')}s sizes=${config.sizes.join(',')} out=${config.outDir}`);
+log(`assets=${config.assets.join(',')} checkpoints=${config.checkpoints.join(',')}s size=${config.size} out=${config.outDir}`);
 if (historicalResults.length) log(`loaded ${historicalResults.length} historical tail result rows`);
 
 await discoverAll();
@@ -76,7 +76,10 @@ function parseArgs(argv) {
       parsed.checkpoints = parseNumberList(next);
       index += 1;
     } else if (arg === '--sizes') {
-      parsed.sizes = parseNumberList(next);
+      parsed.size = parseNumberList(next)[0];
+      index += 1;
+    } else if (arg === '--size') {
+      parsed.size = Number(next);
       index += 1;
     } else if (arg === '--top-levels') {
       parsed.topLevels = Number(next);
@@ -117,7 +120,7 @@ function printHelp() {
 Options:
   --assets btc
   --checkpoints 60,45,30,20,15,10,5
-  --sizes 5,10,25
+  --size 5
   --top-levels 10
   --quote-max-age-ms 2500
   --out-dir data-lab/pm-5m-tail
@@ -320,20 +323,12 @@ function buildSample(round, checkpoint, nowMs) {
   const no = quoteSnapshot(round.quotes.NO, nowMs);
   const selectedSide = selectStrongSide(yes, no);
   const selectedQuote = selectedSide === 'YES' ? yes : selectedSide === 'NO' ? no : null;
-  const sizePlans = config.sizes.map((size) => {
-    const fill = selectedQuote ? buyVwap(selectedQuote.asks, size) : null;
-    return {
-      size,
-      fillable: Boolean(fill?.fillable),
-      vwap: fill?.vwap ?? null,
-      cost: fill?.cost ?? null,
-      filledShares: fill?.filledShares ?? 0,
-      slippage: fill?.vwap != null && selectedQuote?.bestAsk != null ? roundMoney(fill.vwap - selectedQuote.bestAsk) : null,
-    };
-  });
+  const fill = selectedQuote ? buyVwap(selectedQuote.asks, config.size) : null;
+  const fillable = Boolean(fill?.fillable);
+  const vwap = fill?.vwap ?? null;
   const status = selectedSide == null
     ? 'quote_missing'
-    : sizePlans.some((plan) => plan.fillable)
+    : fillable
       ? 'sampled'
       : 'insufficient_depth';
   return {
@@ -352,7 +347,12 @@ function buildSample(round, checkpoint, nowMs) {
     no,
     overroundAsk: yes.bestAsk != null && no.bestAsk != null ? roundMoney(yes.bestAsk + no.bestAsk) : null,
     overroundBid: yes.bestBid != null && no.bestBid != null ? roundMoney(yes.bestBid + no.bestBid) : null,
-    sizePlans,
+    size: config.size,
+    fillable,
+    vwap,
+    cost: fill?.cost ?? null,
+    filledShares: fill?.filledShares ?? 0,
+    slippage: vwap != null && selectedQuote?.bestAsk != null ? roundMoney(vwap - selectedQuote.bestAsk) : null,
   };
 }
 
@@ -432,37 +432,35 @@ function winnerFromMarket(market) {
 function resultRowsForRound(round) {
   const rows = [];
   for (const sample of Object.values(round.samples)) {
-    for (const plan of sample.sizePlans) {
-      const pnlPerShare = plan.fillable && sample.selectedSide && plan.vwap != null
-        ? roundMoney((sample.selectedSide === round.winner ? 1 : 0) - plan.vwap)
-        : null;
-      rows.push({
-        type: 'tail_result',
-        recordedAt: new Date().toISOString(),
-        asset: round.asset,
-        slug: round.slug,
-        title: round.title,
-        startAt: round.startAt,
-        endAt: round.endAt,
-        checkpointSeconds: sample.checkpointSeconds,
-        selectedSide: sample.selectedSide,
-        winner: round.winner,
-        selectedWon: sample.selectedSide != null ? sample.selectedSide === round.winner : null,
-        size: plan.size,
-        fillable: plan.fillable,
-        vwap: plan.vwap,
-        cost: plan.cost,
-        filledShares: plan.filledShares,
-        slippage: plan.slippage,
-        selectedBestAsk: sample.selectedSide === 'YES' ? sample.yes.bestAsk : sample.selectedSide === 'NO' ? sample.no.bestAsk : null,
-        selectedMidpoint: sample.selectedSide === 'YES' ? sample.yes.midpoint : sample.selectedSide === 'NO' ? sample.no.midpoint : null,
-        selectedSpread: sample.selectedSide === 'YES' ? sample.yes.spread : sample.selectedSide === 'NO' ? sample.no.spread : null,
-        midpointGap: sample.yes.midpoint != null && sample.no.midpoint != null ? roundMoney(Math.abs(sample.yes.midpoint - sample.no.midpoint)) : null,
-        overroundAsk: sample.overroundAsk,
-        pnlPerShare,
-        pnl: pnlPerShare == null ? null : roundMoney(pnlPerShare * plan.size),
-      });
-    }
+    const pnlPerShare = sample.fillable && sample.selectedSide && sample.vwap != null
+      ? roundMoney((sample.selectedSide === round.winner ? 1 : 0) - sample.vwap)
+      : null;
+    rows.push({
+      type: 'tail_result',
+      recordedAt: new Date().toISOString(),
+      asset: round.asset,
+      slug: round.slug,
+      title: round.title,
+      startAt: round.startAt,
+      endAt: round.endAt,
+      checkpointSeconds: sample.checkpointSeconds,
+      selectedSide: sample.selectedSide,
+      winner: round.winner,
+      selectedWon: sample.selectedSide != null ? sample.selectedSide === round.winner : null,
+      size: sample.size ?? config.size,
+      fillable: sample.fillable,
+      vwap: sample.vwap,
+      cost: sample.cost,
+      filledShares: sample.filledShares,
+      slippage: sample.slippage,
+      selectedBestAsk: sample.selectedSide === 'YES' ? sample.yes.bestAsk : sample.selectedSide === 'NO' ? sample.no.bestAsk : null,
+      selectedMidpoint: sample.selectedSide === 'YES' ? sample.yes.midpoint : sample.selectedSide === 'NO' ? sample.no.midpoint : null,
+      selectedSpread: sample.selectedSide === 'YES' ? sample.yes.spread : sample.selectedSide === 'NO' ? sample.no.spread : null,
+      midpointGap: sample.yes.midpoint != null && sample.no.midpoint != null ? roundMoney(Math.abs(sample.yes.midpoint - sample.no.midpoint)) : null,
+      overroundAsk: sample.overroundAsk,
+      pnlPerShare,
+      pnl: pnlPerShare == null ? null : roundMoney(pnlPerShare * (sample.size ?? config.size)),
+    });
   }
   return rows;
 }
@@ -485,7 +483,7 @@ function writeSummary() {
       assets: config.assets,
       interval: '5m',
       checkpoints: config.checkpoints,
-      sizes: config.sizes,
+      size: config.size,
       topLevels: config.topLevels,
       quoteMaxAgeMs: config.quoteMaxAgeMs,
       lookbackHours: config.lookbackHours,
@@ -527,7 +525,12 @@ function writeSummary() {
             noMidpoint: sample.no.midpoint,
             selectedBestAsk: sample.selectedSide === 'YES' ? sample.yes.bestAsk : sample.selectedSide === 'NO' ? sample.no.bestAsk : null,
             overroundAsk: sample.overroundAsk,
-            sizePlans: sample.sizePlans,
+            size: sample.size ?? config.size,
+            fillable: sample.fillable,
+            vwap: sample.vwap,
+            cost: sample.cost,
+            filledShares: sample.filledShares,
+            slippage: sample.slippage,
           })),
       })),
   };
@@ -547,13 +550,11 @@ function activeSummary() {
 function aggregate(rows) {
   return {
     rows: rows.length,
-    byCheckpointSize: aggregateBy(rows, (row) => `${row.checkpointSeconds}:${row.size}`, (row) => ({
+    byCheckpoint: aggregateBy(rows, (row) => `${row.checkpointSeconds}`, (row) => ({
       checkpointSeconds: row.checkpointSeconds,
-      size: row.size,
     })),
-    byAskBand: aggregateBy(rows, (row) => `${row.checkpointSeconds}:${row.size}:${askBand(row.selectedBestAsk)}`, (row) => ({
+    byAskBand: aggregateBy(rows, (row) => `${row.checkpointSeconds}:${askBand(row.selectedBestAsk)}`, (row) => ({
       checkpointSeconds: row.checkpointSeconds,
-      size: row.size,
       askBand: askBand(row.selectedBestAsk),
     })),
   };
@@ -605,7 +606,7 @@ function aggregateBy(rows, keyFn, seedFn) {
     avgOverroundAsk: roundMoneyOrNull(item.overroundCount ? item.totalOverroundAsk / item.overroundCount : null),
     avgPnlPerShare: roundMoneyOrNull(item.fillable ? item.totalPnlPerShare / item.fillable : null),
     totalPnl: roundMoney(item.totalPnl),
-  })).sort((a, b) => (b.checkpointSeconds - a.checkpointSeconds) || (a.size - b.size) || String(a.askBand || '').localeCompare(String(b.askBand || '')));
+  })).sort((a, b) => (b.checkpointSeconds - a.checkpointSeconds) || String(a.askBand || '').localeCompare(String(b.askBand || '')));
 }
 
 function askBand(value) {
@@ -642,8 +643,8 @@ function parseHistoricalResult(line) {
     const asset = String(row.asset || '').trim().toLowerCase();
     const slug = String(row.slug || '').trim();
     const checkpointSeconds = finiteNumber(row.checkpointSeconds);
-    const size = finiteNumber(row.size);
-    if (!asset || !slug || checkpointSeconds == null || size == null) return null;
+    const size = finiteNumber(row.size) ?? config.size;
+    if (!asset || !slug || checkpointSeconds == null) return null;
     return {
       ...row,
       asset,
@@ -671,7 +672,7 @@ function uniqueResults(rows) {
 }
 
 function resultKey(row) {
-  return `${row.asset}:${row.slug}:${row.checkpointSeconds}:${row.size}`;
+  return `${row.asset}:${row.slug}:${row.checkpointSeconds}`;
 }
 
 function rowStartMs(row) {
@@ -722,6 +723,14 @@ function numberListFromEnv(name, fallback) {
   if (!raw) return fallback;
   const parsed = parseNumberList(raw);
   return parsed.length ? parsed : fallback;
+}
+
+function firstNumberFromEnv(names, fallback) {
+  for (const name of names) {
+    const parsed = parseNumberList(process.env[name]);
+    if (parsed.length) return parsed[0];
+  }
+  return fallback;
 }
 
 function finiteNumber(value) {

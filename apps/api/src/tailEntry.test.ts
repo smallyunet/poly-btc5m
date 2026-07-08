@@ -92,12 +92,11 @@ test('retries tail entry FAK no-match errors before recording the outcome', asyn
   assert.equal(orders[0]?.clobOrderId, 'tail-order-after-retry');
 });
 
-test('selects the best positive-PnL simulator checkpoint and size', () => {
+test('selects the best positive-PnL simulator checkpoint by per-share edge', () => {
   const config = tailConfig({
     rows: [
-      { checkpointSeconds: 60, size: 5, rows: 40, fillable: 24, fillRate: 0.6, avgPnlPerShare: 0.08, totalPnl: 16, avgVwap: 0.55 },
-      { checkpointSeconds: 45, size: 5, rows: 40, fillable: 28, fillRate: 0.7, avgPnlPerShare: 0.16, totalPnl: 32, avgVwap: 0.49 },
-      { checkpointSeconds: 45, size: 10, rows: 40, fillable: 30, fillRate: 0.75, avgPnlPerShare: 0.22, totalPnl: 66, avgVwap: 0.48 },
+      { checkpointSeconds: 60, rows: 40, fillable: 24, fillRate: 0.6, avgPnlPerShare: 0.08, totalPnl: 16, avgVwap: 0.55 },
+      { checkpointSeconds: 45, rows: 40, fillable: 30, fillRate: 0.75, avgPnlPerShare: 0.22, totalPnl: 33, avgVwap: 0.48 },
     ],
     checkpoints: [60, 45, 30],
   });
@@ -107,16 +106,16 @@ test('selects the best positive-PnL simulator checkpoint and size', () => {
 
   assert.equal(evaluation.ok, true, evaluation.check.reason);
   if (!evaluation.ok) return;
-  assert.equal(evaluation.check.conditions.find((condition) => condition.label === 'Summary selected row')?.actual, '45s / 10 shares / PnL $66.00');
-  assert.equal(evaluation.intent.shares, 10);
-  assert.equal(evaluation.check.reason, 'Tail entry eligible: buy YES 10.00 @ 0.610 VWAP from best 12h PnL row.');
+  assert.equal(evaluation.check.conditions.find((condition) => condition.label === 'Summary selected row')?.actual, '45s / per-share EV 0.2200 / PnL $33.00');
+  assert.equal(evaluation.intent.shares, 5);
+  assert.equal(evaluation.check.reason, 'Tail entry eligible: buy YES 5.00 @ 0.610 VWAP from best 12h checkpoint row.');
 });
 
-test('uses the best positive-PnL simulator size row for live order size', () => {
+test('uses configured tail entry size for live order size', () => {
   const config = tailConfig({
     rows: [
-      { checkpointSeconds: 45, size: 5, rows: 40, fillable: 28, fillRate: 0.7, avgPnlPerShare: 0.16, totalPnl: 32, avgVwap: 0.49 },
-      { checkpointSeconds: 45, size: 10, rows: 40, fillable: 30, fillRate: 0.75, avgPnlPerShare: 0.22, totalPnl: 66, avgVwap: 0.48 },
+      { checkpointSeconds: 60, rows: 40, fillable: 28, fillRate: 0.7, avgPnlPerShare: 0.16, totalPnl: 32, avgVwap: 0.49 },
+      { checkpointSeconds: 45, rows: 40, fillable: 30, fillRate: 0.75, avgPnlPerShare: 0.22, totalPnl: 33, avgVwap: 0.48 },
     ],
     checkpoints: [45],
   });
@@ -127,15 +126,15 @@ test('uses the best positive-PnL simulator size row for live order size', () => 
 
   assert.equal(evaluation.ok, true, evaluation.check.reason);
   if (!evaluation.ok) return;
-  assert.equal(evaluation.check.conditions.find((condition) => condition.label === 'Summary selected row')?.actual, '45s / 10 shares / PnL $66.00');
-  assert.equal(evaluation.intent.shares, 10);
+  assert.equal(evaluation.check.conditions.find((condition) => condition.label === 'Summary selected row')?.actual, '45s / per-share EV 0.2200 / PnL $33.00');
+  assert.equal(evaluation.intent.shares, 2);
   assert.equal(evaluation.intent.limitPrice, 0.611);
 });
 
 test('does not require simulator fill rate when 12h PnL is positive', () => {
   const config = tailConfig({
     rows: [
-      { checkpointSeconds: 20, size: 25, rows: 40, fillable: 8, fillRate: 0.2, avgPnlPerShare: 0.03, totalPnl: 18, avgVwap: 0.7 },
+      { checkpointSeconds: 20, rows: 40, fillable: 8, fillRate: 0.2, avgPnlPerShare: 0.03, totalPnl: 18, avgVwap: 0.7 },
     ],
     checkpoints: [20],
   });
@@ -146,13 +145,13 @@ test('does not require simulator fill rate when 12h PnL is positive', () => {
   assert.equal(evaluation.ok, true, evaluation.check.reason);
   if (!evaluation.ok) return;
   assert.equal(evaluation.check.conditions.find((condition) => condition.label === 'Summary fill rate')?.actual, '20.0% reference only');
-  assert.equal(evaluation.intent.shares, 25);
+  assert.equal(evaluation.intent.shares, 5);
 });
 
 test('caps tail entry limit price at the CLOB maximum', () => {
   const config = tailConfig({
     rows: [
-      { checkpointSeconds: 60, size: 5, rows: 40, fillable: 20, fillRate: 0.5, avgPnlPerShare: 0.02, totalPnl: 5, avgVwap: 0.99 },
+      { checkpointSeconds: 60, rows: 40, fillable: 20, fillRate: 0.5, avgPnlPerShare: 0.02, totalPnl: 5, avgVwap: 0.99 },
     ],
     checkpoints: [60],
   });
@@ -168,8 +167,8 @@ test('caps tail entry limit price at the CLOB maximum', () => {
 test('blocks tail entry when every 12h simulator parameter is losing', () => {
   const config = tailConfig({
     rows: [
-      { checkpointSeconds: 60, size: 5, rows: 40, fillable: 28, fillRate: 0.7, avgPnlPerShare: -0.02, totalPnl: -4, avgVwap: 0.55 },
-      { checkpointSeconds: 45, size: 10, rows: 40, fillable: 30, fillRate: 0.75, avgPnlPerShare: -0.01, totalPnl: -3, avgVwap: 0.48 },
+      { checkpointSeconds: 60, rows: 40, fillable: 28, fillRate: 0.7, avgPnlPerShare: -0.02, totalPnl: -4, avgVwap: 0.55 },
+      { checkpointSeconds: 45, rows: 40, fillable: 30, fillRate: 0.75, avgPnlPerShare: -0.01, totalPnl: -3, avgVwap: 0.48 },
     ],
     checkpoints: [60, 45],
   });
@@ -184,10 +183,10 @@ test('blocks tail entry when every 12h simulator parameter is losing', () => {
 test('blocks tail entry when live VWAP is below the simulator strength floor', () => {
   const config = tailConfig({
     rows: [
-      { checkpointSeconds: 60, size: 5, rows: 40, fillable: 28, fillRate: 0.7, avgPnlPerShare: 0.1, totalPnl: 14, avgVwap: 0.55 },
+      { checkpointSeconds: 60, rows: 40, fillable: 28, fillRate: 0.7, avgPnlPerShare: 0.1, totalPnl: 14, avgVwap: 0.55 },
     ],
     askBandRows: [
-      { checkpointSeconds: 60, size: 5, askBand: '65-75c', rows: 4, fillable: 4, fillRate: 1, avgPnlPerShare: 0.12, totalPnl: 2.4, avgVwap: 0.7 },
+      { checkpointSeconds: 60, askBand: '65-75c', rows: 4, fillable: 4, fillRate: 1, avgPnlPerShare: 0.12, totalPnl: 2.4, avgVwap: 0.7 },
     ],
     checkpoints: [60],
   });
@@ -202,7 +201,7 @@ test('blocks tail entry when live VWAP is below the simulator strength floor', (
 function tailConfig(options: {
   rows?: Array<{
     checkpointSeconds: number;
-    size: number;
+    size?: number;
     askBand?: string;
     rows: number;
     fillable: number;
@@ -213,7 +212,7 @@ function tailConfig(options: {
   }>;
   askBandRows?: Array<{
     checkpointSeconds: number;
-    size: number;
+    size?: number;
     askBand: string;
     rows: number;
     fillable: number;
@@ -230,9 +229,8 @@ function tailConfig(options: {
     ok: true,
     generatedAt: new Date().toISOString(),
     completed: {
-      byCheckpointSize: options.rows || [{
+      byCheckpoint: options.rows || [{
         checkpointSeconds: 60,
-        size: 5,
         rows: 25,
         fillable: 13,
         fillRate: 0.52,
@@ -242,7 +240,6 @@ function tailConfig(options: {
       }],
       byAskBand: options.askBandRows || [{
         checkpointSeconds: 60,
-        size: 5,
         askBand: '55-65c',
         rows: 4,
         fillable: 4,

@@ -68,19 +68,20 @@ Run the independent tail-entry recorder when you want to evaluate buying the
 higher-probability side near round end using live orderbook VWAP:
 
 ```bash
-npm run research:pm5m-tail -- --assets btc --checkpoints 60,45,30,20,15,10,5 --sizes 5,10,25
+npm run research:pm5m-tail -- --assets btc --checkpoints 60,45,30,20,15,10,5 --size 5
 ```
 
 This recorder is separate from the touch-fill simulator. It samples YES/NO
 orderbooks at configured seconds-to-end checkpoints, selects the stronger side
-by midpoint, computes ask-book VWAP for each target size, waits for final Gamma
-resolution, and writes summary data under `data-lab/pm-5m-tail/`. The dashboard
+by midpoint, computes ask-book VWAP for one fixed simulation size, waits for
+final Gamma resolution, and writes summary data under `data-lab/pm-5m-tail/`. The dashboard
 Tail Entry view reads `data-lab/pm-5m-tail/summary.json`; set
 `PM5M_TAIL_SUMMARY_PATH` to override the path. Production Docker Compose starts
 it as a separate `pm5m-tail-recorder` service. Live BTC 5m tail trading uses
-the latest 12h tail summary as its gate: if the best checkpoint/size row has
-positive PnL, live uses that row's checkpoint and size; if all 12h rows are
-negative or unavailable, live tail stays blocked.
+the latest 12h tail summary as its gate: if the best checkpoint row has positive
+per-share edge and PnL, live uses that row's checkpoint and
+`PM5M_TAIL_ENTRY_SIZE`; if all 12h rows are negative or unavailable, live tail
+stays blocked.
 
 ## Runtime Model
 
@@ -253,7 +254,7 @@ Live entry orders are configured as CLOB limit order `price + size`:
 - `BYPASS_ENTRY_SCORE_GATING=true` bypasses strategy entry blockers and the entry orderbook quote gate so each round can attempt paired entry, but it does not bypass `SINGLE_FILL_COOLDOWN`. It still leaves execution-level duplicate/open-order, balance, credential, round-start, invalid price/size, and exit/hedge rules in place.
 - `PM5M_SIM_REQUIRE_POSITIVE_EV=true` blocks 5m live entry unless the touch simulator has a row above `PM5M_SIM_MIN_EV_PER_SHARE`; it applies before asset selection and prevents falling back to a fixed entry price when all simulator rows are negative.
 - `PM5M_TOUCH_LOOKBACK_HOURS=12` is the dual-entry simulation window. With `PM5M_SIM_REQUIRE_POSITIVE_EV=true` and `PM5M_SIM_MIN_EV_PER_SHARE=0`, dual 5m live entry is allowed only when the 12h touch simulator has positive EV.
-- `PM5M_TAIL_LOOKBACK_HOURS=12` is the tail-entry simulation window. Live tail ignores losing 12h parameter rows, selects the positive-PnL row with the highest `totalPnl`, and blocks with `TAIL_SUMMARY_12H_PNL_NOT_POSITIVE` when no checkpoint/size row has positive 12h PnL. Fill rate is displayed as a reference metric only; it is not a live gate.
+- `PM5M_TAIL_LOOKBACK_HOURS=12` is the tail-entry simulation window. Live tail ignores losing 12h checkpoint rows, selects the positive row by per-share edge, and blocks with `TAIL_SUMMARY_12H_PNL_NOT_POSITIVE` when no checkpoint row has positive 12h PnL. Fill rate is displayed as a reference metric only; it is not a live gate. Live order size always comes from `PM5M_TAIL_ENTRY_SIZE`, not the simulator row.
 - `BYPASS_SINGLE_FILL_COOLDOWN=true` bypasses only the active single-fill cooldown entry blocker. It does not disable the single-fill hedge/profit-exit logic.
 - `REFRESH_SINGLE_FILL_COOLDOWN_ON_BOOT=true` recomputes any persisted active single-fill cooldown from the current profile cooldown config during process boot. It preserves fills, reviewed rounds, and repeat history, and only updates or clears active cooldown records.
 - `ENTRY_CONFIRM_TICKS=3` requires the full entry setup to remain eligible across three consecutive bot ticks before orders are posted.

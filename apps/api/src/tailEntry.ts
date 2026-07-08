@@ -36,6 +36,7 @@ type TailSummary = {
   ok?: boolean;
   generatedAt?: string;
   completed?: {
+    byCheckpoint?: TailSummaryRow[];
     byCheckpointSize?: TailSummaryRow[];
     byAskBand?: TailSummaryRow[];
   };
@@ -59,7 +60,7 @@ export function evaluateTailEntry(snapshot: StateSnapshot, appConfig: AppConfig,
   const no = quoteSnapshot(snapshot, snapshot.round.noTokenId, appConfig);
   const selectedLabel = selectStrongSide(yes, no);
   const selected = selectedLabel === 'YES' ? yes : selectedLabel === 'NO' ? no : null;
-  const liveSize = selectedSummaryRow?.size ?? appConfig.pm5mTailEntrySize;
+  const liveSize = appConfig.pm5mTailEntrySize;
   const plan = selected ? buyVwap(selected.quote.asks || [], liveSize) : null;
   const overroundAsk = yes?.quote.bestAsk != null && no?.quote.bestAsk != null ? roundMoney(yes.quote.bestAsk + no.quote.bestAsk) : null;
   const midpointGap = yes?.quote.midpoint != null && no?.quote.midpoint != null ? roundMoney(Math.abs(yes.quote.midpoint - no.quote.midpoint)) : null;
@@ -89,7 +90,7 @@ export function evaluateTailEntry(snapshot: StateSnapshot, appConfig: AppConfig,
     condition('Tail entry enabled', enabled, enabled ? 'btc-5m live path enabled' : 'disabled or non-btc-5m profile'),
     condition('Tail checkpoint', checkpoint != null, selectedSummaryRow?.checkpointSeconds == null ? 'no summary-selected checkpoint' : checkpoint == null ? `${selectedSummaryRow.checkpointSeconds}s selected / ${snapshot.round.secondsToEnd.toFixed(1)}s to end` : `${checkpoint}s checkpoint / ${snapshot.round.secondsToEnd.toFixed(1)}s to end`),
     condition('Summary freshness', summary.ok, summary.label),
-    condition('Summary selected row', Boolean(selectedSummaryRow), selectedSummaryRow ? `${selectedSummaryRow.checkpointSeconds}s / ${selectedSummaryRow.size} shares / PnL ${formatMoney(selectedSummaryRow.totalPnl)}` : 'missing positive 12h PnL row'),
+    condition('Summary selected row', Boolean(selectedSummaryRow), selectedSummaryRow ? `${selectedSummaryRow.checkpointSeconds}s / per-share EV ${formatPerShare(selectedSummaryRow.avgPnlPerShare)} / PnL ${formatMoney(selectedSummaryRow.totalPnl)}` : 'missing positive 12h PnL row'),
     condition('Summary sample size', Boolean(row && (row.rows ?? 0) >= appConfig.pm5mTailEntryMinRounds), row ? `${row.rows ?? 0} / min ${appConfig.pm5mTailEntryMinRounds}` : 'missing'),
     condition('Summary 12h PnL', Boolean(row && (row.totalPnl ?? Number.NEGATIVE_INFINITY) > 0), row?.totalPnl == null ? 'missing' : `${formatMoney(row.totalPnl)} / must be > 0`),
     condition('Summary EV/share', row?.avgPnlPerShare != null, row?.avgPnlPerShare == null ? 'missing' : `${row.avgPnlPerShare.toFixed(4)} reference`),
@@ -115,7 +116,7 @@ export function evaluateTailEntry(snapshot: StateSnapshot, appConfig: AppConfig,
     title: '5m Tail Entry',
     status: blockers.length ? 'blocked' : 'eligible',
     summary: 'Buy the stronger BTC 5m side near expiry only when the 12h tail simulator has positive PnL and current orderbook gates pass.',
-    reason: blockers.length ? blockers.join(', ') : `Tail entry eligible: buy ${selectedLabel} ${liveSize.toFixed(2)} @ ${plan!.vwap!.toFixed(3)} VWAP from best 12h PnL row.`,
+    reason: blockers.length ? blockers.join(', ') : `Tail entry eligible: buy ${selectedLabel} ${liveSize.toFixed(2)} @ ${plan!.vwap!.toFixed(3)} VWAP from best 12h checkpoint row.`,
     blockers,
     amountUsd: plan?.cost,
     limitPrice: plan?.vwap == null ? undefined : cappedPrice(plan.vwap + appConfig.pm5mTailEntryPriceOffset),
@@ -139,7 +140,7 @@ export function evaluateTailEntry(snapshot: StateSnapshot, appConfig: AppConfig,
     orderType: 'LIMIT',
     limitPrice: cappedPrice(plan.vwap + appConfig.pm5mTailEntryPriceOffset),
     shares: liveSize,
-    reason: `BTC 5m tail entry at ${checkpoint}s: selected ${selectedLabel}, simulator 12h PnL ${formatMoney(row?.totalPnl)} at ${liveSize} shares, live VWAP ${plan.vwap.toFixed(3)} >= min ${liveVwapFloor.toFixed(3)}.`,
+    reason: `BTC 5m tail entry at ${checkpoint}s: selected ${selectedLabel}, simulator 12h per-share EV ${formatPerShare(row?.avgPnlPerShare)} with PnL ${formatMoney(row?.totalPnl)}, live size ${liveSize} shares, live VWAP ${plan.vwap.toFixed(3)} >= min ${liveVwapFloor.toFixed(3)}.`,
     status: 'generated',
     ttlSeconds: Math.max(1, Math.ceil(snapshot.round.secondsToEnd)),
     createdAt: snapshot.capturedAt,
@@ -301,15 +302,14 @@ function readTailSummary(appConfig: AppConfig): { ok: true; value: TailSummary; 
 
 function selectSummaryRow(summary: TailSummary, appConfig: AppConfig): TailSummaryRow | null {
   const allowedCheckpoints = new Set(appConfig.pm5mTailEntryCheckpoints);
-  const rows = summary.completed?.byCheckpointSize || [];
+  const rows = summary.completed?.byCheckpoint || summary.completed?.byCheckpointSize || [];
   return rows
-    .filter((row) => row.size != null && Number.isFinite(row.size) && row.size > 0)
     .filter((row) => !allowedCheckpoints.size || (row.checkpointSeconds != null && allowedCheckpoints.has(row.checkpointSeconds)))
     .filter((row) => (row.rows ?? 0) >= appConfig.pm5mTailEntryMinRounds)
     .filter((row) => (row.totalPnl ?? Number.NEGATIVE_INFINITY) > 0)
     .sort((left, right) => (
-      (right.totalPnl ?? Number.NEGATIVE_INFINITY) - (left.totalPnl ?? Number.NEGATIVE_INFINITY)
-      || (right.avgPnlPerShare ?? Number.NEGATIVE_INFINITY) - (left.avgPnlPerShare ?? Number.NEGATIVE_INFINITY)
+      (right.avgPnlPerShare ?? Number.NEGATIVE_INFINITY) - (left.avgPnlPerShare ?? Number.NEGATIVE_INFINITY)
+      || (right.totalPnl ?? Number.NEGATIVE_INFINITY) - (left.totalPnl ?? Number.NEGATIVE_INFINITY)
       || (right.fillRate ?? 0) - (left.fillRate ?? 0)
       || (right.checkpointSeconds ?? 0) - (left.checkpointSeconds ?? 0)
     ))[0] ?? null;
@@ -317,7 +317,7 @@ function selectSummaryRow(summary: TailSummary, appConfig: AppConfig): TailSumma
 
 function summaryMinVwapFloor(summary: TailSummary, selectedRow: TailSummaryRow, appConfig: AppConfig): number {
   const bandRows = (summary.completed?.byAskBand || [])
-    .filter((row) => row.checkpointSeconds === selectedRow.checkpointSeconds && row.size === selectedRow.size)
+    .filter((row) => row.checkpointSeconds === selectedRow.checkpointSeconds)
     .filter((row) => (row.rows ?? 0) >= appConfig.pm5mTailEntryMinBandRows)
     .filter((row) => (row.totalPnl ?? Number.NEGATIVE_INFINITY) > 0)
     .map((row) => ({ row, floor: askBandFloor(row.askBand) }))
@@ -429,6 +429,10 @@ function formatPct(value: number): string {
 
 function formatMoney(value: number | null | undefined): string {
   return value == null || !Number.isFinite(value) ? 'n/a' : `$${value.toFixed(2)}`;
+}
+
+function formatPerShare(value: number | null | undefined): string {
+  return value == null || !Number.isFinite(value) ? 'n/a' : value.toFixed(4);
 }
 
 function isFakNoMatchError(error: string | undefined): boolean {

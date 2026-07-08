@@ -204,7 +204,8 @@ export type TailSimSummary = {
     assets: string[];
     interval: string;
     checkpoints: number[];
-    sizes: number[];
+    size?: number;
+    sizes?: number[];
     topLevels: number;
     quoteMaxAgeMs: number;
     lookbackHours?: number | null;
@@ -226,12 +227,14 @@ export type TailSimSummary = {
   };
   completed?: {
     rows: number;
-    byCheckpointSize: TailSimAggregateRow[];
+    byCheckpoint?: TailSimAggregateRow[];
+    byCheckpointSize?: TailSimAggregateRow[];
     byAskBand: TailSimAggregateRow[];
   };
   completedAllTime?: {
     rows: number;
-    byCheckpointSize: TailSimAggregateRow[];
+    byCheckpoint?: TailSimAggregateRow[];
+    byCheckpointSize?: TailSimAggregateRow[];
     byAskBand: TailSimAggregateRow[];
   };
   recentRounds?: Array<{
@@ -251,7 +254,13 @@ export type TailSimSummary = {
       noMidpoint: number | null;
       selectedBestAsk: number | null;
       overroundAsk: number | null;
-      sizePlans: Array<{
+      size?: number;
+      fillable?: boolean;
+      vwap?: number | null;
+      cost?: number | null;
+      filledShares?: number;
+      slippage?: number | null;
+      sizePlans?: Array<{
         size: number;
         fillable: boolean;
         vwap: number | null;

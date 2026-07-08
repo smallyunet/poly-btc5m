@@ -523,10 +523,10 @@ export function App() {
       : tailSim?.ok
         ? 'waiting'
         : 'unavailable';
-  const tailCheckpointRows = tailSim?.completed?.byCheckpointSize ?? [];
+  const tailCheckpointRows = tailSim?.completed?.byCheckpoint ?? tailSim?.completed?.byCheckpointSize ?? [];
   const tailBandRows = tailSim?.completed?.byAskBand ?? [];
   const tailRecentRounds = tailSim?.recentRounds ?? [];
-  const tailCommand = 'npm run research:pm5m-tail -- --assets btc --checkpoints 60,45,30,20,15,10,5 --sizes 5,10,25 --lookback-hours 12';
+  const tailCommand = 'npm run research:pm5m-tail -- --assets btc --checkpoints 60,45,30,20,15,10,5 --size 5 --lookback-hours 12';
   const tailGeneratedAtMs = tailSim?.generatedAt ? new Date(tailSim.generatedAt).getTime() : 0;
   const tailGeneratedLabel = tailGeneratedAtMs ? formatRelativeAge(tailGeneratedAtMs, nowMs) : 'not generated';
   const tailLookbackHours = tailSim?.config?.lookbackHours;
@@ -1687,7 +1687,7 @@ export function App() {
                     <DecisionMetric
                       label="All-time rows"
                       value={String(tailSimStatus?.completedAllTimeRows ?? tailSim.completedAllTime?.rows ?? 0)}
-                      detail={`${tailSim.config?.sizes?.join(', ') || '5, 10, 25'} shares`}
+                      detail={`${tailSim.config?.size ?? tailSim.config?.sizes?.[0] ?? 5} shares fixed`}
                       tone="neutral"
                     />
                   </div>
@@ -1731,16 +1731,15 @@ export function App() {
                     <div className="sectionHeader compact">
                       <div>
                         <span className="sectionKicker">Completed samples</span>
-                        <h3>Checkpoint x Size PnL Gate</h3>
+                        <h3>Checkpoint PnL Gate</h3>
                       </div>
                       <span className="panelSubTitle">{tailSim.completed?.rows ?? 0} finalized rows / {tailLookbackLabel}</span>
                     </div>
                     {tailCheckpointRows.length > 0 ? (
-                      <DataTable headers={['T-End', 'Size', 'Rows', 'Fill', 'Win', 'VWAP', 'Spread', 'Overround', 'EV/share', 'PnL']}>
+                      <DataTable headers={['T-End', 'Rows', 'Fill', 'Win', 'VWAP', 'Spread', 'Overround', 'EV/share', 'PnL']}>
                         {tailCheckpointRows.map((row) => (
-                          <tr key={`tail-checkpoint-${row.checkpointSeconds}-${row.size}`}>
+                          <tr key={`tail-checkpoint-${row.checkpointSeconds}`}>
                             <td className="mono">{row.checkpointSeconds}s</td>
-                            <td className="mono">{formatShares(row.size)}</td>
                             <td className="mono">{row.rows}</td>
                             <td><Badge tone={row.fillRate && row.fillRate >= 0.9 ? 'good' : 'warn'}>{row.fillable} / {formatRate(row.fillRate)}</Badge></td>
                             <td><Badge tone={row.winRate && row.avgVwap != null && row.winRate > row.avgVwap ? 'good' : 'warn'}>{row.wins} / {formatRate(row.winRate)}</Badge></td>
@@ -1768,11 +1767,10 @@ export function App() {
                       <span className="panelSubTitle">{tailBandRows.length} rows</span>
                     </div>
                     {tailBandRows.length > 0 ? (
-                      <DataTable headers={['T-End', 'Size', 'Ask band', 'Rows', 'Fill', 'Win', 'VWAP', 'EV/share', 'PnL']}>
+                      <DataTable headers={['T-End', 'Ask band', 'Rows', 'Fill', 'Win', 'VWAP', 'EV/share', 'PnL']}>
                         {tailBandRows.map((row) => (
-                          <tr key={`tail-band-${row.checkpointSeconds}-${row.size}-${row.askBand}`}>
+                          <tr key={`tail-band-${row.checkpointSeconds}-${row.askBand}`}>
                             <td className="mono">{row.checkpointSeconds}s</td>
-                            <td className="mono">{formatShares(row.size)}</td>
                             <td><Badge tone="neutral">{row.askBand || '-'}</Badge></td>
                             <td className="mono">{row.rows}</td>
                             <td><Badge tone={row.fillRate && row.fillRate >= 0.9 ? 'good' : 'warn'}>{formatRate(row.fillRate)}</Badge></td>
@@ -1809,12 +1807,13 @@ export function App() {
                             <span className="mutedBlock">{formatEtTime(round.startAt)} - {formatEtTime(round.endAt)}</span>
                             <div className="touchOutcomeStrip">
                               {round.samples.map((sample) => {
-                                const firstPlan = sample.sizePlans[0];
+                                const firstPlan = sample.sizePlans?.[0];
+                                const vwap = sample.vwap ?? firstPlan?.vwap;
                                 return (
                                   <span key={`${round.slug}-${sample.checkpointSeconds}`} className={`touchOutcomePill ${sample.status === 'sampled' ? 'paired' : sample.status === 'insufficient_depth' ? 'single' : 'none'}`} title={`YES mid ${sample.yesMidpoint ?? '-'} / NO mid ${sample.noMidpoint ?? '-'}`}>
                                     <em>{sample.checkpointSeconds}s</em>
                                     <Badge tone={sample.status === 'sampled' ? 'good' : sample.status === 'insufficient_depth' ? 'warn' : 'neutral'}>
-                                      {sample.selectedSide || 'none'} {firstPlan?.vwap == null ? '' : `@ ${firstPlan.vwap.toFixed(3)}`}
+                                      {sample.selectedSide || 'none'} {vwap == null ? '' : `@ ${vwap.toFixed(3)}`}
                                     </Badge>
                                   </span>
                                 );
