@@ -47,8 +47,6 @@ import {
   buildExecutionStats,
   buildRoundExecutionSummaries,
   currentRoundExposure,
-  fillStateLabel,
-  fillStateTone,
   formatCooldownRemaining,
   formatEv,
   formatEtRange,
@@ -60,7 +58,6 @@ import {
   formatSignedMoney,
   formatSubmittedLeg,
   isRoutineHeartbeatLog,
-  netFilledShares,
   orderFailureReason,
   orderMarketTitle,
   orderMatchesStrategyFilter,
@@ -71,6 +68,7 @@ import {
   positionPnl,
   positionValue,
   profileLabelFor,
+  roundFillState,
   roundStatusSummary,
   runtimeBuildLabel,
   strategyCheckLabel,
@@ -1166,8 +1164,7 @@ export function App() {
                           >
                             {day.rounds.map((round) => {
                               const hasUnfilled = round.unfilledOrders > 0;
-                              const net = netFilledShares(round);
-                              const fillLabel = fillStateLabel(net.yes, net.no);
+                              const fillState = roundFillState(round);
                               const status = roundStatusSummary(round);
                               return (
                                 <tr key={round.key}>
@@ -1203,7 +1200,7 @@ export function App() {
                                   <td className="mono">
                                     UP {formatShares(round.filledBuyYes)} / DOWN {formatShares(round.filledBuyNo)}
                                     {' '}
-                                    <Badge tone={fillStateTone(net.yes, net.no)}>{fillLabel}</Badge>
+                                    <Badge tone={fillState.tone}>{fillState.label}</Badge>
                                   </td>
                                   <td>
                                     <Badge tone={hasUnfilled ? 'warn' : 'good'}>
@@ -1247,8 +1244,7 @@ export function App() {
                     >
                       {roundPagination.pageRows.map((round) => {
                         const hasUnfilled = round.unfilledOrders > 0;
-                        const net = netFilledShares(round);
-                        const fillLabel = fillStateLabel(net.yes, net.no);
+                        const fillState = roundFillState(round);
                         const status = roundStatusSummary(round);
                         return (
                           <tr key={round.key}>
@@ -1284,7 +1280,7 @@ export function App() {
                             <td className="mono">
                               UP {formatShares(round.filledBuyYes)} / DOWN {formatShares(round.filledBuyNo)}
                               {' '}
-                              <Badge tone={fillStateTone(net.yes, net.no)}>{fillLabel}</Badge>
+                              <Badge tone={fillState.tone}>{fillState.label}</Badge>
                             </td>
                             <td className="mono">
                               UP {formatShares(round.filledSellYes)} / DOWN {formatShares(round.filledSellNo)}

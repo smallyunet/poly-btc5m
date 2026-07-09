@@ -302,6 +302,17 @@ export function fillStateLabel(yesShares: number, noShares: number): 'paired' | 
   return 'none';
 }
 
+export function roundFillState(round: RoundExecutionSummary): { label: string; tone: 'good' | 'warn' | 'neutral' } {
+  const net = netFilledShares(round);
+  const label = fillStateLabel(net.yes, net.no);
+  if (round.strategy === 'UPDOWN_TAIL_ENTRY') {
+    return label === 'none'
+      ? { label: 'none', tone: 'neutral' }
+      : { label: 'tail fill', tone: 'good' };
+  }
+  return { label, tone: fillStateTone(net.yes, net.no) };
+}
+
 export function netFilledShares(round: Pick<RoundExecutionSummary, 'filledBuyYes' | 'filledBuyNo' | 'filledSellYes' | 'filledSellNo'>) {
   return {
     yes: Math.max(0, round.filledBuyYes - round.filledSellYes),
@@ -380,6 +391,17 @@ export function roundStatusSummary(round: RoundExecutionSummary): RoundStatusSum
   }
   const net = netFilledShares(round);
   const fillLabel = fillStateLabel(net.yes, net.no);
+  if (round.strategy === 'UPDOWN_TAIL_ENTRY') {
+    if (fillLabel !== 'none') {
+      const tailSide = net.yes > SINGLE_FILL_EXPOSURE_EPSILON ? 'UP' : 'DOWN';
+      const shares = net.yes > SINGLE_FILL_EXPOSURE_EPSILON ? net.yes : net.no;
+      return { label: 'tail fill', tone: 'good', detail: `${tailSide} ${formatShares(shares)}` };
+    }
+    if (round.settlementStatus === 'settled') {
+      return { label: 'settled', tone: 'neutral', detail: round.settlementPnl == null ? 'settled without local fills' : formatMoney(round.settlementPnl) };
+    }
+    return { label: 'tail order', tone: 'neutral', detail: `${round.orderCount} orders` };
+  }
   if (fillLabel === 'paired') {
     return { label: 'paired', tone: 'good', detail: `UP ${formatShares(net.yes)} / DOWN ${formatShares(net.no)}` };
   }
@@ -848,6 +870,7 @@ export function buildDailyExecutionSummaries(rounds: RoundExecutionSummary[]): D
         return fillStateLabel(net.yes, net.no) === 'paired';
       }).length,
       singleRounds: sortedRounds.filter((round) => {
+        if (round.strategy === 'UPDOWN_TAIL_ENTRY') return false;
         const net = netFilledShares(round);
         return fillStateLabel(net.yes, net.no) === 'single';
       }).length,
