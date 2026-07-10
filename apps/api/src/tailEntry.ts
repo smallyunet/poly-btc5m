@@ -20,6 +20,7 @@ export type TailEntryEvaluation =
   | { ok: false; rejected?: TradeIntent; check: StrategyCheck };
 
 type TailSummaryRow = {
+  asset?: string;
   checkpointSeconds?: number;
   size?: number;
   askBand?: string;
@@ -35,10 +36,15 @@ type TailSummaryRow = {
 type TailSummary = {
   ok?: boolean;
   generatedAt?: string;
+  config?: {
+    assets?: string[];
+  };
   completed?: {
     byCheckpoint?: TailSummaryRow[];
     byCheckpointSize?: TailSummaryRow[];
+    byAssetCheckpoint?: TailSummaryRow[];
     byAskBand?: TailSummaryRow[];
+    byAssetAskBand?: TailSummaryRow[];
   };
 };
 
@@ -50,12 +56,12 @@ type QuoteSnapshot = {
 export function evaluateTailEntry(snapshot: StateSnapshot, appConfig: AppConfig, store: InMemoryStore): TailEntryEvaluation {
   const blockers: string[] = [];
   const conditions: StrategyCondition[] = [];
-  const enabled = appConfig.pm5mTailEntryEnabled && snapshot.profileId === 'btc-5m' && snapshot.interval === '5m' && snapshot.asset === 'btc';
+  const enabled = appConfig.pm5mTailEntryEnabled && snapshot.interval === '5m' && snapshot.profileId === `${snapshot.asset}-5m`;
   const summary = readTailSummary(appConfig);
-  const selectedSummaryRow = summary.value ? selectSummaryRow(summary.value, appConfig) : null;
+  const selectedSummaryRow = summary.value ? selectSummaryRow(summary.value, snapshot.asset, appConfig) : null;
   const checkpoint = selectedSummaryRow?.checkpointSeconds == null ? null : matchingCheckpoint(snapshot.round.secondsToEnd, selectedSummaryRow.checkpointSeconds, appConfig);
   const row = selectedSummaryRow;
-  const liveVwapFloor = selectedSummaryRow && summary.value ? summaryMinVwapFloor(summary.value, selectedSummaryRow, appConfig) : appConfig.pm5mTailEntryMinVwap;
+  const liveVwapFloor = selectedSummaryRow && summary.value ? summaryMinVwapFloor(summary.value, snapshot.asset, selectedSummaryRow, appConfig) : appConfig.pm5mTailEntryMinVwap;
   const yes = quoteSnapshot(snapshot, snapshot.round.yesTokenId, appConfig);
   const no = quoteSnapshot(snapshot, snapshot.round.noTokenId, appConfig);
   const selectedLabel = selectStrongSide(yes, no);
@@ -87,7 +93,7 @@ export function evaluateTailEntry(snapshot: StateSnapshot, appConfig: AppConfig,
   if (existingOrders.length >= appConfig.pm5mTailEntryMaxOrdersPerRound) blockers.push('TAIL_ROUND_ORDER_LIMIT_REACHED');
 
   conditions.push(
-    condition('Tail entry enabled', enabled, enabled ? 'btc-5m live path enabled' : 'disabled or non-btc-5m profile'),
+    condition('Tail entry enabled', enabled, enabled ? `${snapshot.asset}-5m tail path enabled` : 'disabled or non-5m profile'),
     condition('Tail checkpoint', checkpoint != null, selectedSummaryRow?.checkpointSeconds == null ? 'no summary-selected checkpoint' : checkpoint == null ? `${selectedSummaryRow.checkpointSeconds}s selected / ${snapshot.round.secondsToEnd.toFixed(1)}s to end` : `${checkpoint}s checkpoint / ${snapshot.round.secondsToEnd.toFixed(1)}s to end`),
     condition('Summary freshness', summary.ok, summary.label),
     condition('Summary selected row', Boolean(selectedSummaryRow), selectedSummaryRow ? `${selectedSummaryRow.checkpointSeconds}s / per-share EV ${formatPerShare(selectedSummaryRow.avgPnlPerShare)} / PnL ${formatMoney(selectedSummaryRow.totalPnl)}` : 'missing positive 12h PnL row'),
@@ -115,7 +121,7 @@ export function evaluateTailEntry(snapshot: StateSnapshot, appConfig: AppConfig,
     roundId: snapshot.round.id,
     title: '5m Tail Entry',
     status: blockers.length ? 'blocked' : 'eligible',
-    summary: 'Buy the stronger BTC 5m side near expiry only when the 12h tail simulator has positive PnL and current orderbook gates pass.',
+    summary: `Buy the stronger ${snapshot.asset.toUpperCase()} 5m side near expiry only when that asset's 12h tail simulator has positive PnL and current orderbook gates pass.`,
     reason: blockers.length ? blockers.join(', ') : `Tail entry eligible: buy ${selectedLabel} ${liveSize.toFixed(2)} @ ${plan!.vwap!.toFixed(3)} VWAP from best 12h checkpoint row.`,
     blockers,
     amountUsd: plan?.cost,
@@ -140,7 +146,7 @@ export function evaluateTailEntry(snapshot: StateSnapshot, appConfig: AppConfig,
     orderType: 'LIMIT',
     limitPrice: cappedPrice(plan.vwap + appConfig.pm5mTailEntryPriceOffset),
     shares: liveSize,
-    reason: `BTC 5m tail entry at ${checkpoint}s: selected ${selectedLabel}, simulator 12h per-share EV ${formatPerShare(row?.avgPnlPerShare)} with PnL ${formatMoney(row?.totalPnl)}, live size ${liveSize} shares, live VWAP ${plan.vwap.toFixed(3)} >= min ${liveVwapFloor.toFixed(3)}.`,
+    reason: `${snapshot.asset.toUpperCase()} 5m tail entry at ${checkpoint}s: selected ${selectedLabel}, simulator 12h per-share EV ${formatPerShare(row?.avgPnlPerShare)} with PnL ${formatMoney(row?.totalPnl)}, live size ${liveSize} shares, live VWAP ${plan.vwap.toFixed(3)} >= min ${liveVwapFloor.toFixed(3)}.`,
     status: 'generated',
     ttlSeconds: Math.max(1, Math.ceil(snapshot.round.secondsToEnd)),
     createdAt: snapshot.capturedAt,
@@ -203,7 +209,7 @@ export async function executeTailEntry(params: {
 
 async function tailExecutionGate(params: { appConfig: AppConfig; adapter: PolymarketAdapter; store: InMemoryStore; snapshot: StateSnapshot }, executionKey: string, intent: TradeIntent): Promise<{ ok: true } | { ok: false; reason: string; recordFailure: boolean }> {
   const reject = (reason: string, recordFailure = false) => ({ ok: false as const, reason, recordFailure });
-  if (params.snapshot.profileId !== 'btc-5m') return reject('TAIL_ENTRY_PROFILE_NOT_ALLOWED');
+  if (params.snapshot.interval !== '5m' || params.snapshot.profileId !== `${params.snapshot.asset}-5m`) return reject('TAIL_ENTRY_PROFILE_NOT_ALLOWED');
   if (params.snapshot.round.secondsToStart > 0) return reject('ROUND_NOT_STARTED');
   if (params.snapshot.round.secondsToEnd <= 0) return reject('ROUND_EXPIRED');
   if (!params.appConfig.ownerPrivateKey?.trim() && params.store.getRuntime().executionMode === 'live') return reject('OWNER_PRIVATE_KEY_MISSING', true);
@@ -300,9 +306,12 @@ function readTailSummary(appConfig: AppConfig): { ok: true; value: TailSummary; 
   }
 }
 
-function selectSummaryRow(summary: TailSummary, appConfig: AppConfig): TailSummaryRow | null {
+function selectSummaryRow(summary: TailSummary, asset: string, appConfig: AppConfig): TailSummaryRow | null {
   const allowedCheckpoints = new Set(appConfig.pm5mTailEntryCheckpoints);
-  const rows = summary.completed?.byCheckpoint || summary.completed?.byCheckpointSize || [];
+  const hasAssetBreakdown = Array.isArray(summary.completed?.byAssetCheckpoint);
+  const rows = hasAssetBreakdown
+    ? summary.completed!.byAssetCheckpoint!.filter((row) => row.asset === asset)
+    : asset === 'btc' ? summary.completed?.byCheckpoint || summary.completed?.byCheckpointSize || [] : [];
   return rows
     .filter((row) => !allowedCheckpoints.size || (row.checkpointSeconds != null && allowedCheckpoints.has(row.checkpointSeconds)))
     .filter((row) => (row.rows ?? 0) >= appConfig.pm5mTailEntryMinRounds)
@@ -315,8 +324,11 @@ function selectSummaryRow(summary: TailSummary, appConfig: AppConfig): TailSumma
     ))[0] ?? null;
 }
 
-function summaryMinVwapFloor(summary: TailSummary, selectedRow: TailSummaryRow, appConfig: AppConfig): number {
-  const bandRows = (summary.completed?.byAskBand || [])
+function summaryMinVwapFloor(summary: TailSummary, asset: string, selectedRow: TailSummaryRow, appConfig: AppConfig): number {
+  const hasAssetBreakdown = Array.isArray(summary.completed?.byAssetAskBand);
+  const bandRows = (hasAssetBreakdown
+    ? summary.completed!.byAssetAskBand!.filter((row) => row.asset === asset)
+    : asset === 'btc' ? summary.completed?.byAskBand || [] : [])
     .filter((row) => row.checkpointSeconds === selectedRow.checkpointSeconds)
     .filter((row) => (row.rows ?? 0) >= appConfig.pm5mTailEntryMinBandRows)
     .filter((row) => (row.totalPnl ?? Number.NEGATIVE_INFINITY) > 0)

@@ -42,6 +42,64 @@ services:
       - --
       - --assets
       - btc,eth,sol,doge,xrp,hype
+      - --interval
+      - 5m
+      - --min-price
+      - "0.29"
+      - --max-price
+      - "0.49"
+    volumes:
+      - ./data-lab:/app/data-lab
+
+  pm15m-touch-recorder:
+    build:
+      context: .
+      target: api
+      args:
+        APP_VERSION: ${APP_VERSION:-0.1.0}
+        GIT_SHA: ${GIT_SHA:-unknown}
+        BUILD_TIME: ${BUILD_TIME:-unknown}
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      NODE_ENV: production
+    command:
+      - npm
+      - run
+      - research:pm5m-touch
+      - --
+      - --assets
+      - btc,eth,sol,doge,xrp,hype
+      - --interval
+      - 15m
+      - --min-price
+      - "0.29"
+      - --max-price
+      - "0.49"
+    volumes:
+      - ./data-lab:/app/data-lab
+
+  pm1h-touch-recorder:
+    build:
+      context: .
+      target: api
+      args:
+        APP_VERSION: ${APP_VERSION:-0.1.0}
+        GIT_SHA: ${GIT_SHA:-unknown}
+        BUILD_TIME: ${BUILD_TIME:-unknown}
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      NODE_ENV: production
+    command:
+      - npm
+      - run
+      - research:pm5m-touch
+      - --
+      - --assets
+      - btc,eth,sol,doge,xrp,hype
+      - --interval
+      - 1h
       - --min-price
       - "0.29"
       - --max-price

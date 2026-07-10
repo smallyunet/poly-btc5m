@@ -553,7 +553,16 @@ function aggregate(rows) {
     byCheckpoint: aggregateBy(rows, (row) => `${row.checkpointSeconds}`, (row) => ({
       checkpointSeconds: row.checkpointSeconds,
     })),
+    byAssetCheckpoint: aggregateBy(rows, (row) => `${row.asset}:${row.checkpointSeconds}`, (row) => ({
+      asset: row.asset,
+      checkpointSeconds: row.checkpointSeconds,
+    })),
     byAskBand: aggregateBy(rows, (row) => `${row.checkpointSeconds}:${askBand(row.selectedBestAsk)}`, (row) => ({
+      checkpointSeconds: row.checkpointSeconds,
+      askBand: askBand(row.selectedBestAsk),
+    })),
+    byAssetAskBand: aggregateBy(rows, (row) => `${row.asset}:${row.checkpointSeconds}:${askBand(row.selectedBestAsk)}`, (row) => ({
+      asset: row.asset,
       checkpointSeconds: row.checkpointSeconds,
       askBand: askBand(row.selectedBestAsk),
     })),
@@ -606,7 +615,7 @@ function aggregateBy(rows, keyFn, seedFn) {
     avgOverroundAsk: roundMoneyOrNull(item.overroundCount ? item.totalOverroundAsk / item.overroundCount : null),
     avgPnlPerShare: roundMoneyOrNull(item.fillable ? item.totalPnlPerShare / item.fillable : null),
     totalPnl: roundMoney(item.totalPnl),
-  })).sort((a, b) => (b.checkpointSeconds - a.checkpointSeconds) || String(a.askBand || '').localeCompare(String(b.askBand || '')));
+  })).sort((a, b) => String(a.asset || '').localeCompare(String(b.asset || '')) || (b.checkpointSeconds - a.checkpointSeconds) || String(a.askBand || '').localeCompare(String(b.askBand || '')));
 }
 
 function askBand(value) {

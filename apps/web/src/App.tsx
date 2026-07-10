@@ -107,6 +107,7 @@ export function App() {
   const [simulationSubTab, setSimulationSubTab] = React.useState<SimulationSubTab>('price');
   const [tailSimulationSubTab, setTailSimulationSubTab] = React.useState<TailSimulationSubTab>('checkpoint');
   const [simulationAssetTab, setSimulationAssetTab] = React.useState<string>('btc');
+  const [tailSimulationAssetTab, setTailSimulationAssetTab] = React.useState<string>('btc');
   const [selectedProfileId, setSelectedProfileId] = React.useState<string>('all');
 
   // Logs Search & Filter States
@@ -472,7 +473,7 @@ export function App() {
     ? `${tailSelectedSideCondition?.actual || 'selected side'} @ ${tailEntryCheck.limitPrice == null ? 'strategy limit' : tailEntryCheck.limitPrice.toFixed(3)}`
     : tailEntryCheck?.conditions.filter((condition) => !condition.passed).slice(0, 2).map(blockerDetail).join(' / ')
       || tailEntryCheck?.reason
-      || 'waiting for BTC 5m tail gate';
+      || `waiting for ${viewState.profileState.profile.assetSymbol} 5m tail gate`;
   const profileStatusRows = state.profiles.map((item) => {
     const itemEntryCheck = item.strategyChecks.find((check) => check.strategy === 'UPDOWN_DUAL_ENTRY');
     const itemTailEntryCheck = item.strategyChecks.find((check) => check.strategy === 'UPDOWN_TAIL_ENTRY');
@@ -521,9 +522,17 @@ export function App() {
       : tailSim?.ok
         ? 'waiting'
         : 'unavailable';
-  const tailCheckpointRows = tailSim?.completed?.byCheckpoint ?? tailSim?.completed?.byCheckpointSize ?? [];
-  const tailBandRows = tailSim?.completed?.byAskBand ?? [];
-  const tailRecentRounds = tailSim?.recentRounds ?? [];
+  const tailAssets = tailSim?.config?.assets?.length ? tailSim.config.assets : ['btc', 'eth', 'sol', 'doge', 'xrp', 'hype'];
+  const selectedTailAsset = tailAssets.includes(tailSimulationAssetTab) ? tailSimulationAssetTab : tailAssets[0] || 'btc';
+  const hasTailAssetCheckpoints = Array.isArray(tailSim?.completed?.byAssetCheckpoint);
+  const tailCheckpointRows = hasTailAssetCheckpoints
+    ? tailSim?.completed?.byAssetCheckpoint?.filter((row) => row.asset === selectedTailAsset) ?? []
+    : selectedTailAsset === 'btc' ? tailSim?.completed?.byCheckpoint ?? tailSim?.completed?.byCheckpointSize ?? [] : [];
+  const hasTailAssetBands = Array.isArray(tailSim?.completed?.byAssetAskBand);
+  const tailBandRows = hasTailAssetBands
+    ? tailSim?.completed?.byAssetAskBand?.filter((row) => row.asset === selectedTailAsset) ?? []
+    : selectedTailAsset === 'btc' ? tailSim?.completed?.byAskBand ?? [] : [];
+  const tailRecentRounds = (tailSim?.recentRounds ?? []).filter((round) => round.asset === selectedTailAsset);
   const tailCommand = 'npm run research:pm5m-tail -- --assets btc,eth,sol,doge,xrp,hype --checkpoints 60,45,30,20,15,10,5 --size 5 --lookback-hours 12';
   const tailGeneratedAtMs = tailSim?.generatedAt ? new Date(tailSim.generatedAt).getTime() : 0;
   const tailGeneratedLabel = tailGeneratedAtMs ? formatRelativeAge(tailGeneratedAtMs, nowMs) : 'not generated';
@@ -543,7 +552,7 @@ export function App() {
       title: isAllProfiles ? 'Profile health and routing overview' : `${scopeLabel} execution cockpit`,
       summary: isAllProfiles
         ? 'Use this view to identify which markets are live, cooled down, blocked, or ready before drilling into one profile.'
-        : 'This is the primary action view: current round state, entry readiness, BTC 5m tail order state, open exposure, and hedge/profit-exit readiness.',
+        : 'This is the primary action view: current round state, entry readiness, profile-specific 5m tail order state, open exposure, and hedge/profit-exit readiness.',
     },
     portfolio: {
       kicker: 'Account Risk',
@@ -566,7 +575,7 @@ export function App() {
       kicker: 'Research Calibration',
       title: simulationResearchTab === 'tail' ? 'Tail Entry simulation results' : 'Touch-fill simulation results',
       summary: simulationResearchTab === 'tail'
-        ? 'Use this view to choose BTC 5m tail live parameters from the most recent 12h simulation PnL.'
+        ? 'Use this view to choose each asset\'s 5m tail live parameters from its own most recent 12h simulation PnL.'
         : 'Use this view to calibrate pre-round entry price levels across 5m assets.',
     },
     strategy: {
@@ -592,7 +601,7 @@ export function App() {
         ? { title: 'Asset x price matrix', summary: 'Check whether a price level works broadly or only on specific 5m assets.' }
         : { title: 'Current round touch strip', summary: 'Watch active recorder observations without mixing them into live bot execution.' })
     : (tailSimulationSubTab === 'checkpoint'
-      ? { title: 'Checkpoint x size PnL', summary: 'Primary live BTC 5m tail gate: use the best positive 12h PnL row, otherwise keep live tail stopped.' }
+      ? { title: 'Checkpoint x size PnL', summary: `Primary live ${selectedTailAsset.toUpperCase()} 5m tail gate: use that asset's best positive 12h PnL row, otherwise keep its live tail stopped.` }
       : tailSimulationSubTab === 'bands'
         ? { title: 'Ask-band performance', summary: 'Check which live entry price bands historically retained enough EV after fill and win rates.' }
         : { title: 'Recent tail sample strip', summary: 'Inspect how recent markets were sampled at each checkpoint and what side/price would have been selected.' });
@@ -1661,6 +1670,23 @@ export function App() {
                 </div>
               ) : (
                 <>
+                  <div className="assetMatrixTabs" aria-label="Tail simulation asset filter">
+                    {tailAssets.map((asset) => {
+                      const count = tailSim.completed?.byAssetCheckpoint?.filter((row) => row.asset === asset).length ?? 0;
+                      return (
+                        <button
+                          key={asset}
+                          type="button"
+                          className={`assetMatrixTab ${selectedTailAsset === asset ? 'active' : ''}`}
+                          onClick={() => setTailSimulationAssetTab(asset)}
+                        >
+                          <AssetLabel profileId={`${asset}-5m`} label={asset.toUpperCase()} />
+                          <span>{count}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+
                   <div className="simulationMetricGrid">
                     <DecisionMetric
                       label="WebSocket"
@@ -1677,7 +1703,7 @@ export function App() {
                     <DecisionMetric
                       label="Window rows"
                       value={String(tailSimStatus?.completedRows ?? tailSim.completed?.rows ?? 0)}
-                      detail={`${tailLookbackLabel} lookback / ${tailCheckpointRows.length} checkpoint rows`}
+                      detail={`${selectedTailAsset.toUpperCase()} / ${tailLookbackLabel} lookback / ${tailCheckpointRows.length} checkpoint rows`}
                       tone={(tailSimStatus?.completedRows ?? tailSim.completed?.rows ?? 0) > 0 ? 'good' : 'warn'}
                     />
                     <DecisionMetric
@@ -1734,7 +1760,7 @@ export function App() {
                     {tailCheckpointRows.length > 0 ? (
                       <DataTable headers={['T-End', 'Rows', 'Fill', 'Win', 'VWAP', 'Spread', 'Overround', 'EV/share', 'PnL']}>
                         {tailCheckpointRows.map((row) => (
-                          <tr key={`tail-checkpoint-${row.checkpointSeconds}`}>
+                          <tr key={`tail-checkpoint-${selectedTailAsset}-${row.checkpointSeconds}`}>
                             <td className="mono">{row.checkpointSeconds}s</td>
                             <td className="mono">{row.rows}</td>
                             <td><Badge tone={row.fillRate && row.fillRate >= 0.9 ? 'good' : 'warn'}>{row.fillable} / {formatRate(row.fillRate)}</Badge></td>
@@ -1765,7 +1791,7 @@ export function App() {
                     {tailBandRows.length > 0 ? (
                       <DataTable headers={['T-End', 'Ask band', 'Rows', 'Fill', 'Win', 'VWAP', 'EV/share', 'PnL']}>
                         {tailBandRows.map((row) => (
-                          <tr key={`tail-band-${row.checkpointSeconds}-${row.askBand}`}>
+                          <tr key={`tail-band-${selectedTailAsset}-${row.checkpointSeconds}-${row.askBand}`}>
                             <td className="mono">{row.checkpointSeconds}s</td>
                             <td><Badge tone="neutral">{row.askBand || '-'}</Badge></td>
                             <td className="mono">{row.rows}</td>

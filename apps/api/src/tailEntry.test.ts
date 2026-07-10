@@ -24,12 +24,19 @@ test('evaluates BTC 5m tail entry from simulator row and live VWAP', () => {
   assert.equal(evaluation.check.status, 'eligible');
 });
 
-test('executes live tail entries as FAK orders', async () => {
-  const config = tailConfig();
+test('executes non-BTC live tail entries as FAK orders', async () => {
+  const config = tailConfig({
+    assetRows: [
+      { asset: 'eth', checkpointSeconds: 60, rows: 25, fillable: 13, fillRate: 0.52, avgPnlPerShare: 0.13, totalPnl: 16.25, avgVwap: 0.66 },
+    ],
+    assetBandRows: [
+      { asset: 'eth', checkpointSeconds: 60, askBand: '55-65c', rows: 4, fillable: 4, fillRate: 1, avgPnlPerShare: 0.13, totalPnl: 16.25, avgVwap: 0.61 },
+    ],
+  });
   config.ownerPrivateKey = '0xabc';
   config.depositWallet = '0xwallet';
   const store = new InMemoryStore('live', 2_000, { persistencePath: false });
-  const currentSnapshot = snapshot();
+  const currentSnapshot = snapshot({ asset: 'eth' });
   const evaluation = evaluateTailEntry(currentSnapshot, config, store);
   assert.equal(evaluation.ok, true, evaluation.check.reason);
 
@@ -52,6 +59,7 @@ test('executes live tail entries as FAK orders', async () => {
   assert.deepEqual(diagnostics, []);
   assert.equal(postedOptions?.orderType, 'FAK');
   assert.equal(postedOptions?.execute, true);
+  assert.equal(store.roundOrders('eth-5m', currentSnapshot.round.id, 'UPDOWN_TAIL_ENTRY')[0]?.profileId, 'eth-5m');
 });
 
 test('retries tail entry FAK no-match errors before recording the outcome', async () => {
@@ -180,6 +188,44 @@ test('blocks tail entry when every 12h simulator parameter is losing', () => {
   assert.equal(evaluation.check.conditions.find((condition) => condition.label === 'Summary selected row')?.actual, 'missing positive 12h PnL row');
 });
 
+test('uses each profile asset\'s own tail rows when the recorder contains multiple assets', () => {
+  const config = tailConfig({
+    rows: [
+      { checkpointSeconds: 60, rows: 80, fillable: 50, fillRate: 0.625, avgPnlPerShare: 0.12, totalPnl: 30, avgVwap: 0.6 },
+    ],
+    assetRows: [
+      { asset: 'btc', checkpointSeconds: 60, rows: 40, fillable: 20, fillRate: 0.5, avgPnlPerShare: -0.03, totalPnl: -3, avgVwap: 0.62 },
+      { asset: 'eth', checkpointSeconds: 60, rows: 40, fillable: 30, fillRate: 0.75, avgPnlPerShare: 0.25, totalPnl: 33, avgVwap: 0.55 },
+    ],
+    assetBandRows: [
+      { asset: 'btc', checkpointSeconds: 60, askBand: '55-65c', rows: 4, fillable: 4, fillRate: 1, avgPnlPerShare: -0.03, totalPnl: -1, avgVwap: 0.61 },
+      { asset: 'eth', checkpointSeconds: 60, askBand: '55-65c', rows: 4, fillable: 4, fillRate: 1, avgPnlPerShare: 0.2, totalPnl: 4, avgVwap: 0.61 },
+    ],
+    checkpoints: [60],
+  });
+  const store = new InMemoryStore('monitor', 2_000, { persistencePath: false });
+  const evaluation = evaluateTailEntry(snapshot({ secondsToEnd: 59 }), config, store);
+
+  assert.equal(evaluation.ok, false);
+  assert.equal(evaluation.check.blockers.includes('TAIL_SUMMARY_12H_PNL_NOT_POSITIVE'), true, evaluation.check.reason);
+
+  const ethEvaluation = evaluateTailEntry(snapshot({ asset: 'eth', secondsToEnd: 59 }), config, store);
+  assert.equal(ethEvaluation.ok, true, ethEvaluation.check.reason);
+  if (ethEvaluation.ok) {
+    assert.equal(ethEvaluation.intent.profileId, 'eth-5m');
+    assert.match(ethEvaluation.intent.reason, /^ETH 5m tail entry/);
+  }
+});
+
+test('blocks non-BTC tail entry when only a legacy combined summary is available', () => {
+  const config = tailConfig();
+  const store = new InMemoryStore('monitor', 2_000, { persistencePath: false });
+  const evaluation = evaluateTailEntry(snapshot({ asset: 'sol', secondsToEnd: 59 }), config, store);
+
+  assert.equal(evaluation.ok, false);
+  assert.equal(evaluation.check.blockers.includes('TAIL_SUMMARY_12H_PNL_NOT_POSITIVE'), true, evaluation.check.reason);
+});
+
 test('blocks tail entry when live VWAP is below the simulator strength floor', () => {
   const config = tailConfig({
     rows: [
@@ -221,6 +267,27 @@ function tailConfig(options: {
     totalPnl?: number;
     avgVwap: number;
   }>;
+  assetRows?: Array<{
+    asset: string;
+    checkpointSeconds: number;
+    rows: number;
+    fillable: number;
+    fillRate: number;
+    avgPnlPerShare: number;
+    totalPnl?: number;
+    avgVwap: number;
+  }>;
+  assetBandRows?: Array<{
+    asset: string;
+    checkpointSeconds: number;
+    askBand: string;
+    rows: number;
+    fillable: number;
+    fillRate: number;
+    avgPnlPerShare: number;
+    totalPnl?: number;
+    avgVwap: number;
+  }>;
   checkpoints?: number[];
 } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pm5m-tail-test-'));
@@ -238,6 +305,7 @@ function tailConfig(options: {
         totalPnl: 16.25,
         avgVwap: 0.66,
       }],
+      byAssetCheckpoint: options.assetRows,
       byAskBand: options.askBandRows || [{
         checkpointSeconds: 60,
         askBand: '55-65c',
@@ -248,6 +316,7 @@ function tailConfig(options: {
         totalPnl: 16.25,
         avgVwap: 0.61,
       }],
+      byAssetAskBand: options.assetBandRows,
     },
   }));
   const config = loadConfig();
@@ -271,22 +340,23 @@ function tailConfig(options: {
   return config;
 }
 
-function snapshot(options: { secondsToEnd?: number; yesBid?: number; yesAsk?: number; yesAskSize?: number; noAsk?: number } = {}): StateSnapshot {
+function snapshot(options: { asset?: 'btc' | 'eth' | 'sol' | 'doge' | 'xrp' | 'hype'; secondsToEnd?: number; yesBid?: number; yesAsk?: number; yesAskSize?: number; noAsk?: number } = {}): StateSnapshot {
   const now = Date.now();
+  const asset = options.asset ?? 'btc';
   const secondsToEnd = options.secondsToEnd ?? 59;
   const startAt = new Date(now - (300 - secondsToEnd) * 1000).toISOString();
   const endAt = new Date(now + secondsToEnd * 1000).toISOString();
   return {
     id: 'snapshot-tail',
-    profileId: 'btc-5m',
-    asset: 'btc',
+    profileId: `${asset}-5m`,
+    asset,
     interval: '5m',
     capturedAt: new Date(now).toISOString(),
     round: {
-      id: 'btc-updown-5m-test',
+      id: `${asset}-updown-5m-test`,
       phase: 'monitoring',
-      eventSlug: 'btc-updown-5m-test',
-      title: 'BTC 5m test',
+      eventSlug: `${asset}-updown-5m-test`,
+      title: `${asset.toUpperCase()} 5m test`,
       startAt,
       endAt,
       secondsToStart: -(300 - secondsToEnd),

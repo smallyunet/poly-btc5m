@@ -269,7 +269,7 @@ test('runBotTick blocks 5m entry intents when the asset selector does not select
   const entryCheck = dashboard.profiles[0].strategyChecks.find((check) => check.strategy === 'UPDOWN_DUAL_ENTRY');
 
   assert.equal(entryCheck?.status, 'blocked');
-  assert.ok(entryCheck?.blockers.includes('PM5M_ASSET_NOT_SELECTED'));
+  assert.ok(entryCheck?.blockers.includes('PM_ASSET_NOT_SELECTED'));
   assert.equal(dashboard.intents.filter((intent) => intent.status === 'generated').length, 0);
-  assert.equal(dashboard.intents.filter((intent) => intent.rejectionReason === 'PM5M_ASSET_NOT_SELECTED').length, 2);
+  assert.equal(dashboard.intents.filter((intent) => intent.rejectionReason === 'PM_ASSET_NOT_SELECTED').length, 2);
 });

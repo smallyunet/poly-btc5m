@@ -52,10 +52,14 @@ export type AppConfig = {
   maxEntryQueueImbalance: number;
   pm5mSimPriceEnabled: boolean;
   pm5mSimPriceSummaryPath: string;
+  pm15mSimPriceSummaryPath: string;
+  pm1hSimPriceSummaryPath: string;
   pm5mSimPriceRefreshMs: number;
   pm5mSimPriceMin: number;
   pm5mSimPriceMax: number;
   pm5mSimPriceMinRounds: number;
+  pm15mSimPriceMinRounds: number;
+  pm1hSimPriceMinRounds: number;
   pm5mSimPriceFallback: number;
   pm5mSimPriceMaxSummaryAgeMs: number;
   pm5mSimRequirePositiveEv: boolean;
@@ -178,19 +182,23 @@ export function loadConfig(): AppConfig {
     maxDriftRatio120s: numberEnv('MAX_DRIFT_RATIO_120S', 0.45),
     maxMomentumRatio30s: numberEnv('MAX_MOMENTUM_RATIO_30S', 0.55),
     maxEntryQueueImbalance: numberEnv('MAX_ENTRY_QUEUE_IMBALANCE', 5),
-    pm5mSimPriceEnabled: booleanEnv('PM5M_SIM_PRICE_ENABLED', booleanEnv('BTC_5M_SIM_PRICE_ENABLED', false)),
+    pm5mSimPriceEnabled: booleanEnv('PM_SIM_PRICE_ENABLED', booleanEnv('PM5M_SIM_PRICE_ENABLED', booleanEnv('BTC_5M_SIM_PRICE_ENABLED', false))),
     pm5mSimPriceSummaryPath: process.env.PM5M_SIM_PRICE_SUMMARY_PATH || process.env.BTC_5M_SIM_PRICE_SUMMARY_PATH || process.env.PM5M_TOUCH_SUMMARY_PATH || 'data-lab/pm-5m-touch/summary.json',
-    pm5mSimPriceRefreshMs: parsePositiveInteger(process.env.PM5M_SIM_PRICE_REFRESH_MS || process.env.BTC_5M_SIM_PRICE_REFRESH_MS, 30_000),
-    pm5mSimPriceMin: numberEnv('PM5M_SIM_PRICE_MIN', numberEnv('BTC_5M_SIM_PRICE_MIN', 0.29)),
-    pm5mSimPriceMax: numberEnv('PM5M_SIM_PRICE_MAX', numberEnv('BTC_5M_SIM_PRICE_MAX', 0.49)),
+    pm15mSimPriceSummaryPath: process.env.PM15M_SIM_PRICE_SUMMARY_PATH || 'data-lab/pm-15m-touch/summary.json',
+    pm1hSimPriceSummaryPath: process.env.PM1H_SIM_PRICE_SUMMARY_PATH || 'data-lab/pm-1h-touch/summary.json',
+    pm5mSimPriceRefreshMs: parsePositiveInteger(process.env.PM_SIM_PRICE_REFRESH_MS || process.env.PM5M_SIM_PRICE_REFRESH_MS || process.env.BTC_5M_SIM_PRICE_REFRESH_MS, 30_000),
+    pm5mSimPriceMin: numberEnv('PM_SIM_PRICE_MIN', numberEnv('PM5M_SIM_PRICE_MIN', numberEnv('BTC_5M_SIM_PRICE_MIN', 0.29))),
+    pm5mSimPriceMax: numberEnv('PM_SIM_PRICE_MAX', numberEnv('PM5M_SIM_PRICE_MAX', numberEnv('BTC_5M_SIM_PRICE_MAX', 0.49))),
     pm5mSimPriceMinRounds: parsePositiveInteger(process.env.PM5M_SIM_PRICE_MIN_ROUNDS || process.env.BTC_5M_SIM_PRICE_MIN_ROUNDS, 100),
-    pm5mSimPriceFallback: numberEnv('PM5M_SIM_PRICE_FALLBACK', numberEnv('BTC_5M_SIM_PRICE_FALLBACK', numberEnv('DUAL_LIMIT_PRICE', 0.45))),
-    pm5mSimPriceMaxSummaryAgeMs: parsePositiveInteger(process.env.PM5M_SIM_PRICE_MAX_SUMMARY_AGE_MS || process.env.BTC_5M_SIM_PRICE_MAX_SUMMARY_AGE_MS, 10 * 60_000),
-    pm5mSimRequirePositiveEv: booleanEnv('PM5M_SIM_REQUIRE_POSITIVE_EV', false),
-    pm5mSimMinEvPerShare: numberEnv('PM5M_SIM_MIN_EV_PER_SHARE', 0),
-    pm5mAssetSelectorEnabled: booleanEnv('PM5M_ASSET_SELECTOR_ENABLED', false),
-    pm5mAssetSelectorMaxAssets: parsePositiveInteger(process.env.PM5M_ASSET_SELECTOR_MAX_ASSETS, 1),
-    pm5mAssetSelectorSinglePenalty: numberEnv('PM5M_ASSET_SELECTOR_SINGLE_PENALTY', 0.05),
+    pm15mSimPriceMinRounds: parsePositiveInteger(process.env.PM15M_SIM_PRICE_MIN_ROUNDS, 100),
+    pm1hSimPriceMinRounds: parsePositiveInteger(process.env.PM1H_SIM_PRICE_MIN_ROUNDS, 100),
+    pm5mSimPriceFallback: numberEnv('PM_SIM_PRICE_FALLBACK', numberEnv('PM5M_SIM_PRICE_FALLBACK', numberEnv('BTC_5M_SIM_PRICE_FALLBACK', numberEnv('DUAL_LIMIT_PRICE', 0.45)))),
+    pm5mSimPriceMaxSummaryAgeMs: parsePositiveInteger(process.env.PM_SIM_PRICE_MAX_SUMMARY_AGE_MS || process.env.PM5M_SIM_PRICE_MAX_SUMMARY_AGE_MS || process.env.BTC_5M_SIM_PRICE_MAX_SUMMARY_AGE_MS, 10 * 60_000),
+    pm5mSimRequirePositiveEv: booleanEnv('PM_SIM_REQUIRE_POSITIVE_EV', booleanEnv('PM5M_SIM_REQUIRE_POSITIVE_EV', false)),
+    pm5mSimMinEvPerShare: numberEnv('PM_SIM_MIN_EV_PER_SHARE', numberEnv('PM5M_SIM_MIN_EV_PER_SHARE', 0)),
+    pm5mAssetSelectorEnabled: booleanEnv('PM_ASSET_SELECTOR_ENABLED', booleanEnv('PM5M_ASSET_SELECTOR_ENABLED', false)),
+    pm5mAssetSelectorMaxAssets: parsePositiveInteger(process.env.PM_ASSET_SELECTOR_MAX_ASSETS || process.env.PM5M_ASSET_SELECTOR_MAX_ASSETS, 1),
+    pm5mAssetSelectorSinglePenalty: numberEnv('PM_ASSET_SELECTOR_SINGLE_PENALTY', numberEnv('PM5M_ASSET_SELECTOR_SINGLE_PENALTY', 0.05)),
     pm5mTailEntryEnabled: booleanEnv('PM5M_TAIL_ENTRY_ENABLED', false),
     pm5mTailEntrySummaryPath: process.env.PM5M_TAIL_ENTRY_SUMMARY_PATH || process.env.PM5M_TAIL_SUMMARY_PATH || 'data-lab/pm-5m-tail/summary.json',
     pm5mTailEntryMaxSummaryAgeMs: parsePositiveInteger(process.env.PM5M_TAIL_ENTRY_MAX_SUMMARY_AGE_MS, 10 * 60_000),

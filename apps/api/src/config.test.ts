@@ -38,11 +38,27 @@ const COOLDOWN_ENV_KEYS = [
   'BINANCE_WS_URL',
   'PM5M_SIM_PRICE_ENABLED',
   'PM5M_SIM_PRICE_MIN_ROUNDS',
+  'PM_SIM_PRICE_ENABLED',
+  'PM_SIM_REQUIRE_POSITIVE_EV',
+  'PM_SIM_MIN_EV_PER_SHARE',
+  'PM_SIM_LOOKBACK_HOURS',
+  'PM_SIM_PRICE_REFRESH_MS',
+  'PM_SIM_PRICE_MIN',
+  'PM_SIM_PRICE_MAX',
+  'PM_SIM_PRICE_FALLBACK',
+  'PM_SIM_PRICE_MAX_SUMMARY_AGE_MS',
+  'PM15M_SIM_PRICE_SUMMARY_PATH',
+  'PM1H_SIM_PRICE_SUMMARY_PATH',
+  'PM15M_SIM_PRICE_MIN_ROUNDS',
+  'PM1H_SIM_PRICE_MIN_ROUNDS',
   'PM5M_SIM_REQUIRE_POSITIVE_EV',
   'PM5M_SIM_MIN_EV_PER_SHARE',
   'PM5M_ASSET_SELECTOR_ENABLED',
   'PM5M_ASSET_SELECTOR_MAX_ASSETS',
   'PM5M_ASSET_SELECTOR_SINGLE_PENALTY',
+  'PM_ASSET_SELECTOR_ENABLED',
+  'PM_ASSET_SELECTOR_MAX_ASSETS',
+  'PM_ASSET_SELECTOR_SINGLE_PENALTY',
   'BTC_5M_SIM_PRICE_ENABLED',
   'BTC_5M_SIM_PRICE_MIN_ROUNDS',
   '5M_SINGLE_FILL_COOLDOWN_BASE_MS',
@@ -112,11 +128,33 @@ test('PM 5m simulator price config supports generic env and legacy BTC env fallb
   });
 });
 
-test('PM 5m asset selector config supports live top-N routing env', () => {
+test('simulation config supports global positive-EV gates and interval-specific summaries', () => {
   withEnv(COOLDOWN_ENV_KEYS, {
-    PM5M_ASSET_SELECTOR_ENABLED: 'true',
-    PM5M_ASSET_SELECTOR_MAX_ASSETS: '2',
-    PM5M_ASSET_SELECTOR_SINGLE_PENALTY: '0.07',
+    PM_SIM_PRICE_ENABLED: 'true',
+    PM_SIM_REQUIRE_POSITIVE_EV: 'true',
+    PM_SIM_MIN_EV_PER_SHARE: '0.02',
+    PM15M_SIM_PRICE_SUMMARY_PATH: 'data-lab/test-15m/summary.json',
+    PM1H_SIM_PRICE_SUMMARY_PATH: 'data-lab/test-1h/summary.json',
+    PM15M_SIM_PRICE_MIN_ROUNDS: '40',
+    PM1H_SIM_PRICE_MIN_ROUNDS: '12',
+  }, () => {
+    const config = loadConfig();
+
+    assert.equal(config.pm5mSimPriceEnabled, true);
+    assert.equal(config.pm5mSimRequirePositiveEv, true);
+    assert.equal(config.pm5mSimMinEvPerShare, 0.02);
+    assert.equal(config.pm15mSimPriceSummaryPath, 'data-lab/test-15m/summary.json');
+    assert.equal(config.pm1hSimPriceSummaryPath, 'data-lab/test-1h/summary.json');
+    assert.equal(config.pm15mSimPriceMinRounds, 40);
+    assert.equal(config.pm1hSimPriceMinRounds, 12);
+  });
+});
+
+test('asset selector config supports global per-interval top-N routing env', () => {
+  withEnv(COOLDOWN_ENV_KEYS, {
+    PM_ASSET_SELECTOR_ENABLED: 'true',
+    PM_ASSET_SELECTOR_MAX_ASSETS: '2',
+    PM_ASSET_SELECTOR_SINGLE_PENALTY: '0.07',
     PM5M_SIM_REQUIRE_POSITIVE_EV: 'true',
     PM5M_SIM_MIN_EV_PER_SHARE: '0.01',
   }, () => {

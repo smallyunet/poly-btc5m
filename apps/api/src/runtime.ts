@@ -10,7 +10,7 @@ import type { MarketDataService } from './marketData';
 import type { ParticipationService } from './participation';
 import type { RecurringCryptoRoundDiscovery } from './roundDiscovery';
 import type { InMemoryStore, SingleFillCooldownRecord } from './store';
-import { rankFiveMinuteAssetCandidates, selectFiveMinuteEntryPrice, type FiveMinuteAssetSelection } from './simPriceSelector';
+import { rankIntervalAssetCandidates, selectProfileEntryPrice, type IntervalAssetSelection } from './simPriceSelector';
 import { evaluateTailEntry, executeTailEntry } from './tailEntry';
 
 export async function runAllProfilesTick(appConfig: AppConfig, store: InMemoryStore, data: MarketDataService, adapter: PolymarketAdapter, discovery: RecurringCryptoRoundDiscovery, participationService: ParticipationService): Promise<StateSnapshot[]> {
@@ -18,15 +18,15 @@ export async function runAllProfilesTick(appConfig: AppConfig, store: InMemorySt
   const selectorProfiles = appConfig.executionMode === 'live'
     ? enabledProfiles.filter((profile) => profile.status === 'live')
     : enabledProfiles;
-  const fiveMinuteAssetSelections = rankFiveMinuteAssetCandidates(appConfig, selectorProfiles);
+  const intervalAssetSelections = rankIntervalAssetCandidates(appConfig, selectorProfiles);
   const snapshots: StateSnapshot[] = [];
   for (const profile of enabledProfiles) {
-    snapshots.push(await runBotTick(appConfigForProfile(appConfig, profile), store, data, adapter, discovery, participationService, profile, fiveMinuteAssetSelections.get(profile.id)));
+    snapshots.push(await runBotTick(appConfigForProfile(appConfig, profile), store, data, adapter, discovery, participationService, profile, intervalAssetSelections.get(profile.id)));
   }
   return snapshots;
 }
 
-export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, data: MarketDataService, adapter: PolymarketAdapter, discovery: RecurringCryptoRoundDiscovery, participationService: ParticipationService, profile: MarketProfile = appConfig.marketProfiles[0], fiveMinuteAssetSelection?: FiveMinuteAssetSelection): Promise<StateSnapshot> {
+export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, data: MarketDataService, adapter: PolymarketAdapter, discovery: RecurringCryptoRoundDiscovery, participationService: ParticipationService, profile: MarketProfile = appConfig.marketProfiles[0], intervalAssetSelection?: IntervalAssetSelection): Promise<StateSnapshot> {
   const diagnostics: string[] = [];
   store.setActiveStrategyProfile(appConfig.activeStrategyProfile);
   const classicActive = appConfig.activeStrategyProfile === 'classic';
@@ -70,7 +70,7 @@ export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, dat
   const portfolio = await loadPortfolio(appConfig, adapter, tokenLabels, store.settledPnl(), diagnostics);
   const positions = portfolio.positions.filter((position) => position.label !== 'UNKNOWN');
   const roundSnapshot = roundToSnapshot(appConfig, store, round);
-  const dynamicEntryPrice = withAssetSelection(selectFiveMinuteEntryPrice(appConfig, profile, roundSnapshot), fiveMinuteAssetSelection);
+  const dynamicEntryPrice = withAssetSelection(selectProfileEntryPrice(appConfig, profile, roundSnapshot), intervalAssetSelection);
   store.recordDynamicEntryPrice(dynamicEntryPrice);
   const entryAppConfig = { ...appConfig, dualLimitPrice: dynamicEntryPrice.selectedPrice };
   const baseSnapshot: StateSnapshot = {
@@ -102,8 +102,8 @@ export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, dat
       appConfig.bypassEntryScoreGating,
     )
     : evaluatedEntry;
-  const simGuardedEntry = applyFiveMinuteSimulatorSelection(confirmedEntry, dynamicEntryPrice);
-  const entry = applyFiveMinuteAssetSelection(simGuardedEntry, fiveMinuteAssetSelection);
+  const simGuardedEntry = applySimulatorSelection(confirmedEntry, dynamicEntryPrice);
+  const entry = applyIntervalAssetSelection(simGuardedEntry, intervalAssetSelection);
   const intents = entry.intents.map((intent) => withProfile(intent, profile));
   store.recordIntents([...intents, ...entry.rejected.map((intent) => withProfile(intent, profile))]);
   const executionDiagnostics = await executeLiveIntents({
@@ -171,7 +171,7 @@ export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, dat
 }
 
 function shouldEvaluateCurrentTailEntry(appConfig: AppConfig, profile: MarketProfile): boolean {
-  return appConfig.pm5mTailEntryEnabled && profile.id === 'btc-5m' && profile.asset === 'btc' && profile.interval === '5m';
+  return appConfig.pm5mTailEntryEnabled && profile.interval === '5m';
 }
 
 function appConfigForProfile(appConfig: AppConfig, profile: MarketProfile): AppConfig {
@@ -223,7 +223,7 @@ function withProfile<T extends object>(value: T, profile: MarketProfile): T {
   return { ...value, profileId: profile.id, asset: profile.asset, interval: profile.interval };
 }
 
-function withAssetSelection(selection: ReturnType<typeof selectFiveMinuteEntryPrice>, assetSelection?: FiveMinuteAssetSelection): ReturnType<typeof selectFiveMinuteEntryPrice> {
+function withAssetSelection(selection: ReturnType<typeof selectProfileEntryPrice>, assetSelection?: IntervalAssetSelection): ReturnType<typeof selectProfileEntryPrice> {
   if (!assetSelection) return selection;
   return {
     ...selection,
@@ -237,9 +237,9 @@ function withAssetSelection(selection: ReturnType<typeof selectFiveMinuteEntryPr
   };
 }
 
-function applyFiveMinuteAssetSelection(entry: StrategyEvaluation, assetSelection?: FiveMinuteAssetSelection): StrategyEvaluation {
+function applyIntervalAssetSelection(entry: StrategyEvaluation, assetSelection?: IntervalAssetSelection): StrategyEvaluation {
   if (!assetSelection) return entry;
-  const selectorCondition = condition('5m asset selector', assetSelection.selected, assetSelection.reason);
+  const selectorCondition = condition('Interval asset selector', assetSelection.selected, assetSelection.reason);
   const checks = entry.checks.map((check) => {
     if (check.strategy !== 'UPDOWN_DUAL_ENTRY') return check;
     if (assetSelection.selected) {
@@ -248,8 +248,8 @@ function applyFiveMinuteAssetSelection(entry: StrategyEvaluation, assetSelection
     return {
       ...check,
       status: 'blocked' as const,
-      reason: check.reason ? `${check.reason}; PM5M_ASSET_NOT_SELECTED` : 'PM5M_ASSET_NOT_SELECTED',
-      blockers: [...new Set([...check.blockers, 'PM5M_ASSET_NOT_SELECTED'])],
+      reason: check.reason ? `${check.reason}; PM_ASSET_NOT_SELECTED` : 'PM_ASSET_NOT_SELECTED',
+      blockers: [...new Set([...check.blockers, 'PM_ASSET_NOT_SELECTED'])],
       conditions: [...check.conditions, selectorCondition],
     };
   });
@@ -262,7 +262,7 @@ function applyFiveMinuteAssetSelection(entry: StrategyEvaluation, assetSelection
       ...entry.intents.map((intent) => ({
         ...intent,
         status: 'rejected' as const,
-        rejectionReason: 'PM5M_ASSET_NOT_SELECTED',
+        rejectionReason: 'PM_ASSET_NOT_SELECTED',
         reason: `${intent.reason}; ${assetSelection.reason}`,
       })),
     ],
@@ -270,9 +270,9 @@ function applyFiveMinuteAssetSelection(entry: StrategyEvaluation, assetSelection
   };
 }
 
-function applyFiveMinuteSimulatorSelection(entry: StrategyEvaluation, selection: ReturnType<typeof selectFiveMinuteEntryPrice>): StrategyEvaluation {
+function applySimulatorSelection(entry: StrategyEvaluation, selection: ReturnType<typeof selectProfileEntryPrice>): StrategyEvaluation {
   if (selection.enabled || !selection.reason.includes('positive EV')) return entry;
-  const selectorCondition = condition('5m simulator EV gate', false, selection.reason);
+  const selectorCondition = condition('Simulator EV gate', false, selection.reason);
   const checks = entry.checks.map((check) => {
     if (check.strategy !== 'UPDOWN_DUAL_ENTRY') return check;
     return {

@@ -29,9 +29,9 @@ export const STRATEGY_RULES: StrategyRule[] = [
     id: 'UPDOWN_TAIL_ENTRY',
     title: '5m Tail Entry',
     allocationPct: 0,
-    summary: 'During an active BTC 5m round, buy the stronger side near expiry only when tail simulation parameters and live orderbook gates both pass.',
+    summary: 'During an active recurring-crypto 5m round, buy the stronger side near expiry only when that asset\'s tail simulation parameters and live orderbook gates both pass.',
     entryRules: [
-      'Only runs for the BTC 5m profile when PM5M_TAIL_ENTRY_ENABLED=true.',
+      'Runs independently for enabled BTC, ETH, SOL, DOGE, XRP, and HYPE 5m profiles when PM5M_TAIL_ENTRY_ENABLED=true.',
       'The round must already be running and inside one configured PM5M_TAIL_ENTRY_CHECKPOINTS window.',
       'The tail simulation summary must be fresh and the matching checkpoint row must pass minimum sample, per-share edge, and reference fill-rate checks.',
       'YES and NO books must be live and fresh; the stronger side is selected by midpoint.',

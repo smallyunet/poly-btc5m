@@ -5,7 +5,7 @@ import process from 'node:process';
 import WebSocket from 'ws';
 
 const DEFAULT_ASSETS = ['btc', 'eth', 'sol', 'doge', 'xrp', 'hype'];
-const ROUND_SECONDS = 300;
+const INTERVAL_SECONDS = { '5m': 300, '15m': 900, '1h': 3600 };
 const DEFAULT_GAMMA_URL = 'https://gamma-api.polymarket.com';
 const DEFAULT_CLOB_WS_URL = 'wss://ws-subscriptions-clob.polymarket.com/ws/market';
 
@@ -17,16 +17,20 @@ if (args.help) {
 
 const config = {
   assets: args.assets || DEFAULT_ASSETS,
+  interval: args.interval || '5m',
   minPrice: args.minPrice ?? 0.29,
   maxPrice: args.maxPrice ?? 0.49,
   step: args.step ?? 0.01,
-  outDir: path.resolve(args.outDir || 'data-lab/pm-5m-touch'),
+  outDir: path.resolve(args.outDir || `data-lab/pm-${args.interval || '5m'}-touch`),
   gammaUrl: stripTrailingSlash(args.gammaUrl || DEFAULT_GAMMA_URL),
   clobWsUrl: args.clobWsUrl || DEFAULT_CLOB_WS_URL,
   discoveryMs: args.discoveryMs ?? 30_000,
   summaryMs: args.summaryMs ?? 5_000,
-  lookbackHours: args.lookbackHours ?? numberFromEnv('PM5M_TOUCH_LOOKBACK_HOURS', 12),
+  lookbackHours: args.lookbackHours ?? numberFromEnv('PM_SIM_LOOKBACK_HOURS', numberFromEnv('PM5M_TOUCH_LOOKBACK_HOURS', 12)),
 };
+
+config.roundSeconds = INTERVAL_SECONDS[config.interval];
+if (!config.roundSeconds) throw new Error(`Unsupported interval: ${config.interval}. Expected 5m, 15m, or 1h.`);
 
 const priceLevels = buildPriceLevels(config.minPrice, config.maxPrice, config.step);
 const rounds = new Map();
@@ -40,8 +44,8 @@ let summaryTimer;
 
 fs.mkdirSync(config.outDir, { recursive: true });
 
-log(`starting Polymarket 5m touch recorder`);
-log(`assets=${config.assets.join(',')} prices=${priceLevels.map((price) => cents(price)).join(',')} out=${config.outDir}`);
+log(`starting Polymarket ${config.interval} touch recorder`);
+log(`assets=${config.assets.join(',')} interval=${config.interval} prices=${priceLevels.map((price) => cents(price)).join(',')} out=${config.outDir}`);
 if (historicalCompletedResults.length) {
   log(`loaded ${historicalCompletedResults.length} historical completed result rows`);
 }
@@ -65,6 +69,9 @@ function parseArgs(argv) {
     if (arg === '--help' || arg === '-h') parsed.help = true;
     else if (arg === '--assets') {
       parsed.assets = String(next || '').split(',').map((item) => item.trim().toLowerCase()).filter(Boolean);
+      index += 1;
+    } else if (arg === '--interval') {
+      parsed.interval = String(next || '').trim().toLowerCase();
       index += 1;
     } else if (arg === '--min-price') {
       parsed.minPrice = Number(next);
@@ -104,6 +111,7 @@ function printHelp() {
 
 Options:
   --assets btc,eth,sol,doge,xrp,hype
+  --interval 5m
   --min-price 0.29
   --max-price 0.49
   --step 0.01
@@ -118,8 +126,8 @@ Options:
 
 async function discoverAll() {
   const nowSec = Math.floor(Date.now() / 1000);
-  const currentStart = Math.floor(nowSec / ROUND_SECONDS) * ROUND_SECONDS;
-  const starts = [currentStart, currentStart + ROUND_SECONDS, currentStart + ROUND_SECONDS * 2];
+  const currentStart = Math.floor(nowSec / config.roundSeconds) * config.roundSeconds;
+  const starts = [currentStart, currentStart + config.roundSeconds, currentStart + config.roundSeconds * 2];
   for (const asset of config.assets) {
     for (const startSec of starts) {
       await discoverRound(asset, startSec);
@@ -128,8 +136,8 @@ async function discoverAll() {
 }
 
 async function discoverRound(asset, startSec) {
-  const slug = `${asset}-updown-5m-${startSec}`;
-  const key = `${asset}:${slug}`;
+  const slug = `${asset}-updown-${config.interval}-${startSec}`;
+  const key = `${asset}:${config.interval}:${slug}`;
   if (rounds.has(key)) return;
   const market = await gammaMarket(slug);
   if (!isUsableMarket(market, slug)) return;
@@ -143,10 +151,11 @@ async function discoverRound(asset, startSec) {
 
   const round = {
     asset,
+    interval: config.interval,
     slug,
     title: String(market.question || slug),
     startAt: new Date(startSec * 1000).toISOString(),
-    endAt: new Date((startSec + ROUND_SECONDS) * 1000).toISOString(),
+    endAt: new Date((startSec + config.roundSeconds) * 1000).toISOString(),
     yesTokenId,
     noTokenId,
     firstSeenAt: new Date().toISOString(),
@@ -168,6 +177,7 @@ async function discoverRound(asset, startSec) {
     type: 'round_discovered',
     recordedAt: new Date().toISOString(),
     asset,
+    interval: config.interval,
     slug,
     title: round.title,
     startAt: round.startAt,
@@ -285,6 +295,7 @@ function recordBestAsk(tokenId, bestAsk) {
       type: 'touch',
       recordedAt: nowIso,
       asset: round.asset,
+      interval: round.interval,
       slug: round.slug,
       side: indexed.side,
       tokenId,
@@ -317,6 +328,7 @@ function resultRowsForRound(round) {
       type: 'round_result',
       recordedAt: new Date().toISOString(),
       asset: round.asset,
+      interval: round.interval,
       slug: round.slug,
       title: round.title,
       startAt: round.startAt,
@@ -355,7 +367,7 @@ function writeSummary() {
     generatedAt: new Date().toISOString(),
     config: {
       assets: config.assets,
-      interval: '5m',
+      interval: config.interval,
       minPrice: config.minPrice,
       maxPrice: config.maxPrice,
       step: config.step,
@@ -381,6 +393,7 @@ function writeSummary() {
       .slice(0, 30)
       .map((round) => ({
         asset: round.asset,
+        interval: round.interval,
         slug: round.slug,
         title: round.title,
         startAt: round.startAt,
@@ -436,6 +449,7 @@ function parseHistoricalResultRow(line) {
       type: 'round_result',
       recordedAt: String(row.recordedAt || ''),
       asset,
+      interval: typeof row.interval === 'string' ? row.interval : config.interval,
       slug,
       title,
       startAt: typeof row.startAt === 'string' ? row.startAt : undefined,
@@ -462,7 +476,7 @@ function uniqueResultRows(rows) {
 }
 
 function resultRowKey(row) {
-  return `${row.asset}:${row.slug}:${priceKey(row.price)}`;
+  return `${row.asset}:${row.interval || config.interval}:${row.slug}:${priceKey(row.price)}`;
 }
 
 function aggregate(rows) {
@@ -581,7 +595,7 @@ function stripTrailingSlash(value) {
 }
 
 function log(message) {
-  console.log(`[pm5m-touch] ${new Date().toISOString()} ${message}`);
+  console.log(`[pm-${config.interval}-touch] ${new Date().toISOString()} ${message}`);
 }
 
 function shutdown() {

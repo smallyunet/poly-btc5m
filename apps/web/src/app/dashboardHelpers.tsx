@@ -180,6 +180,7 @@ export type TouchSimSummary = {
 export type TouchOutcome = 'paired' | 'single' | 'none';
 
 export type TailSimAggregateRow = {
+  asset?: string;
   checkpointSeconds: number;
   size: number;
   askBand?: string;
@@ -229,13 +230,17 @@ export type TailSimSummary = {
     rows: number;
     byCheckpoint?: TailSimAggregateRow[];
     byCheckpointSize?: TailSimAggregateRow[];
+    byAssetCheckpoint?: TailSimAggregateRow[];
     byAskBand: TailSimAggregateRow[];
+    byAssetAskBand?: TailSimAggregateRow[];
   };
   completedAllTime?: {
     rows: number;
     byCheckpoint?: TailSimAggregateRow[];
     byCheckpointSize?: TailSimAggregateRow[];
+    byAssetCheckpoint?: TailSimAggregateRow[];
     byAskBand: TailSimAggregateRow[];
+    byAssetAskBand?: TailSimAggregateRow[];
   };
   recentRounds?: Array<{
     asset: string;
