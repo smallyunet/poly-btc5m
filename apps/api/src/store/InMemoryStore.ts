@@ -5,7 +5,7 @@ import { STRATEGY_RULES } from '../../../../packages/strategy/src';
 import type { BotRuntimeStatus, DashboardState, DataFeedStatus, DynamicEntryPriceSelection, EntryRuntimeConfig, ExecutionMode, FillRecord, MarketProfile, MarketProfileId, OrderRecord, RuntimeLogRecord, SettlementRecord, StateSnapshot, StrategyCheck, StrategyId, StrategyProfile, TradeIntent } from '../../../../packages/shared/src';
 import { CLASSIC_ENTRY_STRATEGY, EXPERIMENT_STRATEGY, FINAL_SINGLE_FILL_GRACE_MS } from './constants';
 import { cooldownCategory, entrySignalScope, fillStrategy, finalSingleFillReviewMs, isExperimentStopLike, isFillRecordLike, isMarketProfileId, isOrderRecordLike, isRoundEnded, isSameCooldownEvent, isSingleFillCooldownEventLike, isSingleFillCooldownLike, isSingleFillHedgeOutcomeLike, isTelegramNotificationStateLike, isTradeIntentLike, matchingOrderFills, maxCooldown, netShares, normalizeCooldownPolicy, optionalEnv, orderStrategy, parseProfileRoundKey, profileAsset, profileDurationMs, profileDurationSeconds, profileIntervals, profileRoundKey, roundMoney, roundStartMs, runtimeVersion, strategyProfileForStrategy, sum, toTime } from './helpers';
-import type { ExperimentStopRecord, OpenOrderLike, PersistedRuntimeState, SingleFillCooldownEvent, SingleFillCooldownPolicy, SingleFillCooldownRecord, SingleFillHedgeCandidate, SingleFillHedgeOutcome, SingleFillProfitExitCandidate, StoreOptions, TelegramNotificationState } from './types';
+import type { ExperimentStopRecord, OpenOrderLike, PendingSingleFillRiskRecord, PersistedRuntimeState, SingleFillCooldownEvent, SingleFillCooldownPolicy, SingleFillCooldownRecord, SingleFillHedgeCandidate, SingleFillHedgeOutcome, SingleFillProfitExitCandidate, StoreOptions, TelegramNotificationState } from './types';
 
 export class InMemoryStore {
   private runtime: BotRuntimeStatus;
@@ -375,6 +375,41 @@ export class InMemoryStore {
     });
     if (updated) this.persistState();
     return updated;
+  }
+
+  futureOpenDualOrders(profileId: MarketProfileId, sourceRoundId: string): OrderRecord[] {
+    const sourceStartMs = roundStartMs(sourceRoundId);
+    if (sourceStartMs == null) return [];
+    return this.orders.filter((order) => {
+      if (order.profileId !== profileId || order.side !== 'BUY') return false;
+      if (orderStrategy(order) !== CLASSIC_ENTRY_STRATEGY) return false;
+      if (order.status !== 'posted' && order.status !== 'partially_filled') return false;
+      if (!order.clobOrderId) return false;
+      const orderStartMs = roundStartMs(order.roundId);
+      return orderStartMs != null && orderStartMs > sourceStartMs;
+    });
+  }
+
+  getPendingSingleFillRisk(profileId: MarketProfileId, nowMs = Date.now()): PendingSingleFillRiskRecord | null {
+    const candidates: PendingSingleFillRiskRecord[] = [];
+    for (const key of this.pendingSingleFillReviewRoundIds) {
+      const { profileId: sourceProfileId, roundId } = parseProfileRoundKey(key);
+      if (!sourceProfileId || this.singleFillCooldownRoundIds.has(key)) continue;
+      if (!this.sharedCooldownTargetProfileIds(sourceProfileId).includes(profileId)) continue;
+      const reviewAtMs = finalSingleFillReviewMs(roundId, sourceProfileId);
+      if (reviewAtMs == null) continue;
+      const exposure = this.singleSidedBuyExposure(roundId, CLASSIC_ENTRY_STRATEGY, sourceProfileId);
+      if (!exposure.singleSided) continue;
+      candidates.push({
+        profileId,
+        sourceProfileId,
+        roundId,
+        expiresAt: new Date(Math.max(reviewAtMs, nowMs + 60_000)).toISOString(),
+        yesShares: exposure.yesShares,
+        noShares: exposure.noShares,
+      });
+    }
+    return candidates.sort((left, right) => toTime(right.expiresAt) - toTime(left.expiresAt))[0] ?? null;
   }
 
   getRoundStrike(roundId: string): number | undefined {

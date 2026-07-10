@@ -693,6 +693,8 @@ The hedge is therefore a tail-loss reducer, not an unconditional return enhancer
 
 ### Cooldown After One Side Fills
 
+Before final review, a detected single-sided fill creates a provisional `PENDING_SINGLE_FILL_RISK` lock. The lock cannot be bypassed by the score or cooldown bypass settings. It blocks new Dual entries and cancels still-open Dual BUY orders for later rounds on affected same-asset profiles. If the missing side later fills, the provisional lock clears automatically.
+
 Final-round review is still the cooldown trigger. It only reviews rounds that have tracked local strategy BUY orders; external/manual fills with no local order record are ignored. If final BUY fills are paired, the hedge succeeded or the original orders later filled, so no single-fill cooldown starts.
 
 If the final state is still single-sided, cooldown duration depends on the latest hedge outcome:

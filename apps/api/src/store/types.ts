@@ -20,6 +20,15 @@ export type SingleFillHedgeCandidate = {
 
 export type SingleFillProfitExitCandidate = SingleFillHedgeCandidate;
 
+export type PendingSingleFillRiskRecord = {
+  profileId: MarketProfileId;
+  sourceProfileId: MarketProfileId;
+  roundId: string;
+  expiresAt: string;
+  yesShares: number;
+  noShares: number;
+};
+
 export type SingleFillHedgeOutcome = {
   profileId: MarketProfileId;
   roundId: string;

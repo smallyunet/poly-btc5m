@@ -163,6 +163,7 @@ test('caps tail entry limit price at the CLOB maximum', () => {
     ],
     checkpoints: [60],
   });
+  config.pm5mTailEntryMaxVwap = 0.99;
   const store = new InMemoryStore('monitor', 2_000, { persistencePath: false });
   const evaluation = evaluateTailEntry(snapshot({ yesBid: 0.98, yesAsk: 0.99, noAsk: 0.02 }), config, store);
 
@@ -242,6 +243,55 @@ test('blocks tail entry when live VWAP is below the simulator strength floor', (
   assert.equal(evaluation.ok, false);
   assert.equal(evaluation.check.blockers.includes('TAIL_VWAP_TOO_LOW'), true, evaluation.check.reason);
   assert.equal(evaluation.check.conditions.find((condition) => condition.label === 'VWAP floor')?.actual, '0.610 / min 0.650');
+});
+
+test('blocks tail entry when live VWAP exceeds the configured ceiling', () => {
+  const config = tailConfig();
+  const store = new InMemoryStore('monitor', 2_000, { persistencePath: false });
+  const evaluation = evaluateTailEntry(snapshot({ yesBid: 0.87, yesAsk: 0.88, noAsk: 0.14 }), config, store);
+
+  assert.equal(evaluation.ok, false);
+  assert.equal(evaluation.check.blockers.includes('TAIL_VWAP_TOO_HIGH'), true, evaluation.check.reason);
+  assert.equal(evaluation.check.conditions.find((condition) => condition.label === 'VWAP ceiling')?.actual, '0.880 / max 0.850');
+});
+
+test('caps tail limit offset at the configured VWAP ceiling', () => {
+  const config = tailConfig();
+  const store = new InMemoryStore('monitor', 2_000, { persistencePath: false });
+  const evaluation = evaluateTailEntry(snapshot({ yesBid: 0.84, yesAsk: 0.85, noAsk: 0.17 }), config, store);
+
+  assert.equal(evaluation.ok, true, evaluation.check.reason);
+  if (!evaluation.ok) return;
+  assert.equal(evaluation.intent.limitPrice, 0.85);
+});
+
+test('execution gate rejects a stale tail intent above the configured ceiling', async () => {
+  const config = tailConfig();
+  config.ownerPrivateKey = '0xabc';
+  config.depositWallet = '0xwallet';
+  const store = new InMemoryStore('live', 2_000, { persistencePath: false });
+  const currentSnapshot = snapshot();
+  const evaluation = evaluateTailEntry(currentSnapshot, config, store);
+  assert.equal(evaluation.ok, true, evaluation.check.reason);
+  if (!evaluation.ok) return;
+  let posted = false;
+  const adapter = {
+    async executeLimitIntent() {
+      posted = true;
+      return { ok: true, orderId: 'unexpected', price: 0.86, size: 5 };
+    },
+  } as unknown as PolymarketAdapter;
+
+  const diagnostics = await executeTailEntry({
+    appConfig: config,
+    adapter,
+    store,
+    snapshot: currentSnapshot,
+    evaluation: { ...evaluation, intent: { ...evaluation.intent, limitPrice: 0.86 } },
+  });
+
+  assert.equal(posted, false);
+  assert.match(diagnostics[0] || '', /TAIL_LIMIT_PRICE_ABOVE_MAX/);
 });
 
 function tailConfig(options: {

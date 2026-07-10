@@ -34,6 +34,41 @@ test('does not start single-fill cooldown before the round is final', () => {
   assert.equal(store.getActiveEntryCooldown(PROFILE, nowMs), null);
 });
 
+test('exposes pending single-fill risk before final review and clears it when paired', () => {
+  const nowMs = Date.now();
+  const roundId = roundIdFromStart(nowMs - 4 * 60_000);
+  const store = new InMemoryStore('live', 2_000, { persistencePath: false }, 'classic', undefined, [marketProfile('btc-5m'), marketProfile('btc-15m')]);
+
+  store.recordOrder(order(roundId, 'YES'));
+  const yesFill = fill(roundId, 'YES');
+  store.recordFills([yesFill]);
+  store.maybeStartSingleFillCooldown([yesFill], policy(), nowMs, 'UPDOWN_DUAL_ENTRY', PROFILE);
+
+  const risk = store.getPendingSingleFillRisk('btc-15m', nowMs);
+  assert.equal(risk?.sourceProfileId, PROFILE);
+  assert.equal(risk?.roundId, roundId);
+  assert.equal(risk?.yesShares, 10);
+  assert.equal(risk?.noShares, 0);
+
+  store.recordOrder(order(roundId, 'NO'));
+  store.recordFills([fill(roundId, 'NO')]);
+  assert.equal(store.getPendingSingleFillRisk(PROFILE, nowMs), null);
+  assert.equal(store.getPendingSingleFillRisk('btc-15m', nowMs), null);
+});
+
+test('finds only later open Dual orders for pending-risk cancellation', () => {
+  const nowMs = Date.now();
+  const sourceRound = roundIdFromStart(nowMs - 4 * 60_000);
+  const laterRound = roundIdFromStart(nowMs + 60_000);
+  const store = new InMemoryStore('live', 2_000, { persistencePath: false });
+
+  store.recordOrder(order(sourceRound, 'NO', { clobOrderId: 'source-order' }));
+  store.recordOrder(order(laterRound, 'YES', { clobOrderId: 'later-yes' }));
+  store.recordOrder(order(laterRound, 'NO', { clobOrderId: 'later-no', status: 'filled' }));
+
+  assert.deepEqual(store.futureOpenDualOrders(PROFILE, sourceRound).map((item) => item.clobOrderId), ['later-yes']);
+});
+
 test('starts single-fill cooldown only after final round state is single-sided', () => {
   const nowMs = Date.now();
   const roundId = roundIdFromStart(nowMs - 7 * 60_000);

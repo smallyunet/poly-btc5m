@@ -9,6 +9,7 @@ import { buildSingleFillLossExitCheck, executeSingleFillLossExits, lossExitExpos
 import type { MarketDataService } from './marketData';
 import type { ParticipationService } from './participation';
 import type { RecurringCryptoRoundDiscovery } from './roundDiscovery';
+import { cancelFutureDualOrdersForPendingRisk } from './pendingSingleFillRisk';
 import type { InMemoryStore, SingleFillCooldownRecord } from './store';
 import { rankIntervalAssetCandidates, selectProfileEntryPrice, type IntervalAssetSelection } from './simPriceSelector';
 import { evaluateTailEntry, executeTailEntry } from './tailEntry';
@@ -70,6 +71,12 @@ export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, dat
   const portfolio = await loadPortfolio(appConfig, adapter, tokenLabels, store.settledPnl(), diagnostics);
   const positions = portfolio.positions.filter((position) => position.label !== 'UNKNOWN');
   const roundSnapshot = roundToSnapshot(appConfig, store, round);
+  const fillCooldowns = await reconcileFills(appConfig, adapter, store, roundSnapshot, tokenLabels, diagnostics, profile);
+  const orderCooldowns = await reconcileTrackedOrders(appConfig, adapter, store, diagnostics, profile);
+  const pendingSingleFillRisk = store.getPendingSingleFillRisk(profile.id);
+  if (pendingSingleFillRisk) {
+    diagnostics.push(...await cancelFutureDualOrdersForPendingRisk(store, adapter, pendingSingleFillRisk));
+  }
   const dynamicEntryPrice = withAssetSelection(selectProfileEntryPrice(appConfig, profile, roundSnapshot), intervalAssetSelection);
   store.recordDynamicEntryPrice(dynamicEntryPrice);
   const entryAppConfig = { ...appConfig, dualLimitPrice: dynamicEntryPrice.selectedPrice };
@@ -90,7 +97,14 @@ export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, dat
     diagnostics,
   };
   const activeCooldown = store.getActiveEntryCooldown(profile.id);
-  const risk = riskConfig(entryAppConfig, store.getRuntime().executionMode !== 'live', activeCooldown?.expiresAt, activeCooldown ? `single fill on ${activeCooldown.roundId}` : undefined);
+  const risk = riskConfig(
+    entryAppConfig,
+    store.getRuntime().executionMode !== 'live',
+    activeCooldown?.expiresAt,
+    activeCooldown ? `single fill on ${activeCooldown.roundId}` : undefined,
+    pendingSingleFillRisk?.expiresAt,
+    pendingSingleFillRisk ? `pending single fill from ${pendingSingleFillRisk.sourceProfileId} on ${pendingSingleFillRisk.roundId}` : undefined,
+  );
   const snapshot: StateSnapshot = { ...baseSnapshot, regime: classifyRegime(baseSnapshot, risk) };
   snapshot.orderbookDepth = buildOrderbookDepthSnapshot(snapshot, entryAppConfig);
   const evaluatedEntry = classicActive ? evaluateEntry(snapshot, risk) : evaluateExperimentEntry(snapshot, appConfig, store);
@@ -125,8 +139,6 @@ export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, dat
   if (tailSnapshot) tailSnapshot.orderbookDepth = buildOrderbookDepthSnapshot(tailSnapshot, entryAppConfig);
   const tailEntry = classicActive && tailSnapshot ? evaluateTailEntry(tailSnapshot, appConfig, store) : null;
   const tailEntryDiagnostics = tailEntry && tailSnapshot ? await executeTailEntry({ appConfig, adapter, store, snapshot: tailSnapshot, evaluation: tailEntry }) : [];
-  const fillCooldowns = await reconcileFills(appConfig, adapter, store, roundSnapshot, tokenLabels, diagnostics, profile);
-  const orderCooldowns = await reconcileTrackedOrders(appConfig, adapter, store, diagnostics, profile);
   const crossProfileRiskDiagnostics = classicActive
     ? await executeCrossProfileSingleFillRisk(appConfig, store, data, adapter, [...fillCooldowns, ...orderCooldowns])
     : [];
@@ -1062,7 +1074,14 @@ async function resolvedWinningLabel(appConfig: AppConfig, eventSlug: string): Pr
   return null;
 }
 
-function riskConfig(appConfig: AppConfig, dryRun: boolean, entryCooldownUntil?: string, entryCooldownReason?: string): StrategyRiskConfig {
+function riskConfig(
+  appConfig: AppConfig,
+  dryRun: boolean,
+  entryCooldownUntil?: string,
+  entryCooldownReason?: string,
+  pendingSingleFillRiskUntil?: string,
+  pendingSingleFillRiskReason?: string,
+): StrategyRiskConfig {
   return {
     dryRun,
     dualLimitPrice: appConfig.dualLimitPrice,
@@ -1096,6 +1115,8 @@ function riskConfig(appConfig: AppConfig, dryRun: boolean, entryCooldownUntil?: 
     entryOrderTtlSeconds: appConfig.marketConfig.decisionLeadSeconds,
     entryCooldownUntil,
     entryCooldownReason,
+    pendingSingleFillRiskUntil,
+    pendingSingleFillRiskReason,
   };
 }
 

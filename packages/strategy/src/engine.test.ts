@@ -143,6 +143,21 @@ test('bypasses active single-fill cooldown when enabled', () => {
   assert.match(result.checks[0].conditions.find((item) => item.label === 'Single-fill cooldown')?.actual || '', /bypassed/);
 });
 
+test('pending single-fill risk cannot be bypassed', () => {
+  const snapshot = { ...baseSnapshot(chopFeatures()), regime: 'CHOP' as const };
+  const result = evaluateEntry(snapshot, {
+    ...risk,
+    bypassEntryScoreGating: true,
+    bypassSingleFillCooldown: true,
+    pendingSingleFillRiskUntil: new Date(Date.now() + 2 * 60_000).toISOString(),
+    pendingSingleFillRiskReason: 'pending single fill on round-0',
+  });
+  assert.equal(result.intents.length, 0);
+  assert.equal(result.rejected.length, 2);
+  assert.match(result.rejected[0].rejectionReason || '', /PENDING_SINGLE_FILL_RISK/);
+  assert.equal(result.checks[0].conditions.find((item) => item.label === 'Pending single-fill risk')?.passed, false);
+});
+
 test('generates paired YES and NO intents in a fresh CHOP decision window', () => {
   const snapshot = { ...baseSnapshot(chopFeatures()), regime: 'CHOP' as const };
   const result = evaluateEntry(snapshot, risk);

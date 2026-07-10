@@ -33,6 +33,8 @@ export type StrategyRiskConfig = {
   entryOrderTtlSeconds: number;
   entryCooldownUntil?: string;
   entryCooldownReason?: string;
+  pendingSingleFillRiskUntil?: string;
+  pendingSingleFillRiskReason?: string;
 };
 
 export type ExitEvaluationContext = {
@@ -88,6 +90,8 @@ export function evaluateEntry(snapshot: StateSnapshot, config: StrategyRiskConfi
   const cooldownUntilMs = config.entryCooldownUntil ? new Date(config.entryCooldownUntil).getTime() : 0;
   const cooldownActive = Number.isFinite(cooldownUntilMs) && cooldownUntilMs > Date.now();
   const cooldownPassed = config.bypassSingleFillCooldown || !cooldownActive;
+  const pendingRiskUntilMs = config.pendingSingleFillRiskUntil ? new Date(config.pendingSingleFillRiskUntil).getTime() : 0;
+  const pendingRiskActive = Number.isFinite(pendingRiskUntilMs) && pendingRiskUntilMs > Date.now();
   const centerCrosses = snapshot.features.centerCross120s ?? snapshot.features.cross120s;
   const centerMinBiExcursion = snapshot.features.centerMinBiExcursionBps120s ?? snapshot.features.minBiExcursionBps120s;
   const decisionWindowPassed = entryBypass || inDecisionWindow;
@@ -107,6 +111,7 @@ export function evaluateEntry(snapshot: StateSnapshot, config: StrategyRiskConfi
   const participationPassed = entryBypass || !participation.blocked;
 
   if (!cooldownPassed) reasons.push('SINGLE_FILL_COOLDOWN');
+  if (pendingRiskActive) reasons.push('PENDING_SINGLE_FILL_RISK');
   if (!roundTokensPassed) reasons.push('ROUND_TOKENS_MISSING');
   if (!decisionWindowPassed) reasons.push('NOT_IN_DECISION_WINDOW');
   if (!scoreGatingPassed) reasons.push(`REGIME_${snapshot.regime}`);
@@ -144,6 +149,7 @@ export function evaluateEntry(snapshot: StateSnapshot, config: StrategyRiskConfi
     conditions: [
       condition('Decision window', decisionWindowPassed, entryBypass ? `${snapshot.round.secondsToStart.toFixed(1)}s to start / min ${config.entryMinSecondsToStart}s (bypassed)` : `${snapshot.round.secondsToStart.toFixed(1)}s to start / min ${config.entryMinSecondsToStart}s`),
       condition('Single-fill cooldown', cooldownPassed, config.bypassSingleFillCooldown && cooldownActive ? `${cooldownLabel(config.entryCooldownUntil, config.entryCooldownReason)} (bypassed)` : cooldownActive ? cooldownLabel(config.entryCooldownUntil, config.entryCooldownReason) : 'inactive'),
+      condition('Pending single-fill risk', !pendingRiskActive, pendingRiskActive ? cooldownLabel(config.pendingSingleFillRiskUntil, config.pendingSingleFillRiskReason) : 'inactive'),
       condition('Round token ids', roundTokensPassed, roundTokensPassed ? 'YES/NO token ids present' : 'missing YES or NO token id'),
       condition('Regime is CHOP', scoreGatingPassed, entryBypass ? `${snapshot.regime} (bypassed)` : snapshot.regime),
       condition('CHOP score threshold', chopScoreThresholdPassed, entryBypass ? `${snapshot.features.chopScore.toFixed(1)} / ${config.minChopScore} (bypassed)` : `${snapshot.features.chopScore.toFixed(1)} / ${config.minChopScore}`),

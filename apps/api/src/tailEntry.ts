@@ -68,6 +68,9 @@ export function evaluateTailEntry(snapshot: StateSnapshot, appConfig: AppConfig,
   const selected = selectedLabel === 'YES' ? yes : selectedLabel === 'NO' ? no : null;
   const liveSize = appConfig.pm5mTailEntrySize;
   const plan = selected ? buyVwap(selected.quote.asks || [], liveSize) : null;
+  const tailLimitPrice = plan?.vwap == null
+    ? undefined
+    : Math.min(cappedPrice(plan.vwap + appConfig.pm5mTailEntryPriceOffset), appConfig.pm5mTailEntryMaxVwap);
   const overroundAsk = yes?.quote.bestAsk != null && no?.quote.bestAsk != null ? roundMoney(yes.quote.bestAsk + no.quote.bestAsk) : null;
   const midpointGap = yes?.quote.midpoint != null && no?.quote.midpoint != null ? roundMoney(Math.abs(yes.quote.midpoint - no.quote.midpoint)) : null;
   const existingOrders = store.roundOrders(snapshot.profileId, snapshot.round.id, TAIL_ENTRY_STRATEGY)
@@ -86,6 +89,7 @@ export function evaluateTailEntry(snapshot: StateSnapshot, appConfig: AppConfig,
   if (selectedLabel == null || !selected) blockers.push('TAIL_SIDE_NOT_SELECTABLE');
   if (plan && !plan.fillable) blockers.push('TAIL_DEPTH_INSUFFICIENT');
   if (plan?.vwap != null && plan.vwap + EPSILON < liveVwapFloor) blockers.push('TAIL_VWAP_TOO_LOW');
+  if (plan?.vwap != null && plan.vwap > appConfig.pm5mTailEntryMaxVwap + EPSILON) blockers.push('TAIL_VWAP_TOO_HIGH');
   if (selected?.quote.spread != null && selected.quote.spread > appConfig.pm5mTailEntryMaxSpread + EPSILON) blockers.push('TAIL_SPREAD_TOO_WIDE');
   if (overroundAsk != null && overroundAsk > appConfig.pm5mTailEntryMaxOverround + EPSILON) blockers.push('TAIL_OVERROUND_TOO_HIGH');
   if ((midpointGap ?? 0) + EPSILON < appConfig.pm5mTailEntryMinMidpointGap) blockers.push('TAIL_MIDPOINT_GAP_TOO_SMALL');
@@ -108,6 +112,7 @@ export function evaluateTailEntry(snapshot: StateSnapshot, appConfig: AppConfig,
     condition('Midpoint gap', (midpointGap ?? 0) + EPSILON >= appConfig.pm5mTailEntryMinMidpointGap, midpointGap == null ? 'missing' : `${midpointGap.toFixed(3)} / min ${appConfig.pm5mTailEntryMinMidpointGap.toFixed(3)}`),
     condition('VWAP depth', Boolean(plan?.fillable), plan?.vwap == null ? `${plan?.filledShares ?? 0}/${liveSize}` : `${plan.filledShares}/${liveSize} @ ${plan.vwap.toFixed(3)}`),
     condition('VWAP floor', plan?.vwap != null && plan.vwap + EPSILON >= liveVwapFloor, plan?.vwap == null ? 'missing' : `${plan.vwap.toFixed(3)} / min ${liveVwapFloor.toFixed(3)}`),
+    condition('VWAP ceiling', plan?.vwap != null && plan.vwap <= appConfig.pm5mTailEntryMaxVwap + EPSILON, plan?.vwap == null ? 'missing' : `${plan.vwap.toFixed(3)} / max ${appConfig.pm5mTailEntryMaxVwap.toFixed(3)}`),
     condition('Spread cap', selected?.quote.spread != null && selected.quote.spread <= appConfig.pm5mTailEntryMaxSpread + EPSILON, selected?.quote.spread == null ? 'missing' : `${selected.quote.spread.toFixed(3)} / max ${appConfig.pm5mTailEntryMaxSpread.toFixed(3)}`),
     condition('Overround cap', overroundAsk != null && overroundAsk <= appConfig.pm5mTailEntryMaxOverround + EPSILON, overroundAsk == null ? 'missing' : `${overroundAsk.toFixed(3)} / max ${appConfig.pm5mTailEntryMaxOverround.toFixed(3)}`),
     condition('Round order limit', existingOrders.length < appConfig.pm5mTailEntryMaxOrdersPerRound, `${existingOrders.length} / max ${appConfig.pm5mTailEntryMaxOrdersPerRound}`),
@@ -125,7 +130,7 @@ export function evaluateTailEntry(snapshot: StateSnapshot, appConfig: AppConfig,
     reason: blockers.length ? blockers.join(', ') : `Tail entry eligible: buy ${selectedLabel} ${liveSize.toFixed(2)} @ ${plan!.vwap!.toFixed(3)} VWAP from best 12h checkpoint row.`,
     blockers,
     amountUsd: plan?.cost,
-    limitPrice: plan?.vwap == null ? undefined : cappedPrice(plan.vwap + appConfig.pm5mTailEntryPriceOffset),
+    limitPrice: tailLimitPrice,
     conditions,
   };
 
@@ -144,7 +149,7 @@ export function evaluateTailEntry(snapshot: StateSnapshot, appConfig: AppConfig,
     label: selectedLabel,
     side: 'BUY',
     orderType: 'LIMIT',
-    limitPrice: cappedPrice(plan.vwap + appConfig.pm5mTailEntryPriceOffset),
+    limitPrice: tailLimitPrice!,
     shares: liveSize,
     reason: `${snapshot.asset.toUpperCase()} 5m tail entry at ${checkpoint}s: selected ${selectedLabel}, simulator 12h per-share EV ${formatPerShare(row?.avgPnlPerShare)} with PnL ${formatMoney(row?.totalPnl)}, live size ${liveSize} shares, live VWAP ${plan.vwap.toFixed(3)} >= min ${liveVwapFloor.toFixed(3)}.`,
     status: 'generated',
@@ -212,6 +217,7 @@ async function tailExecutionGate(params: { appConfig: AppConfig; adapter: Polyma
   if (params.snapshot.interval !== '5m' || params.snapshot.profileId !== `${params.snapshot.asset}-5m`) return reject('TAIL_ENTRY_PROFILE_NOT_ALLOWED');
   if (params.snapshot.round.secondsToStart > 0) return reject('ROUND_NOT_STARTED');
   if (params.snapshot.round.secondsToEnd <= 0) return reject('ROUND_EXPIRED');
+  if (intent.limitPrice > params.appConfig.pm5mTailEntryMaxVwap + EPSILON) return reject('TAIL_LIMIT_PRICE_ABOVE_MAX');
   if (!params.appConfig.ownerPrivateKey?.trim() && params.store.getRuntime().executionMode === 'live') return reject('OWNER_PRIVATE_KEY_MISSING', true);
   if (!params.appConfig.depositWallet?.trim() && params.store.getRuntime().executionMode === 'live') return reject('POLYMARKET_DEPOSIT_WALLET_MISSING', true);
   if (params.store.hasNonFailedOrder(executionKey)) return reject('LOCAL_TAIL_ORDER_EXISTS');

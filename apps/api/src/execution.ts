@@ -190,6 +190,9 @@ async function executionGate(params: ExecuteIntentsParams, intent: TradeIntent):
   if (!Number.isFinite(intent.limitPrice) || intent.limitPrice <= 0 || intent.limitPrice >= 1) return reject('INVALID_LIMIT_PRICE');
   if (!Number.isFinite(intent.shares) || intent.shares <= 0) return reject('INVALID_SHARES');
   if (roundDownShares(intent.shares) <= 0) return reject('INVALID_ORDER_SIZE');
+  if (intent.strategy === 'UPDOWN_DUAL_ENTRY' && params.store.getPendingSingleFillRisk(intent.profileId)) {
+    return reject('PENDING_SINGLE_FILL_RISK');
+  }
 
   const bypassEntryQuoteGate = params.risk.bypassEntryScoreGating && ENTRY_STRATEGIES.has(intent.strategy);
   if (!bypassEntryQuoteGate) {

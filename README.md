@@ -215,6 +215,7 @@ PM5M_TAIL_ENTRY_MIN_ROUNDS=20
 PM5M_TAIL_ENTRY_MIN_EV_PER_SHARE=0
 PM5M_TAIL_ENTRY_CHECKPOINTS=60,45,30,20,15,10,5
 PM5M_TAIL_ENTRY_SIZE=2
+PM5M_TAIL_ENTRY_MAX_VWAP=0.99
 PM_ASSET_SELECTOR_ENABLED=true
 PM_ASSET_SELECTOR_MAX_ASSETS=1
 PM_ASSET_SELECTOR_SINGLE_PENALTY=0.05
@@ -257,11 +258,11 @@ Live entry orders are configured as CLOB limit order `price + size`:
 
 - With `DYNAMIC_LIMIT_ENABLED=true`, CHOP score maps to 42c/44c/45c/46c, capped by `MAX_PAIR_COST`.
 - In live mode, `MIN_LIVE_CHOP_SCORE=80` blocks edge-score 42c setups from posting real orders.
-- `BYPASS_ENTRY_SCORE_GATING=true` bypasses strategy entry blockers and the entry orderbook quote gate so each round can attempt paired entry, but it does not bypass `SINGLE_FILL_COOLDOWN`. It still leaves execution-level duplicate/open-order, balance, credential, round-start, invalid price/size, and exit/hedge rules in place.
+- `BYPASS_ENTRY_SCORE_GATING=true` bypasses strategy entry blockers and the entry orderbook quote gate so each round can attempt paired entry, but it does not bypass `SINGLE_FILL_COOLDOWN` or the provisional `PENDING_SINGLE_FILL_RISK` lock. It still leaves execution-level duplicate/open-order, balance, credential, round-start, invalid price/size, and exit/hedge rules in place.
 - `PM_SIM_REQUIRE_POSITIVE_EV=true` blocks every 5m, 15m, and 1h live entry unless that profile's asset-and-interval touch simulator has a row above `PM_SIM_MIN_EV_PER_SHARE`; it prevents fallback to a fixed entry price when the summary is missing, stale, undersampled, or non-positive.
 - `PM_SIM_LOOKBACK_HOURS=12` is the recorder lookback window. Each interval has an independent summary and minimum sample threshold; when the rolling window is undersampled, the selector can use that same interval's all-time rows, but never another interval's rows.
 - `PM_ASSET_SELECTOR_ENABLED=true` ranks the six enabled assets independently inside each interval using `EV - SINGLE_PENALTY * singleRate`; with `PM_ASSET_SELECTOR_MAX_ASSETS=1`, at most one 5m, one 15m, and one 1h profile can pass the selector for their respective rounds.
-- `PM5M_TAIL_LOOKBACK_HOURS=12` is the tail-entry simulation window. Each enabled 5m asset reads only its own rows, ignores losing checkpoints, selects its positive row by per-share edge, and blocks independently with `TAIL_SUMMARY_12H_PNL_NOT_POSITIVE` when no checkpoint has positive 12h PnL. Fill rate is reference-only, and live order size always comes from `PM5M_TAIL_ENTRY_SIZE`.
+- `PM5M_TAIL_LOOKBACK_HOURS=12` is the tail-entry simulation window. Each enabled 5m asset reads only its own rows, ignores losing checkpoints, selects its positive row by per-share edge, and blocks independently with `TAIL_SUMMARY_12H_PNL_NOT_POSITIVE` when no checkpoint has positive 12h PnL. Fill rate is reference-only, live order size always comes from `PM5M_TAIL_ENTRY_SIZE`, and both live VWAP and the final FAK limit are capped by `PM5M_TAIL_ENTRY_MAX_VWAP`.
 - `BYPASS_SINGLE_FILL_COOLDOWN=true` bypasses only the active single-fill cooldown entry blocker. It does not disable the single-fill hedge/profit-exit logic.
 - `REFRESH_SINGLE_FILL_COOLDOWN_ON_BOOT=true` recomputes any persisted active single-fill cooldown from the current profile cooldown config during process boot. It preserves fills, reviewed rounds, and repeat history, and only updates or clears active cooldown records.
 - `ENTRY_CONFIRM_TICKS=3` requires the full entry setup to remain eligible across three consecutive bot ticks before orders are posted.

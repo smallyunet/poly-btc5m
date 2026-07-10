@@ -13,6 +13,7 @@ export const STRATEGY_RULES: StrategyRule[] = [
       'Extreme imbalance in YES vs NO bid queue at the entry limit is blocked; mild imbalance is only diagnostic.',
       'Shares come from the active market profile.',
       'No duplicate local or Polymarket open order may exist for the same round/token.',
+      'A detected single-sided fill creates a non-bypassable provisional risk lock and cancels still-open Dual orders for later rounds until the source exposure becomes paired or reaches final review.',
       'Live entry orders are posted as GTC limit orders; post-start risk is handled by the profit-exit and hedge rules.',
     ],
     exitRules: [
@@ -35,7 +36,7 @@ export const STRATEGY_RULES: StrategyRule[] = [
       'The round must already be running and inside one configured PM5M_TAIL_ENTRY_CHECKPOINTS window.',
       'The tail simulation summary must be fresh and the matching checkpoint row must pass minimum sample, per-share edge, and reference fill-rate checks.',
       'YES and NO books must be live and fresh; the stronger side is selected by midpoint.',
-      'The selected side must pass midpoint-gap, VWAP, spread, overround, slippage, notional, and per-round duplicate-order gates; live size comes from PM5M_TAIL_ENTRY_SIZE.',
+      'The selected side must pass midpoint-gap, minimum and maximum VWAP, spread, overround, slippage, notional, and per-round duplicate-order gates; live size comes from PM5M_TAIL_ENTRY_SIZE.',
       'Live tail entries are posted as capped FAK BUY LIMIT orders, not GTC orders.',
     ],
     exitRules: [
