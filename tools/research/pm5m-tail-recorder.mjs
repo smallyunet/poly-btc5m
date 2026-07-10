@@ -4,7 +4,7 @@ import path from 'node:path';
 import process from 'node:process';
 import WebSocket from 'ws';
 
-const DEFAULT_ASSETS = ['btc'];
+const DEFAULT_ASSETS = ['btc', 'eth', 'sol', 'doge', 'xrp', 'hype'];
 const ROUND_SECONDS = 300;
 const DEFAULT_GAMMA_URL = 'https://gamma-api.polymarket.com';
 const DEFAULT_CLOB_WS_URL = 'wss://ws-subscriptions-clob.polymarket.com/ws/market';
@@ -118,7 +118,7 @@ function printHelp() {
   npm run research:pm5m-tail -- [options]
 
 Options:
-  --assets btc
+  --assets btc,eth,sol,doge,xrp,hype
   --checkpoints 60,45,30,20,15,10,5
   --size 5
   --top-levels 10

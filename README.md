@@ -68,7 +68,7 @@ Run the independent tail-entry recorder when you want to evaluate buying the
 higher-probability side near round end using live orderbook VWAP:
 
 ```bash
-npm run research:pm5m-tail -- --assets btc --checkpoints 60,45,30,20,15,10,5 --size 5
+npm run research:pm5m-tail -- --assets btc,eth,sol,doge,xrp,hype --checkpoints 60,45,30,20,15,10,5 --size 5
 ```
 
 This recorder is separate from the touch-fill simulator. It samples YES/NO

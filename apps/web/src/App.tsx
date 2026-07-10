@@ -524,7 +524,7 @@ export function App() {
   const tailCheckpointRows = tailSim?.completed?.byCheckpoint ?? tailSim?.completed?.byCheckpointSize ?? [];
   const tailBandRows = tailSim?.completed?.byAskBand ?? [];
   const tailRecentRounds = tailSim?.recentRounds ?? [];
-  const tailCommand = 'npm run research:pm5m-tail -- --assets btc --checkpoints 60,45,30,20,15,10,5 --size 5 --lookback-hours 12';
+  const tailCommand = 'npm run research:pm5m-tail -- --assets btc,eth,sol,doge,xrp,hype --checkpoints 60,45,30,20,15,10,5 --size 5 --lookback-hours 12';
   const tailGeneratedAtMs = tailSim?.generatedAt ? new Date(tailSim.generatedAt).getTime() : 0;
   const tailGeneratedLabel = tailGeneratedAtMs ? formatRelativeAge(tailGeneratedAtMs, nowMs) : 'not generated';
   const tailLookbackHours = tailSim?.config?.lookbackHours;
@@ -1640,7 +1640,7 @@ export function App() {
 
               <div className="listScopeBar">
                 <span>{tailSim?.model || 'tail-entry: buy stronger side by midpoint using ask-book VWAP'}</span>
-                <strong>{tailSim?.config?.assets?.join(', ') || 'btc'}</strong>
+                <strong>{tailSim?.config?.assets?.join(', ') || 'btc, eth, sol, doge, xrp, hype'}</strong>
                 <strong>{tailSim?.config?.checkpoints?.map((item) => `${item}s`).join(', ') || '60s, 45s, 30s, 20s, 15s, 10s, 5s'}</strong>
                 <strong>updated {tailGeneratedLabel}</strong>
               </div>

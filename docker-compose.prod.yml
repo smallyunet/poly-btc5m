@@ -41,7 +41,7 @@ services:
       - research:pm5m-touch
       - --
       - --assets
-      - btc
+      - btc,eth,sol,doge,xrp,hype
       - --min-price
       - "0.29"
       - --max-price
@@ -67,7 +67,7 @@ services:
       - research:pm5m-tail
       - --
       - --assets
-      - btc
+      - btc,eth,sol,doge,xrp,hype
       - --checkpoints
       - "60,45,30,20,15,10,5"
       - --size
