@@ -86,6 +86,36 @@ test('falls back when no asset-specific simulator row passes range and min-round
   assert.equal(selected.selectedPrice, 0.45);
 });
 
+test('blocks fallback when simulator availability is required without requiring positive EV', () => {
+  const summaryPath = writeSummary([
+    { ...row('btc', 0.36, -0.01, 0.2), rounds: 20 },
+  ]);
+  const selected = selectProfileEntryPrice(
+    { ...config(summaryPath), pm5mSimRequireAvailable: true, pm5mSimRequirePositiveEv: false },
+    profile('btc-5m', 'btc'),
+    round('btc-updown-5m-test-available'),
+  );
+
+  assert.equal(selected.source, 'disabled');
+  assert.match(selected.reason, /availability gate blocked/);
+  assert.match(selected.reason, /no row passed/);
+});
+
+test('uses pure EV ordering when the single-rate penalty is zero', () => {
+  const summaryPath = writeSummary([
+    row('btc', 0.31, -0.01, 0.70),
+    row('btc', 0.40, -0.02, 0.10),
+  ]);
+  const selected = selectProfileEntryPrice(
+    { ...config(summaryPath), pm5mAssetSelectorSinglePenalty: 0 },
+    profile('btc-5m', 'btc'),
+    round('btc-updown-5m-test-pure-ev'),
+  );
+
+  assert.equal(selected.selectedPrice, 0.31);
+  assert.equal(selected.estimatedEvPerShare, -0.01);
+});
+
 test('uses all-time simulator rows when lookback rows do not meet min rounds', () => {
   const summaryPath = writeSummary([
     { ...row('btc', 0.40, 0.010, 0.2), rounds: 20 },
@@ -250,6 +280,7 @@ function config(summaryPath: string): AppConfig {
     pm5mSimPriceFallback: 0.45,
     pm5mSimPriceMaxSummaryAgeMs: 600_000,
     pm5mSimRequirePositiveEv: false,
+    pm5mSimRequireAvailable: false,
     pm5mSimMinEvPerShare: 0,
     pm5mAssetSelectorEnabled: false,
     pm5mAssetSelectorMaxAssets: 1,

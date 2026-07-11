@@ -63,6 +63,7 @@ export type AppConfig = {
   pm5mSimPriceFallback: number;
   pm5mSimPriceMaxSummaryAgeMs: number;
   pm5mSimRequirePositiveEv: boolean;
+  pm5mSimRequireAvailable: boolean;
   pm5mSimMinEvPerShare: number;
   pm5mAssetSelectorEnabled: boolean;
   pm5mAssetSelectorMaxAssets: number;
@@ -195,6 +196,7 @@ export function loadConfig(): AppConfig {
     pm5mSimPriceFallback: numberEnv('PM_SIM_PRICE_FALLBACK', numberEnv('PM5M_SIM_PRICE_FALLBACK', numberEnv('BTC_5M_SIM_PRICE_FALLBACK', numberEnv('DUAL_LIMIT_PRICE', 0.45)))),
     pm5mSimPriceMaxSummaryAgeMs: parsePositiveInteger(process.env.PM_SIM_PRICE_MAX_SUMMARY_AGE_MS || process.env.PM5M_SIM_PRICE_MAX_SUMMARY_AGE_MS || process.env.BTC_5M_SIM_PRICE_MAX_SUMMARY_AGE_MS, 10 * 60_000),
     pm5mSimRequirePositiveEv: booleanEnv('PM_SIM_REQUIRE_POSITIVE_EV', booleanEnv('PM5M_SIM_REQUIRE_POSITIVE_EV', false)),
+    pm5mSimRequireAvailable: booleanEnv('PM_SIM_REQUIRE_AVAILABLE', booleanEnv('PM5M_SIM_REQUIRE_AVAILABLE', true)),
     pm5mSimMinEvPerShare: numberEnv('PM_SIM_MIN_EV_PER_SHARE', numberEnv('PM5M_SIM_MIN_EV_PER_SHARE', 0)),
     pm5mAssetSelectorEnabled: booleanEnv('PM_ASSET_SELECTOR_ENABLED', booleanEnv('PM5M_ASSET_SELECTOR_ENABLED', false)),
     pm5mAssetSelectorMaxAssets: parsePositiveInteger(process.env.PM_ASSET_SELECTOR_MAX_ASSETS || process.env.PM5M_ASSET_SELECTOR_MAX_ASSETS, 1),

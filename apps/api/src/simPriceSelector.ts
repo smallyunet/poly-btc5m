@@ -53,6 +53,8 @@ export function selectProfileEntryPrice(appConfig: AppConfig, profile: MarketPro
   const fallbackPrice = roundPrice(appConfig.pm5mSimPriceFallback || appConfig.dualLimitPrice);
   const selectedAt = new Date().toISOString();
   const simulationEnabled = appConfig.pm5mSimPriceEnabled || appConfig.pm5mAssetSelectorEnabled;
+  const failClosed = appConfig.pm5mSimRequireAvailable || appConfig.pm5mSimRequirePositiveEv;
+  const gateLabel = appConfig.pm5mSimRequirePositiveEv ? 'positive EV gate' : 'availability gate';
   if (!simulationEnabled) {
     return disabledSelection(profile, fallbackPrice, selectedAt, 'PM_SIM_PRICE_ENABLED=false');
   }
@@ -65,8 +67,8 @@ export function selectProfileEntryPrice(appConfig: AppConfig, profile: MarketPro
   const summaryPath = path.resolve(process.cwd(), summaryPathForProfile(appConfig, profile));
   const summary = readSummary(summaryPath, appConfig.pm5mSimPriceRefreshMs);
   if (!summary.ok) {
-    if (appConfig.pm5mSimRequirePositiveEv) {
-      return lock(lockKey, disabledSelection(profile, fallbackPrice, selectedAt, `${profile.interval} simulator positive EV gate blocked ${profile.asset}: ${summary.reason}`));
+    if (failClosed) {
+      return lock(lockKey, disabledSelection(profile, fallbackPrice, selectedAt, `${profile.interval} simulator ${gateLabel} blocked ${profile.asset}: ${summary.reason}`));
     }
     return lock(lockKey, fallbackSelection(profile, fallbackPrice, selectedAt, nextSelectionAt, summary.reason));
   }
@@ -74,12 +76,12 @@ export function selectProfileEntryPrice(appConfig: AppConfig, profile: MarketPro
   const generatedAtMs = summary.value.generatedAt ? new Date(summary.value.generatedAt).getTime() : NaN;
   const summaryAgeMs = Number.isFinite(generatedAtMs) ? Date.now() - generatedAtMs : null;
   if (summaryAgeMs == null || summaryAgeMs > appConfig.pm5mSimPriceMaxSummaryAgeMs) {
-    if (appConfig.pm5mSimRequirePositiveEv) {
+    if (failClosed) {
       return lock(lockKey, disabledSelection(
         profile,
         fallbackPrice,
         selectedAt,
-        `${profile.interval} simulator positive EV gate blocked ${profile.asset}: simulator summary stale (${summaryAgeMs == null ? 'unknown age' : `${Math.round(summaryAgeMs / 1000)}s`})`,
+        `${profile.interval} simulator ${gateLabel} blocked ${profile.asset}: simulator summary stale (${summaryAgeMs == null ? 'unknown age' : `${Math.round(summaryAgeMs / 1000)}s`})`,
       ));
     }
     return lock(lockKey, fallbackSelection(
@@ -99,12 +101,14 @@ export function selectProfileEntryPrice(appConfig: AppConfig, profile: MarketPro
       ? bestSimulatorRow(appConfig, profile, summaryRows(summary.value, 'all-time'), 'all-time')
       : undefined);
   if (!best) {
-    if (appConfig.pm5mSimRequirePositiveEv) {
+    if (failClosed) {
       return lock(lockKey, disabledSelection(
         profile,
         fallbackPrice,
         selectedAt,
-        `${profile.interval} simulator positive EV gate blocked ${profile.asset}: no row above ${appConfig.pm5mSimMinEvPerShare.toFixed(4)}/share passed range/min-round filters`,
+        appConfig.pm5mSimRequirePositiveEv
+          ? `${profile.interval} simulator positive EV gate blocked ${profile.asset}: no row above ${appConfig.pm5mSimMinEvPerShare.toFixed(4)}/share passed range/min-round filters`
+          : `${profile.interval} simulator availability gate blocked ${profile.asset}: no row passed range/min-round filters`,
       ));
     }
     return lock(lockKey, fallbackSelection(

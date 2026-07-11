@@ -288,15 +288,16 @@ function applyIntervalAssetSelection(entry: StrategyEvaluation, assetSelection?:
 }
 
 function applySimulatorSelection(entry: StrategyEvaluation, selection: ReturnType<typeof selectProfileEntryPrice>): StrategyEvaluation {
-  if (selection.enabled || !selection.reason.includes('positive EV')) return entry;
-  const selectorCondition = condition('Simulator EV gate', false, selection.reason);
+  if (selection.enabled || selection.source !== 'disabled' || selection.reason === 'PM_SIM_PRICE_ENABLED=false') return entry;
+  const blocker = selection.reason.includes('positive EV') ? 'PM5M_SIM_EV_NOT_POSITIVE' : 'PM_SIMULATOR_UNAVAILABLE';
+  const selectorCondition = condition('Simulator gate', false, selection.reason);
   const checks = entry.checks.map((check) => {
     if (check.strategy !== 'UPDOWN_DUAL_ENTRY') return check;
     return {
       ...check,
       status: 'blocked' as const,
-      reason: check.reason ? `${check.reason}; PM5M_SIM_EV_NOT_POSITIVE` : 'PM5M_SIM_EV_NOT_POSITIVE',
-      blockers: [...new Set([...check.blockers, 'PM5M_SIM_EV_NOT_POSITIVE'])],
+      reason: check.reason ? `${check.reason}; ${blocker}` : blocker,
+      blockers: [...new Set([...check.blockers, blocker])],
       conditions: [...check.conditions, selectorCondition],
     };
   });
@@ -308,7 +309,7 @@ function applySimulatorSelection(entry: StrategyEvaluation, selection: ReturnTyp
       ...entry.intents.map((intent) => ({
         ...intent,
         status: 'rejected' as const,
-        rejectionReason: 'PM5M_SIM_EV_NOT_POSITIVE',
+        rejectionReason: blocker,
         reason: `${intent.reason}; ${selection.reason}`,
       })),
     ],

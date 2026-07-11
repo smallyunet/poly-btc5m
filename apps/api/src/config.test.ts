@@ -40,6 +40,7 @@ const COOLDOWN_ENV_KEYS = [
   'PM5M_SIM_PRICE_MIN_ROUNDS',
   'PM_SIM_PRICE_ENABLED',
   'PM_SIM_REQUIRE_POSITIVE_EV',
+  'PM_SIM_REQUIRE_AVAILABLE',
   'PM_SIM_MIN_EV_PER_SHARE',
   'PM_SIM_LOOKBACK_HOURS',
   'PM_SIM_PRICE_REFRESH_MS',
@@ -101,6 +102,15 @@ test('cross-profile single-fill risk can be disabled by env override', () => {
     const config = loadConfig();
 
     assert.equal(config.crossProfileSingleFillRiskEnabled, false);
+  });
+});
+
+test('simulator availability gate defaults fail closed and supports override', () => {
+  withEnv(COOLDOWN_ENV_KEYS, {}, () => {
+    assert.equal(loadConfig().pm5mSimRequireAvailable, true);
+  });
+  withEnv(COOLDOWN_ENV_KEYS, { PM_SIM_REQUIRE_AVAILABLE: 'false' }, () => {
+    assert.equal(loadConfig().pm5mSimRequireAvailable, false);
   });
 });
 

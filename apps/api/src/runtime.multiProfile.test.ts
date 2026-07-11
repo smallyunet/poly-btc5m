@@ -27,6 +27,7 @@ test('runAllProfilesTick captures isolated six-asset 5m, 15m, and 1h profile sna
   config.depositWallet = undefined;
   config.pm5mSimPriceEnabled = false;
   config.pm5mSimRequirePositiveEv = false;
+  config.pm5mSimRequireAvailable = false;
   config.pm5mAssetSelectorEnabled = false;
   config.pm5mTailEntryEnabled = false;
   config.marketProfiles = config.marketProfiles.map((profile) => (
@@ -171,6 +172,7 @@ test('runBotTick blocks 5m entry intents when the asset selector does not select
   config.depositWallet = undefined;
   config.pm5mSimPriceEnabled = false;
   config.pm5mSimRequirePositiveEv = false;
+  config.pm5mSimRequireAvailable = false;
   config.pm5mAssetSelectorEnabled = true;
   config.pm5mTailEntryEnabled = false;
   const profile = { ...config.marketProfiles.find((item) => item.id === 'btc-5m')!, status: 'monitor' as const };
