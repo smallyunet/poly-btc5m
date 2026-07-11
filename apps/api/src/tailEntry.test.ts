@@ -21,6 +21,7 @@ test('evaluates BTC 5m tail entry from simulator row and live VWAP', () => {
   assert.equal(evaluation.intent.label, 'YES');
   assert.equal(evaluation.intent.limitPrice, 0.611);
   assert.equal(evaluation.intent.shares, 5);
+  assert.equal(evaluation.intent.maxSpendUsd, 3.055);
   assert.equal(evaluation.check.status, 'eligible');
 });
 

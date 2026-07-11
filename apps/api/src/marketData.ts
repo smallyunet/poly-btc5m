@@ -11,6 +11,7 @@ export class MarketDataService {
   private clob?: WebSocket;
   private clobTokenKey = '';
   private clobReconnect?: NodeJS.Timeout;
+  private clobHeartbeat?: NodeJS.Timeout;
   private binanceConnected = false;
   private clobConnected = false;
   private readonly lastBinanceSampleAtBySymbol = new Map<string, number>();
@@ -36,8 +37,17 @@ export class MarketDataService {
       return;
     }
     if (this.clobTokenKey === nextKey && this.clob) return;
-    this.closeClob();
+    const addedTokenIds = tokenIds.filter((tokenId) => !existingTokenIds.includes(tokenId));
     this.clobTokenKey = nextKey;
+    if (this.clob?.readyState === WebSocket.OPEN) {
+      this.clob.send(JSON.stringify({
+        operation: 'subscribe',
+        assets_ids: addedTokenIds,
+        custom_feature_enabled: true,
+      }));
+      return;
+    }
+    if (this.clob) return;
     this.connectClob(tokenIds);
   }
 
@@ -206,15 +216,17 @@ export class MarketDataService {
         if (ws.readyState === WebSocket.OPEN) {
           ws.send(JSON.stringify({
             type: 'market',
-            assets_ids: tokenIds,
+            assets_ids: this.clobTokenKey.split('|').filter(Boolean),
             custom_feature_enabled: true,
           }));
         }
+        this.startClobHeartbeat(ws);
       });
       ws.on('message', (data) => this.handleOrderbookMessage(data.toString()));
       ws.on('close', () => {
         this.clobConnected = false;
         this.clob = undefined;
+        this.stopClobHeartbeat();
         if (this.clobTokenKey) {
           this.clobReconnect = setTimeout(() => this.connectClob(this.clobTokenKey.split('|').filter(Boolean)), 5_000);
           this.clobReconnect.unref?.();
@@ -242,7 +254,22 @@ export class MarketDataService {
       }
       this.clob = undefined;
     }
+    this.stopClobHeartbeat();
     this.clobConnected = false;
+  }
+
+  private startClobHeartbeat(ws: WebSocket): void {
+    this.stopClobHeartbeat();
+    this.clobHeartbeat = setInterval(() => {
+      if (ws.readyState === WebSocket.OPEN) ws.send('PING');
+    }, 10_000);
+    this.clobHeartbeat.unref?.();
+  }
+
+  private stopClobHeartbeat(): void {
+    if (!this.clobHeartbeat) return;
+    clearInterval(this.clobHeartbeat);
+    this.clobHeartbeat = undefined;
   }
 
   private handleBinancePriceMessage(data: unknown): void {

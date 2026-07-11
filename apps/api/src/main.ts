@@ -28,12 +28,15 @@ async function main() {
   data.start();
 
   let tickRunning = false;
+  let skippedScheduledTicks = 0;
   const tick = async (source: 'initial' | 'scheduled' | 'manual') => {
     if (tickRunning) {
-      store.recordRuntimeLog({ level: 'warn', source: 'worker', message: `Skipped ${source} tick because a previous tick is still running.` });
+      if (source === 'scheduled') skippedScheduledTicks += 1;
+      else store.recordRuntimeLog({ level: 'warn', source: 'worker', message: `Skipped ${source} tick because a previous tick is still running.` });
       return;
     }
     tickRunning = true;
+    const startedAt = Date.now();
     try {
       const snapshots = await runAllProfilesTick(config, store, data, adapter, discovery, participation);
       const snapshot = snapshots[0];
@@ -42,8 +45,16 @@ async function main() {
         level: snapshot.diagnostics.some((item) => /failed|stale|blocked|error/i.test(item)) ? 'warn' : 'info',
         source: 'worker',
         message: `${source} tick completed.`,
-        details: { roundId: snapshot.round.id, phase: snapshot.round.phase, regime: snapshot.regime, diagnostics: snapshot.diagnostics },
+        details: {
+          roundId: snapshot.round.id,
+          phase: snapshot.round.phase,
+          regime: snapshot.regime,
+          diagnostics: snapshot.diagnostics,
+          durationMs: Date.now() - startedAt,
+          skippedScheduledTicks,
+        },
       });
+      skippedScheduledTicks = 0;
       try {
         await telegramNotifier.notifyAfterTick(store.dashboardState());
       } catch (error) {

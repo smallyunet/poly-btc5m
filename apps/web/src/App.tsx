@@ -1709,7 +1709,7 @@ export function App() {
                     <DecisionMetric
                       label="All-time rows"
                       value={String(tailSimStatus?.completedAllTimeRows ?? tailSim.completedAllTime?.rows ?? 0)}
-                      detail={`${tailSim.config?.size ?? tailSim.config?.sizes?.[0] ?? 5} shares fixed`}
+                      detail={`${tailSim.config?.size ?? tailSim.config?.sizes?.[0] ?? 5} reference shares (spend capped)`}
                       tone="neutral"
                     />
                   </div>

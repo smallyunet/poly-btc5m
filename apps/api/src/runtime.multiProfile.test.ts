@@ -35,6 +35,8 @@ test('runAllProfilesTick captures isolated six-asset 5m, 15m, and 1h profile sna
   const enabledProfiles = config.marketProfiles.filter((profile) => profile.status !== 'disabled');
   const store = new InMemoryStore('monitor', 2_000, { persistencePath: false }, 'classic', undefined, config.marketProfiles);
   const syncedTokens: string[][] = [];
+  let activeDiscoveries = 0;
+  let maxConcurrentDiscoveries = 0;
 
   const data = {
     latestPrice() {
@@ -88,6 +90,10 @@ test('runAllProfilesTick captures isolated six-asset 5m, 15m, and 1h profile sna
   };
   const discovery = {
     async discover(params: { profile: MarketProfile }) {
+      activeDiscoveries += 1;
+      maxConcurrentDiscoveries = Math.max(maxConcurrentDiscoveries, activeDiscoveries);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      activeDiscoveries -= 1;
       const nowSec = Math.floor(Date.now() / 1000);
       const startSec = Math.floor(nowSec / params.profile.roundDurationSeconds) * params.profile.roundDurationSeconds + params.profile.roundDurationSeconds;
       const slug = `${params.profile.seriesSlug}-${startSec}`;
@@ -135,6 +141,7 @@ test('runAllProfilesTick captures isolated six-asset 5m, 15m, and 1h profile sna
     .filter(Boolean);
 
   assert.deepEqual(snapshots.map((snapshot) => snapshot.profileId).sort(), enabledProfiles.map((profile) => profile.id).sort());
+  assert.ok(maxConcurrentDiscoveries > 1);
   assert.equal(dashboard.profiles.length, enabledProfiles.length);
   assert.deepEqual(dashboard.profiles.map((item) => item.profile.id).sort(), [
     'btc-15m', 'btc-1h', 'btc-5m',

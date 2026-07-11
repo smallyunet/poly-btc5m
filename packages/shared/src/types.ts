@@ -339,6 +339,7 @@ export type TradeIntent = {
   orderType: 'LIMIT';
   limitPrice: number;
   shares: number;
+  maxSpendUsd?: number;
   reason: string;
   status: 'generated' | 'rejected' | 'executed' | 'failed';
   ttlSeconds: number;

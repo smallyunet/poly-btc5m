@@ -20,11 +20,16 @@ export async function runAllProfilesTick(appConfig: AppConfig, store: InMemorySt
     ? enabledProfiles.filter((profile) => profile.status === 'live')
     : enabledProfiles;
   const intervalAssetSelections = rankIntervalAssetCandidates(appConfig, selectorProfiles);
-  const snapshots: StateSnapshot[] = [];
-  for (const profile of enabledProfiles) {
-    snapshots.push(await runBotTick(appConfigForProfile(appConfig, profile), store, data, adapter, discovery, participationService, profile, intervalAssetSelections.get(profile.id)));
-  }
-  return snapshots;
+  return Promise.all(enabledProfiles.map((profile) => runBotTick(
+    appConfigForProfile(appConfig, profile),
+    store,
+    data,
+    adapter,
+    discovery,
+    participationService,
+    profile,
+    intervalAssetSelections.get(profile.id),
+  )));
 }
 
 export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, data: MarketDataService, adapter: PolymarketAdapter, discovery: RecurringCryptoRoundDiscovery, participationService: ParticipationService, profile: MarketProfile = appConfig.marketProfiles[0], intervalAssetSelection?: IntervalAssetSelection): Promise<StateSnapshot> {

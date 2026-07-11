@@ -36,7 +36,8 @@ export const STRATEGY_RULES: StrategyRule[] = [
       'The round must already be running and inside one configured PM5M_TAIL_ENTRY_CHECKPOINTS window.',
       'The tail simulation summary must be fresh and the matching checkpoint row must pass minimum sample, per-share edge, and reference fill-rate checks.',
       'YES and NO books must be live and fresh; the stronger side is selected by midpoint.',
-      'The selected side must pass midpoint-gap, minimum and maximum VWAP, spread, overround, slippage, notional, and per-round duplicate-order gates; live size comes from PM5M_TAIL_ENTRY_SIZE.',
+      'The selected side must pass midpoint-gap, minimum and maximum VWAP, spread, overround, slippage, notional, and per-round duplicate-order gates; PM5M_TAIL_ENTRY_SIZE is the reference share count used to cap spend at size times limit price.',
+      'A marketable BUY limit can receive more outcome shares when execution improves below the limit price; the capped spend, rather than the eventual share count, is the Tail exposure boundary.',
       'Live tail entries are posted as capped FAK BUY LIMIT orders, not GTC orders.',
     ],
     exitRules: [
