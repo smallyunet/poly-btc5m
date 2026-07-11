@@ -34,12 +34,13 @@ export function ProfileRail({
   diagnostics,
   onSelectProfile,
 }: Props) {
+  const activeProfiles = profileStatusRows.filter(({ item }) => item.profile.status !== 'disabled');
   return (
     <aside className="opsRail">
-      <div className="panel opsPanel">
+      {activeProfiles.length > 1 && <div className="panel opsPanel">
         <h2>Profiles</h2>
         <div className="opsProfileList">
-          {profileStatusRows.map(({ item, entryCheck, tailEntryCheck, hedgeCheck, profitExitCheck, cooldownActive }) => (
+          {activeProfiles.map(({ item, entryCheck, tailEntryCheck, hedgeCheck, profitExitCheck, cooldownActive }) => (
             <button key={item.profile.id} type="button" className={`opsProfileRow ${selectedProfileId === item.profile.id ? 'active' : ''}`} onClick={() => onSelectProfile(item.profile.id)}>
               <div>
                 <strong><AssetLabel profileId={item.profile.id} label={item.profile.label} size="sm" /></strong>
@@ -55,7 +56,7 @@ export function ProfileRail({
             </button>
           ))}
         </div>
-      </div>
+      </div>}
 
       <div className="panel opsPanel">
         <h2>System</h2>

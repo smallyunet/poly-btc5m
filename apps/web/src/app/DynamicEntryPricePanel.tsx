@@ -1,4 +1,4 @@
-import { Activity, Database, Route, Sigma, TrendingUp } from 'lucide-react';
+import { Activity, Database, TrendingUp } from 'lucide-react';
 
 import type { DynamicEntryPriceSelection } from '../../../../packages/shared/src';
 import { Badge } from '../components/dashboard/Ui';
@@ -16,11 +16,6 @@ export function DynamicEntryPricePanel({ selection, configuredPrice }: DynamicEn
   const sourceLabel = selection?.source === 'simulator' ? 'SIMULATOR' : selection?.source === 'fallback' ? 'FALLBACK' : 'CONFIG';
   const updatedAt = selection?.selectedAt ? formatEtTime(selection.selectedAt) : '-';
   const title = selection?.profileId ? `${assetNameForProfile(selection.profileId)} ${selection.profileId.split('-')[1] || ''} Entry Price` : 'Entry Price';
-  const selectorRank = selection?.assetSelectorEnabled
-    ? selection.assetSelectorSelected
-      ? `#${selection.assetSelectorRank ?? '-'}`
-      : `skip #${selection.assetSelectorRank ?? '-'}`
-    : 'off';
   const selectorFormula = selection?.assetSelectorSinglePenalty != null
     ? `score = EV - ${selection.assetSelectorSinglePenalty.toFixed(3)} * single`
     : undefined;
@@ -35,12 +30,7 @@ export function DynamicEntryPricePanel({ selection, configuredPrice }: DynamicEn
         <Badge tone={sourceTone}>{sourceLabel}</Badge>
       </div>
 
-      <div className="dynamicEntryPriceStats" aria-label="Simulator selection metrics">
-        <div>
-          <Sigma size={14} aria-hidden="true" />
-          <span>Score</span>
-          <strong>{formatEv(selection?.assetSelectorScore)}</strong>
-        </div>
+      <div className="dynamicEntryPriceStats compact" aria-label="Simulator selection metrics">
         <div>
           <TrendingUp size={14} aria-hidden="true" />
           <span>EV</span>
@@ -56,14 +46,12 @@ export function DynamicEntryPricePanel({ selection, configuredPrice }: DynamicEn
           <span>Rounds</span>
           <strong>{selection?.rounds ?? '-'}</strong>
         </div>
-        <div>
-          <Route size={14} aria-hidden="true" />
-          <span>Rank</span>
-          <strong>{selectorRank}</strong>
-        </div>
       </div>
 
-      <p>{selection?.reason || `Using configured entry price; last update ${updatedAt}.`}{selectorFormula ? ` ${selectorFormula}.` : ''}</p>
+      <details className="dynamicEntryReason">
+        <summary>Why this price</summary>
+        <p>{selection?.reason || `Using configured entry price; last update ${updatedAt}.`}{selectorFormula ? ` ${selectorFormula}.` : ''}</p>
+      </details>
     </section>
   );
 }

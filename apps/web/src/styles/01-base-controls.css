@@ -86,6 +86,126 @@ body {
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.03);
 }
 
+.dashboardNav {
+  position: sticky;
+  top: 10px;
+  z-index: 30;
+  gap: 18px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.94);
+  backdrop-filter: blur(18px);
+}
+
+.dashboardBrand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: max-content;
+}
+
+.dashboardBrandMark {
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9px;
+  background: var(--text-primary);
+  color: white;
+  font-size: 14px;
+  font-weight: 900;
+}
+
+.dashboardBrand > div {
+  display: grid;
+  gap: 1px;
+}
+
+.dashboardBrand h1 {
+  font-size: 14px;
+  line-height: 1.1;
+}
+
+.dashboardBrand span:last-child {
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.navRuntime {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.navRefresh {
+  min-width: 0;
+  padding: 7px 9px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.03);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.navMore {
+  position: relative;
+}
+
+.navMore summary {
+  list-style: none;
+}
+
+.navMore summary::-webkit-details-marker {
+  display: none;
+}
+
+.navMore.active > summary,
+.navMore[open] > summary {
+  color: var(--color-primary);
+  background: rgba(37, 99, 235, 0.08);
+}
+
+.navMoreMenu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  width: 190px;
+  padding: 6px;
+  display: grid;
+  gap: 3px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: white;
+  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.16);
+}
+
+.navMoreMenu button {
+  width: 100%;
+  padding: 9px 10px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-secondary);
+  text-align: left;
+}
+
+.navMoreMenu button:hover,
+.navMoreMenu button.active {
+  background: rgba(37, 99, 235, 0.08);
+  color: var(--color-primary);
+}
+
 .topbar h1 {
   font-size: 22px;
   font-weight: 700;

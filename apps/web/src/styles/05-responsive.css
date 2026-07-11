@@ -108,6 +108,32 @@
     gap: 14px;
   }
 
+  .dashboardNav {
+    position: static;
+    padding: 12px;
+  }
+
+  .dashboardBrand {
+    width: 100%;
+  }
+
+  .navRuntime {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .navRefresh {
+    margin-left: auto;
+  }
+
+  .navMoreMenu {
+    position: fixed;
+    top: auto;
+    right: 12px;
+    left: 12px;
+    width: auto;
+  }
+
   .topbar h1 {
     font-size: 20px;
   }

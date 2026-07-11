@@ -90,61 +90,65 @@ export function TailEntryPanel({
         </div>
       </div>
 
-      <div className="tailEntryDetailHeader">
-        <span>Technical gates</span>
-        <strong>{roundOrderLimitCondition?.actual || '-'}</strong>
-      </div>
-      <div className="tailEntryTechnicalGrid">
-        <div><span>Status</span><strong>{tailEntryCheck?.status || 'pending'}</strong></div>
-        <div><span>Tail round</span><strong>{evaluatedRoundId || '-'}</strong></div>
-        <div><span>Checkpoint</span><strong>{checkpointActual}</strong></div>
-        <div><span>Summary row</span><strong>{selectedSummaryRowCondition?.actual || '-'}</strong></div>
-        <div><span>Selected side</span><strong>{selectedSideCondition?.actual || '-'}</strong></div>
-        <div><span>Limit</span><strong>{tailEntryCheck?.limitPrice == null ? '-' : tailEntryCheck.limitPrice.toFixed(3)}</strong></div>
-        <div><span>Amount</span><strong>{tailEntryCheck?.amountUsd == null ? '-' : formatMoney(tailEntryCheck.amountUsd)}</strong></div>
-        <div><span>12h PnL gate</span><strong>{summaryPnlCondition?.actual || '-'}</strong></div>
-        <div><span>Summary EV</span><strong>{summaryEvCondition?.actual || '-'}</strong></div>
-        <div><span>Min price</span><strong>{summaryMinVwapCondition?.actual || '-'}</strong></div>
-        <div><span>Live VWAP</span><strong>{vwapCondition?.actual || vwapFloorCondition?.actual || '-'}</strong></div>
-        <div><span>Midpoint gap</span><strong>{midpointGapCondition?.actual || '-'}</strong></div>
-        <div><span>Round limit</span><strong>{roundOrderLimitCondition?.actual || '-'}</strong></div>
-        <div><span>Tail orders</span><strong>{currentRoundTailOrders.length}</strong></div>
-      </div>
+      <details className="compactDisclosure">
+        <summary>
+          <span>Technical details and current-round orders</span>
+          <strong>{currentRoundTailOrders.length} orders · {tailEntryCheck?.blockers.length ?? 0} blockers</strong>
+        </summary>
+        <div className="compactDisclosureBody">
+          <div className="tailEntryTechnicalGrid">
+            <div><span>Status</span><strong>{tailEntryCheck?.status || 'pending'}</strong></div>
+            <div><span>Tail round</span><strong>{evaluatedRoundId || '-'}</strong></div>
+            <div><span>Checkpoint</span><strong>{checkpointActual}</strong></div>
+            <div><span>Summary row</span><strong>{selectedSummaryRowCondition?.actual || '-'}</strong></div>
+            <div><span>Selected side</span><strong>{selectedSideCondition?.actual || '-'}</strong></div>
+            <div><span>Limit</span><strong>{tailEntryCheck?.limitPrice == null ? '-' : tailEntryCheck.limitPrice.toFixed(3)}</strong></div>
+            <div><span>Amount</span><strong>{tailEntryCheck?.amountUsd == null ? '-' : formatMoney(tailEntryCheck.amountUsd)}</strong></div>
+            <div><span>12h PnL gate</span><strong>{summaryPnlCondition?.actual || '-'}</strong></div>
+            <div><span>Summary EV</span><strong>{summaryEvCondition?.actual || '-'}</strong></div>
+            <div><span>Min price</span><strong>{summaryMinVwapCondition?.actual || '-'}</strong></div>
+            <div><span>Live VWAP</span><strong>{vwapCondition?.actual || vwapFloorCondition?.actual || '-'}</strong></div>
+            <div><span>Midpoint gap</span><strong>{midpointGapCondition?.actual || '-'}</strong></div>
+            <div><span>Round limit</span><strong>{roundOrderLimitCondition?.actual || '-'}</strong></div>
+            <div><span>Tail orders</span><strong>{currentRoundTailOrders.length}</strong></div>
+          </div>
 
-      <div className="tailEntryOrderBlock">
-        <div className="tailEntryOrderHeader">
-          <span>Current tail round orders</span>
-          <strong>{currentRoundTailOrders.length ? `${currentRoundTailOrders.length} shown` : 'none'}</strong>
-        </div>
-        {currentRoundTailOrders.length > 0 ? (
-          <div className="tailEntryOrders">
-            {currentRoundTailOrders.map((order) => (
-              <div key={order.id} className="tailEntryOrderRow">
-                <div>
-                  <Badge tone={order.status === 'failed' ? 'bad' : order.status === 'filled' ? 'good' : order.status === 'posted' ? 'warn' : 'neutral'}>{order.status}</Badge>
-                  <Badge tone={outcomeTone(order.label)}>{outcomeLabel(order.label)}</Badge>
-                </div>
-                <strong>{order.side} {order.size.toFixed(2)} @ {order.price.toFixed(3)}</strong>
-                <span>{formatEtTime(order.createdAt)} · {shortenTokenId(order.clobOrderId || order.id)}</span>
-                <em title={orderMarketTitle(order)}>{orderFailureReason(order)}</em>
+          <div className="tailEntryOrderBlock">
+            <div className="tailEntryOrderHeader">
+              <span>Current tail round orders</span>
+              <strong>{currentRoundTailOrders.length ? `${currentRoundTailOrders.length} shown` : 'none'}</strong>
+            </div>
+            {currentRoundTailOrders.length > 0 ? (
+              <div className="tailEntryOrders">
+                {currentRoundTailOrders.map((order) => (
+                  <div key={order.id} className="tailEntryOrderRow">
+                    <div>
+                      <Badge tone={order.status === 'failed' ? 'bad' : order.status === 'filled' ? 'good' : order.status === 'posted' ? 'warn' : 'neutral'}>{order.status}</Badge>
+                      <Badge tone={outcomeTone(order.label)}>{outcomeLabel(order.label)}</Badge>
+                    </div>
+                    <strong>{order.side} {order.size.toFixed(2)} @ {order.price.toFixed(3)}</strong>
+                    <span>{formatEtTime(order.createdAt)} · {shortenTokenId(order.clobOrderId || order.id)}</span>
+                    <em title={orderMarketTitle(order)}>{orderFailureReason(order)}</em>
+                  </div>
+                ))}
               </div>
-            ))}
+            ) : (
+              <div className="tailEntryNoOrder">
+                <strong>{primaryBlocker}</strong>
+                <span>No Tail Entry order is recorded for this evaluated round. See Activity → Orders for older Tail attempts.</span>
+              </div>
+            )}
           </div>
-        ) : (
-          <div className="tailEntryNoOrder">
-            <strong>{primaryBlocker}</strong>
-            <span>No Tail Entry order is recorded for this evaluated round. See Activity → Orders for older Tail attempts.</span>
-          </div>
-        )}
-      </div>
 
-      {tailEntryCheck?.blockers.length ? (
-        <div className="portfolioDiagnostics">
-          {tailEntryCheck.blockers.slice(0, 6).map((blocker) => (
-            <span key={blocker}>{blocker}</span>
-          ))}
+          {tailEntryCheck?.blockers.length ? (
+            <div className="portfolioDiagnostics">
+              {tailEntryCheck.blockers.slice(0, 6).map((blocker) => (
+                <span key={blocker}>{blocker}</span>
+              ))}
+            </div>
+          ) : null}
         </div>
-      ) : null}
+      </details>
     </div>
   );
 }
