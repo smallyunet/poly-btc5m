@@ -165,6 +165,7 @@ test('caps tail entry limit price at the CLOB maximum', () => {
     checkpoints: [60],
   });
   config.pm5mTailEntryMaxVwap = 0.99;
+  config.pm5mTailEntryMinEvPerShare = 0.02;
   const store = new InMemoryStore('monitor', 2_000, { persistencePath: false });
   const evaluation = evaluateTailEntry(snapshot({ yesBid: 0.98, yesAsk: 0.99, noAsk: 0.02 }), config, store);
 
@@ -295,6 +296,62 @@ test('execution gate rejects a stale tail intent above the configured ceiling', 
   assert.match(diagnostics[0] || '', /TAIL_LIMIT_PRICE_ABOVE_MAX/);
 });
 
+test('blocks the live ask band when its conservative win probability does not clear price plus margin', () => {
+  const config = tailConfig({
+    askBandRows: [{ checkpointSeconds: 60, askBand: '55-65c', rows: 100, fillable: 100, fillRate: 1, wins: 70, winRate: 0.7, avgPnlPerShare: 0.09, totalPnl: 45, avgVwap: 0.61 }],
+  });
+  config.pm5mTailEntryWinProbabilityMargin = 0.01;
+  const evaluation = evaluateTailEntry(snapshot(), config, new InMemoryStore('monitor', 2_000, { persistencePath: false }));
+
+  assert.equal(evaluation.ok, false);
+  assert.equal(evaluation.check.blockers.includes('TAIL_WIN_PROBABILITY_MARGIN_TOO_LOW'), true, evaluation.check.reason);
+});
+
+test('blocks Tail when Dual already allocated the same round', () => {
+  const config = tailConfig();
+  const store = new InMemoryStore('monitor', 2_000, { persistencePath: false });
+  const current = snapshot();
+  store.recordOrder({
+    id: 'dual-order', profileId: 'btc-5m', asset: 'btc', interval: '5m', intentId: 'dual-intent', strategy: 'UPDOWN_DUAL_ENTRY', strategyProfile: 'classic', executionKey: 'dual-key', roundId: current.round.id, eventSlug: current.round.eventSlug, tokenId: current.round.yesTokenId, label: 'YES', side: 'BUY', price: 0.31, size: 5, status: 'cancelled', createdAt: current.capturedAt,
+  });
+  const evaluation = evaluateTailEntry(current, config, store);
+
+  assert.equal(evaluation.ok, false);
+  assert.equal(evaluation.check.blockers.includes('TAIL_DUAL_ROUND_CONFLICT'), true, evaluation.check.reason);
+});
+
+test('blocks Tail while its loss cooldown is active', () => {
+  const config = tailConfig();
+  const store = new InMemoryStore('monitor', 2_000, { persistencePath: false });
+  const current = snapshot();
+  store.recordTailLoss('btc-5m', 'previous-tail-round', -2, { baseMs: 900_000, repeatWindowMs: 3_600_000, secondMs: 3_600_000, thirdMs: 14_400_000 });
+  const evaluation = evaluateTailEntry(current, config, store);
+
+  assert.equal(evaluation.ok, false);
+  assert.equal(evaluation.check.blockers.includes('TAIL_COOLDOWN'), true, evaluation.check.reason);
+});
+
+test('revalidates Tail immediately before live submit', async () => {
+  const config = tailConfig();
+  config.ownerPrivateKey = '0xabc';
+  config.depositWallet = '0xwallet';
+  const store = new InMemoryStore('live', 2_000, { persistencePath: false });
+  const current = snapshot();
+  const evaluation = evaluateTailEntry(current, config, store);
+  assert.equal(evaluation.ok, true, evaluation.check.reason);
+  if (!evaluation.ok) return;
+  let posted = false;
+  const adapter = {
+    async getCollateralBalanceAllowance() { return { balance: 100, allowance: 100 }; },
+    async getOpenOrders() { return []; },
+    async executeLimitIntent() { posted = true; return { ok: true, price: 0.61, size: 5 }; },
+  } as unknown as PolymarketAdapter;
+  const diagnostics = await executeTailEntry({ appConfig: config, adapter, store, snapshot: current, evaluation, revalidate: () => ({ ok: false, check: { ...evaluation.check, status: 'blocked', reason: 'TAIL_SIDE_NOT_SELECTABLE', blockers: ['TAIL_SIDE_NOT_SELECTABLE'] } }) });
+
+  assert.equal(posted, false);
+  assert.match(diagnostics[0] || '', /TAIL_REVALIDATION_BLOCKED/);
+});
+
 function tailConfig(options: {
   rows?: Array<{
     checkpointSeconds: number;
@@ -314,6 +371,8 @@ function tailConfig(options: {
     rows: number;
     fillable: number;
     fillRate: number;
+    wins?: number;
+    winRate?: number;
     avgPnlPerShare: number;
     totalPnl?: number;
     avgVwap: number;
@@ -335,6 +394,8 @@ function tailConfig(options: {
     rows: number;
     fillable: number;
     fillRate: number;
+    wins?: number;
+    winRate?: number;
     avgPnlPerShare: number;
     totalPnl?: number;
     avgVwap: number;
@@ -343,31 +404,42 @@ function tailConfig(options: {
 } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pm5m-tail-test-'));
   const summaryPath = path.join(dir, 'summary.json');
+  const checkpointRows = options.rows || [{
+    checkpointSeconds: 60,
+    rows: 25,
+    fillable: 13,
+    fillRate: 0.52,
+    avgPnlPerShare: 0.13,
+    totalPnl: 16.25,
+    avgVwap: 0.66,
+  }];
+  const bands = ['<55c', '55-65c', '65-75c', '75-85c', '85c+'];
+  const bandRows = options.askBandRows || checkpointRows.flatMap((row) => bands.map((askBand) => ({
+    ...row,
+    askBand,
+    rows: 100,
+    fillable: 100,
+    fillRate: 1,
+    avgPnlPerShare: 0.13,
+    totalPnl: 65,
+  })));
+  const assetBandRows = options.assetBandRows || options.assetRows?.flatMap((row) => bands.map((askBand) => ({
+    ...row,
+    askBand,
+    rows: 100,
+    fillable: 100,
+    fillRate: 1,
+    avgPnlPerShare: 0.13,
+    totalPnl: 65,
+  })));
   fs.writeFileSync(summaryPath, JSON.stringify({
     ok: true,
     generatedAt: new Date().toISOString(),
     completed: {
-      byCheckpoint: options.rows || [{
-        checkpointSeconds: 60,
-        rows: 25,
-        fillable: 13,
-        fillRate: 0.52,
-        avgPnlPerShare: 0.13,
-        totalPnl: 16.25,
-        avgVwap: 0.66,
-      }],
+      byCheckpoint: checkpointRows,
       byAssetCheckpoint: options.assetRows,
-      byAskBand: options.askBandRows || [{
-        checkpointSeconds: 60,
-        askBand: '55-65c',
-        rows: 4,
-        fillable: 4,
-        fillRate: 1,
-        avgPnlPerShare: 0.13,
-        totalPnl: 16.25,
-        avgVwap: 0.61,
-      }],
-      byAssetAskBand: options.assetBandRows,
+      byAskBand: bandRows,
+      byAssetAskBand: assetBandRows,
     },
   }));
   const config = loadConfig();
@@ -388,6 +460,7 @@ function tailConfig(options: {
   config.pm5mTailEntryMaxSlippage = 0.02;
   config.pm5mTailEntryPriceOffset = 0.001;
   config.pm5mTailEntryMaxOrdersPerRound = 1;
+  config.pm5mTailEntryWinProbabilityMargin = -1;
   return config;
 }
 

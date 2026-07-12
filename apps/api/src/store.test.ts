@@ -506,6 +506,21 @@ test('BTC 1h human-readable round slugs are eligible for settlement after expiry
   }]);
 });
 
+test('Tail loss cooldown escalates from base to second and third loss durations', () => {
+  const store = new InMemoryStore('live', 2_000, { persistencePath: false });
+  const now = Date.now();
+  const policy = { baseMs: 900_000, repeatWindowMs: 3_600_000, secondMs: 3_600_000, thirdMs: 14_400_000 };
+
+  const first = store.recordTailLoss('btc-5m', 'tail-1', -2, policy, now);
+  const second = store.recordTailLoss('btc-5m', 'tail-2', -2, policy, now + 60_000);
+  const third = store.recordTailLoss('btc-5m', 'tail-3', -2, policy, now + 120_000);
+
+  assert.equal(new Date(first?.expiresAt || 0).getTime(), now + 900_000);
+  assert.equal(new Date(second?.expiresAt || 0).getTime(), now + 60_000 + 3_600_000);
+  assert.equal(new Date(third?.expiresAt || 0).getTime(), now + 120_000 + 14_400_000);
+  assert.equal(third?.recentLossCount, 3);
+});
+
 test('open-order reconciliation only cancels orders for the requested profile', () => {
   const nowMs = Date.now();
   const fiveMinuteRound = roundIdFromStart(nowMs - 7 * 60_000);

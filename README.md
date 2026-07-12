@@ -213,10 +213,16 @@ PM5M_TAIL_ENTRY_ENABLED=true
 PM5M_TAIL_ENTRY_SUMMARY_PATH=data-lab/pm-5m-tail/summary.json
 PM5M_TAIL_ENTRY_MAX_SUMMARY_AGE_MS=600000
 PM5M_TAIL_ENTRY_MIN_ROUNDS=20
-PM5M_TAIL_ENTRY_MIN_EV_PER_SHARE=0
-PM5M_TAIL_ENTRY_CHECKPOINTS=60,45,30,20,15,10,5
+PM5M_TAIL_ENTRY_MIN_EV_PER_SHARE=0.02
+PM5M_TAIL_ENTRY_CHECKPOINTS=15
 PM5M_TAIL_ENTRY_SIZE=2
+PM5M_TAIL_ENTRY_MIN_BAND_ROWS=50
 PM5M_TAIL_ENTRY_MAX_VWAP=0.99
+PM5M_TAIL_ENTRY_WIN_PROBABILITY_MARGIN=0.01
+PM5M_TAIL_COOLDOWN_BASE_MS=900000
+PM5M_TAIL_COOLDOWN_REPEAT_WINDOW_MS=3600000
+PM5M_TAIL_COOLDOWN_SECOND_MS=3600000
+PM5M_TAIL_COOLDOWN_THIRD_MS=14400000
 PM_ASSET_SELECTOR_ENABLED=true
 PM_ASSET_SELECTOR_MAX_ASSETS=1
 PM_ASSET_SELECTOR_SINGLE_PENALTY=0
@@ -263,7 +269,8 @@ Live entry orders are configured as CLOB limit order `price + size`:
 - `PM_SIM_REQUIRE_AVAILABLE=true` keeps simulator-selected entry fail-closed when the summary is missing, stale, or undersampled. `PM_SIM_REQUIRE_POSITIVE_EV=false` allows the experimental pure-EV selector to trade the least-negative historical row; it does not permit fallback while availability is required.
 - `PM_SIM_LOOKBACK_HOURS=84` is the experimental recorder lookback window, approximately 1,008 BTC 5m rounds and therefore close to the tested 1,000-round selector. Each interval has an independent summary and minimum sample threshold; when the rolling window is undersampled, the selector can use that same interval's all-time rows, but never another interval's rows.
 - `PM_ASSET_SELECTOR_ENABLED=true` ranks the six enabled assets independently inside each interval using `EV - SINGLE_PENALTY * singleRate`; the experimental BTC5m configuration sets the penalty to zero for pure-EV selection. With `PM_ASSET_SELECTOR_MAX_ASSETS=1`, at most one 5m, one 15m, and one 1h profile can pass the selector for their respective rounds.
-- `PM5M_TAIL_LOOKBACK_HOURS=12` is the tail-entry simulation window. Each enabled 5m asset reads only its own rows, ignores losing checkpoints, selects its positive row by per-share edge, and blocks independently with `TAIL_SUMMARY_12H_PNL_NOT_POSITIVE` when no checkpoint has positive 12h PnL. Fill rate is reference-only. `PM5M_TAIL_ENTRY_SIZE` is the reference share count used to cap the FAK BUY spend at `size * limitPrice`; Polymarket price improvement can return more outcome shares without increasing that spend. Both live VWAP and the final FAK limit are capped by `PM5M_TAIL_ENTRY_MAX_VWAP`.
+- `PM5M_TAIL_LOOKBACK_HOURS=12` is the tail-entry simulation window. Live Tail is fixed to the 15-second checkpoint and requires both its BTC checkpoint row and the current VWAP ask-band row to clear the configured sample and per-share EV thresholds. The ask-band 95% win-probability lower bound must also exceed live VWAP by `PM5M_TAIL_ENTRY_WIN_PROBABILITY_MARGIN`. Fill rate is reference-only. `PM5M_TAIL_ENTRY_SIZE` is the reference share count used to cap FAK BUY spend; Polymarket price improvement can return more outcome shares without increasing that spend.
+- Ordinary Tail is blocked for any round already allocated to Dual. Immediately before posting, the worker revalidates the selected side, ask band, and VWAP against the latest websocket book. A settled Tail loss starts an escalating Tail-only cooldown: 15 minutes for the first loss, 60 minutes for the second loss inside one hour, and 4 hours for the third or later loss.
 - `BYPASS_SINGLE_FILL_COOLDOWN=true` bypasses only the active single-fill cooldown entry blocker. It does not disable the single-fill hedge/profit-exit logic.
 - `REFRESH_SINGLE_FILL_COOLDOWN_ON_BOOT=true` recomputes any persisted active single-fill cooldown from the current profile cooldown config during process boot. It preserves fills, reviewed rounds, and repeat history, and only updates or clears active cooldown records.
 - `ENTRY_CONFIRM_TICKS=3` requires the full entry setup to remain eligible across three consecutive bot ticks before orders are posted.

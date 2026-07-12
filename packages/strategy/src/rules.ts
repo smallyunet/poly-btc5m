@@ -34,8 +34,12 @@ export const STRATEGY_RULES: StrategyRule[] = [
     entryRules: [
       'Runs independently for enabled BTC, ETH, SOL, DOGE, XRP, and HYPE 5m profiles when PM5M_TAIL_ENTRY_ENABLED=true.',
       'The round must already be running and inside one configured PM5M_TAIL_ENTRY_CHECKPOINTS window.',
-      'The tail simulation summary must be fresh and the matching checkpoint row must pass minimum sample, per-share edge, and reference fill-rate checks.',
+      'The tail simulation summary must be fresh, and both the fixed checkpoint row and the live VWAP ask-band row must pass minimum sample and per-share EV thresholds.',
+      'The ask-band 95% win-probability lower bound must exceed live VWAP by the configured safety margin.',
       'YES and NO books must be live and fresh; the stronger side is selected by midpoint.',
+      'A round already allocated to Dual is excluded from ordinary Tail entry; missing-side recovery remains owned by the capped hedge rule.',
+      'The selected side, ask band, and VWAP are revalidated from the latest book immediately before live submission.',
+      'A settled Tail loss starts an escalating Tail-only cooldown: base pause, longer second loss pause, and third-loss circuit breaker inside the repeat window.',
       'The selected side must pass midpoint-gap, minimum and maximum VWAP, spread, overround, slippage, notional, and per-round duplicate-order gates; PM5M_TAIL_ENTRY_SIZE is the reference share count used to cap spend at size times limit price.',
       'A marketable BUY limit can receive more outcome shares when execution improves below the limit price; the capped spend, rather than the eventual share count, is the Tail exposure boundary.',
       'Live tail entries are posted as capped FAK BUY LIMIT orders, not GTC orders.',

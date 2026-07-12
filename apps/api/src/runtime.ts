@@ -143,7 +143,23 @@ export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, dat
   } satisfies StateSnapshot : null;
   if (tailSnapshot) tailSnapshot.orderbookDepth = buildOrderbookDepthSnapshot(tailSnapshot, entryAppConfig);
   const tailEntry = classicActive && tailSnapshot ? evaluateTailEntry(tailSnapshot, appConfig, store) : null;
-  const tailEntryDiagnostics = tailEntry && tailSnapshot ? await executeTailEntry({ appConfig, adapter, store, snapshot: tailSnapshot, evaluation: tailEntry }) : [];
+  const tailEntryDiagnostics = tailEntry && tailSnapshot && tailRound ? await executeTailEntry({
+    appConfig,
+    adapter,
+    store,
+    snapshot: tailSnapshot,
+    evaluation: tailEntry,
+    revalidate: () => {
+      const capturedAt = new Date().toISOString();
+      const secondsToEnd = (new Date(tailSnapshot.round.endAt).getTime() - Date.now()) / 1000;
+      return evaluateTailEntry({
+        ...tailSnapshot,
+        capturedAt,
+        round: { ...tailSnapshot.round, secondsToEnd, secondsToStart: secondsToEnd - profile.roundDurationSeconds },
+        orderbooks: data.refreshOrderbooks(tailRound),
+      }, appConfig, store);
+    },
+  }) : [];
   const crossProfileRiskDiagnostics = classicActive
     ? await executeCrossProfileSingleFillRisk(appConfig, store, data, adapter, [...fillCooldowns, ...orderCooldowns])
     : [];
@@ -1007,6 +1023,17 @@ async function reconcileSettlements(appConfig: AppConfig, store: InMemoryStore, 
         status: 'settled',
       };
       store.recordSettlement(settlement);
+      const tailFills = fills.filter((fill) => fill.strategy === 'UPDOWN_TAIL_ENTRY');
+      if (tailFills.some((fill) => fill.side === 'BUY')) {
+        const tailPnl = calculateSettlementValues(tailFills, winningLabel).pnl;
+        const cooldown = store.recordTailLoss(profile.id, round.roundId, tailPnl, {
+          baseMs: appConfig.pm5mTailCooldownBaseMs,
+          repeatWindowMs: appConfig.pm5mTailCooldownRepeatWindowMs,
+          secondMs: appConfig.pm5mTailCooldownSecondMs,
+          thirdMs: appConfig.pm5mTailCooldownThirdMs,
+        });
+        if (cooldown) diagnostics.push(`Tail loss cooldown active until ${cooldown.expiresAt} after ${round.roundId} (${tailPnl.toFixed(2)} PnL).`);
+      }
     } catch (error) {
       if (store.getRuntime().executionMode === 'live') diagnostics.push(`Settlement reconciliation failed for ${round.roundId}: ${error instanceof Error ? error.message : String(error)}`);
     }

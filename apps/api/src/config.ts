@@ -85,6 +85,11 @@ export type AppConfig = {
   pm5mTailEntryMaxSlippage: number;
   pm5mTailEntryPriceOffset: number;
   pm5mTailEntryMaxOrdersPerRound: number;
+  pm5mTailEntryWinProbabilityMargin: number;
+  pm5mTailCooldownBaseMs: number;
+  pm5mTailCooldownRepeatWindowMs: number;
+  pm5mTailCooldownSecondMs: number;
+  pm5mTailCooldownThirdMs: number;
   minLiveChopScore: number;
   bypassEntryScoreGating: boolean;
   bypassSingleFillCooldown: boolean;
@@ -218,6 +223,11 @@ export function loadConfig(): AppConfig {
     pm5mTailEntryMaxSlippage: numberEnv('PM5M_TAIL_ENTRY_MAX_SLIPPAGE', 0.02),
     pm5mTailEntryPriceOffset: numberEnv('PM5M_TAIL_ENTRY_PRICE_OFFSET', 0.001),
     pm5mTailEntryMaxOrdersPerRound: parsePositiveInteger(process.env.PM5M_TAIL_ENTRY_MAX_ORDERS_PER_ROUND, 1),
+    pm5mTailEntryWinProbabilityMargin: numberEnv('PM5M_TAIL_ENTRY_WIN_PROBABILITY_MARGIN', 0.01),
+    pm5mTailCooldownBaseMs: parsePositiveInteger(process.env.PM5M_TAIL_COOLDOWN_BASE_MS, 15 * 60_000),
+    pm5mTailCooldownRepeatWindowMs: parsePositiveInteger(process.env.PM5M_TAIL_COOLDOWN_REPEAT_WINDOW_MS, 60 * 60_000),
+    pm5mTailCooldownSecondMs: parsePositiveInteger(process.env.PM5M_TAIL_COOLDOWN_SECOND_MS, 60 * 60_000),
+    pm5mTailCooldownThirdMs: parsePositiveInteger(process.env.PM5M_TAIL_COOLDOWN_THIRD_MS, 4 * 60 * 60_000),
     minLiveChopScore: numberEnv('MIN_LIVE_CHOP_SCORE', 70),
     bypassEntryScoreGating: booleanEnv('BYPASS_ENTRY_SCORE_GATING', true),
     bypassSingleFillCooldown: booleanEnv('BYPASS_SINGLE_FILL_COOLDOWN', false),

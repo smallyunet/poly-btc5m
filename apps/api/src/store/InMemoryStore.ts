@@ -5,7 +5,7 @@ import { STRATEGY_RULES } from '../../../../packages/strategy/src';
 import type { BotRuntimeStatus, DashboardState, DataFeedStatus, DynamicEntryPriceSelection, EntryRuntimeConfig, ExecutionMode, FillRecord, MarketProfile, MarketProfileId, OrderRecord, RuntimeLogRecord, SettlementRecord, StateSnapshot, StrategyCheck, StrategyId, StrategyProfile, TradeIntent } from '../../../../packages/shared/src';
 import { CLASSIC_ENTRY_STRATEGY, EXPERIMENT_STRATEGY, FINAL_SINGLE_FILL_GRACE_MS } from './constants';
 import { cooldownCategory, entrySignalScope, fillStrategy, finalSingleFillReviewMs, isExperimentStopLike, isFillRecordLike, isMarketProfileId, isOrderRecordLike, isRoundEnded, isSameCooldownEvent, isSingleFillCooldownEventLike, isSingleFillCooldownLike, isSingleFillHedgeOutcomeLike, isTelegramNotificationStateLike, isTradeIntentLike, matchingOrderFills, maxCooldown, netShares, normalizeCooldownPolicy, optionalEnv, orderStrategy, parseProfileRoundKey, profileAsset, profileDurationMs, profileDurationSeconds, profileIntervals, profileRoundKey, roundMoney, roundStartMs, runtimeVersion, strategyProfileForStrategy, sum, toTime } from './helpers';
-import type { ExperimentStopRecord, OpenOrderLike, PendingSingleFillRiskRecord, PersistedRuntimeState, SingleFillCooldownEvent, SingleFillCooldownPolicy, SingleFillCooldownRecord, SingleFillHedgeCandidate, SingleFillHedgeOutcome, SingleFillProfitExitCandidate, StoreOptions, TelegramNotificationState } from './types';
+import type { ExperimentStopRecord, OpenOrderLike, PendingSingleFillRiskRecord, PersistedRuntimeState, SingleFillCooldownEvent, SingleFillCooldownPolicy, SingleFillCooldownRecord, SingleFillHedgeCandidate, SingleFillHedgeOutcome, SingleFillProfitExitCandidate, StoreOptions, TailCooldownEvent, TailCooldownRecord, TelegramNotificationState } from './types';
 
 export class InMemoryStore {
   private runtime: BotRuntimeStatus;
@@ -22,6 +22,8 @@ export class InMemoryStore {
   private pendingSingleFillReviewRoundIds = new Set<string>();
   private singleFillHedgeOutcomes = new Map<string, SingleFillHedgeOutcome>();
   private singleFillCooldownEvents: SingleFillCooldownEvent[] = [];
+  private tailCooldowns = new Map<MarketProfileId, TailCooldownRecord>();
+  private tailCooldownEvents: TailCooldownEvent[] = [];
   private experimentStop: ExperimentStopRecord | null = null;
   private entrySignalCounts = new Map<string, number>();
   private runtimeLogs: RuntimeLogRecord[] = [];
@@ -133,6 +135,34 @@ export class InMemoryStore {
       this.settlements = [settlement, ...this.settlements].slice(0, this.maxRecords);
     }
     this.persistState();
+  }
+
+  getActiveTailCooldown(profileId: MarketProfileId, nowMs = Date.now()): TailCooldownRecord | null {
+    const active = this.tailCooldowns.get(profileId) || null;
+    if (!active) return null;
+    if (toTime(active.expiresAt) > nowMs) return active;
+    this.tailCooldowns.delete(profileId);
+    this.persistState();
+    return null;
+  }
+
+  recordTailLoss(profileId: MarketProfileId, roundId: string, pnl: number, policy: { baseMs: number; repeatWindowMs: number; secondMs: number; thirdMs: number }, nowMs = Date.now()): TailCooldownRecord | null {
+    if (!(pnl < 0) || this.tailCooldownEvents.some((event) => event.profileId === profileId && event.roundId === roundId)) return null;
+    const recent = this.tailCooldownEvents.filter((event) => event.profileId === profileId && nowMs - toTime(event.triggeredAt) <= policy.repeatWindowMs);
+    const recentLossCount = recent.length + 1;
+    const durationMs = recentLossCount >= 3 ? policy.thirdMs : recentLossCount === 2 ? policy.secondMs : policy.baseMs;
+    const record: TailCooldownRecord = {
+      profileId,
+      roundId,
+      triggeredAt: new Date(nowMs).toISOString(),
+      expiresAt: new Date(nowMs + durationMs).toISOString(),
+      recentLossCount,
+      pnl,
+    };
+    this.tailCooldownEvents = [{ profileId, roundId, triggeredAt: record.triggeredAt }, ...recent].slice(0, 100);
+    this.tailCooldowns.set(profileId, record);
+    this.persistState();
+    return record;
   }
 
   settledPnl(): number {
@@ -715,6 +745,8 @@ export class InMemoryStore {
       this.pendingSingleFillReviewRoundIds = new Set(Array.isArray(parsed.pendingSingleFillReviewRoundIds) ? parsed.pendingSingleFillReviewRoundIds.filter((roundId): roundId is string => typeof roundId === 'string') : []);
       this.singleFillHedgeOutcomes = new Map(Object.entries(parsed.singleFillHedgeOutcomes || {}).filter((entry): entry is [string, SingleFillHedgeOutcome] => isSingleFillHedgeOutcomeLike(entry[1])));
       this.singleFillCooldownEvents = Array.isArray(parsed.singleFillCooldownEvents) ? parsed.singleFillCooldownEvents.filter(isSingleFillCooldownEventLike).slice(0, 100) : [];
+      this.tailCooldowns = new Map(Object.entries(parsed.tailCooldowns || {}).filter((entry): entry is [MarketProfileId, TailCooldownRecord] => isMarketProfileId(entry[0]) && Boolean(entry[1]?.roundId && entry[1]?.expiresAt)));
+      this.tailCooldownEvents = Array.isArray(parsed.tailCooldownEvents) ? parsed.tailCooldownEvents.filter((event): event is TailCooldownEvent => Boolean(event?.profileId && event?.roundId && event?.triggeredAt)).slice(0, 100) : [];
       this.experimentStop = isExperimentStopLike(parsed.experimentStop) ? parsed.experimentStop : null;
       this.runtime = this.runtimeWithCooldown();
       this.reconcileOrderFillStatus();
@@ -770,6 +802,8 @@ export class InMemoryStore {
         pendingSingleFillReviewRoundIds: [...this.pendingSingleFillReviewRoundIds],
         singleFillHedgeOutcomes: Object.fromEntries(this.singleFillHedgeOutcomes),
         singleFillCooldownEvents: this.singleFillCooldownEvents,
+        tailCooldowns: Object.fromEntries(this.tailCooldowns),
+        tailCooldownEvents: this.tailCooldownEvents,
         experimentStop: this.experimentStop,
       };
       const tmpPath = `${this.persistencePath}.${process.pid}.tmp`;

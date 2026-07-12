@@ -16,7 +16,7 @@ const CLOB_MIN_LIMIT_PRICE = 0.01;
 const CLOB_MAX_LIMIT_PRICE = 0.99;
 
 export type TailEntryEvaluation =
-  | { ok: true; intent: TradeIntent; check: StrategyCheck; checkpointSeconds: number; vwap: number; bestAsk: number; midpointGap: number }
+  | { ok: true; intent: TradeIntent; check: StrategyCheck; checkpointSeconds: number; vwap: number; bestAsk: number; midpointGap: number; askBand: string }
   | { ok: false; rejected?: TradeIntent; check: StrategyCheck };
 
 type TailSummaryRow = {
@@ -28,6 +28,7 @@ type TailSummaryRow = {
   fillable?: number;
   fillRate?: number | null;
   winRate?: number | null;
+  wins?: number | null;
   avgPnlPerShare?: number | null;
   totalPnl?: number | null;
   avgVwap?: number | null;
@@ -68,6 +69,10 @@ export function evaluateTailEntry(snapshot: StateSnapshot, appConfig: AppConfig,
   const selected = selectedLabel === 'YES' ? yes : selectedLabel === 'NO' ? no : null;
   const liveSize = appConfig.pm5mTailEntrySize;
   const plan = selected ? buyVwap(selected.quote.asks || [], liveSize) : null;
+  const liveAskBand = plan?.vwap == null ? null : askBandForVwap(plan.vwap);
+  const bandRow = selectedSummaryRow && summary.value && liveAskBand
+    ? selectBandRow(summary.value, snapshot.asset, selectedSummaryRow.checkpointSeconds, liveAskBand)
+    : null;
   const tailLimitPrice = plan?.vwap == null
     ? undefined
     : Math.min(cappedPrice(plan.vwap + appConfig.pm5mTailEntryPriceOffset), appConfig.pm5mTailEntryMaxVwap);
@@ -75,6 +80,9 @@ export function evaluateTailEntry(snapshot: StateSnapshot, appConfig: AppConfig,
   const midpointGap = yes?.quote.midpoint != null && no?.quote.midpoint != null ? roundMoney(Math.abs(yes.quote.midpoint - no.quote.midpoint)) : null;
   const existingOrders = store.roundOrders(snapshot.profileId, snapshot.round.id, TAIL_ENTRY_STRATEGY)
     .filter((order) => order.status !== 'failed');
+  const dualRoundOrders = store.roundOrders(snapshot.profileId, snapshot.round.id, 'UPDOWN_DUAL_ENTRY')
+    .filter((order) => order.status !== 'failed');
+  const tailCooldown = store.getActiveTailCooldown(snapshot.profileId);
 
   if (!enabled) blockers.push('TAIL_ENTRY_DISABLED');
   if (snapshot.round.secondsToStart > 0) blockers.push('ROUND_NOT_STARTED');
@@ -85,6 +93,15 @@ export function evaluateTailEntry(snapshot: StateSnapshot, appConfig: AppConfig,
   if (row && (row.rows ?? 0) < appConfig.pm5mTailEntryMinRounds) blockers.push('TAIL_SUMMARY_SAMPLE_TOO_SMALL');
   if (summary.ok && !row) blockers.push('TAIL_SUMMARY_12H_PNL_NOT_POSITIVE');
   if (row && (row.totalPnl ?? Number.NEGATIVE_INFINITY) <= 0) blockers.push('TAIL_SUMMARY_12H_PNL_NOT_POSITIVE');
+  if (row && (row.avgPnlPerShare ?? Number.NEGATIVE_INFINITY) < appConfig.pm5mTailEntryMinEvPerShare) blockers.push('TAIL_SUMMARY_EV_TOO_LOW');
+  if (!bandRow) blockers.push('TAIL_ASK_BAND_HISTORY_MISSING');
+  if (bandRow && (bandRow.rows ?? 0) < appConfig.pm5mTailEntryMinBandRows) blockers.push('TAIL_ASK_BAND_SAMPLE_TOO_SMALL');
+  if (bandRow && (bandRow.totalPnl ?? Number.NEGATIVE_INFINITY) <= 0) blockers.push('TAIL_ASK_BAND_PNL_NOT_POSITIVE');
+  if (bandRow && (bandRow.avgPnlPerShare ?? Number.NEGATIVE_INFINITY) < appConfig.pm5mTailEntryMinEvPerShare) blockers.push('TAIL_ASK_BAND_EV_TOO_LOW');
+  const bandWinLowerBound = bandRow ? winProbabilityLowerBound(bandRow) : null;
+  if (bandWinLowerBound != null && plan?.vwap != null && bandWinLowerBound + EPSILON < plan.vwap + appConfig.pm5mTailEntryWinProbabilityMargin) blockers.push('TAIL_WIN_PROBABILITY_MARGIN_TOO_LOW');
+  if (dualRoundOrders.length) blockers.push('TAIL_DUAL_ROUND_CONFLICT');
+  if (tailCooldown) blockers.push('TAIL_COOLDOWN');
   if (!yes || !no) blockers.push('ORDERBOOK_MISSING');
   if (selectedLabel == null || !selected) blockers.push('TAIL_SIDE_NOT_SELECTABLE');
   if (plan && !plan.fillable) blockers.push('TAIL_DEPTH_INSUFFICIENT');
@@ -104,6 +121,13 @@ export function evaluateTailEntry(snapshot: StateSnapshot, appConfig: AppConfig,
     condition('Summary sample size', Boolean(row && (row.rows ?? 0) >= appConfig.pm5mTailEntryMinRounds), row ? `${row.rows ?? 0} / min ${appConfig.pm5mTailEntryMinRounds}` : 'missing'),
     condition('Summary 12h PnL', Boolean(row && (row.totalPnl ?? Number.NEGATIVE_INFINITY) > 0), row?.totalPnl == null ? 'missing' : `${formatMoney(row.totalPnl)} / must be > 0`),
     condition('Summary EV/share', row?.avgPnlPerShare != null, row?.avgPnlPerShare == null ? 'missing' : `${row.avgPnlPerShare.toFixed(4)} reference`),
+    condition('Summary minimum EV/share', Boolean(row && (row.avgPnlPerShare ?? Number.NEGATIVE_INFINITY) >= appConfig.pm5mTailEntryMinEvPerShare), row?.avgPnlPerShare == null ? 'missing' : `${row.avgPnlPerShare.toFixed(4)} / min ${appConfig.pm5mTailEntryMinEvPerShare.toFixed(4)}`),
+    condition('Current ask band', Boolean(bandRow), liveAskBand == null ? 'missing' : `${liveAskBand} / ${bandRow?.rows ?? 0} rows / EV ${formatPerShare(bandRow?.avgPnlPerShare)}`),
+    condition('Ask-band sample size', Boolean(bandRow && (bandRow.rows ?? 0) >= appConfig.pm5mTailEntryMinBandRows), `${bandRow?.rows ?? 0} / min ${appConfig.pm5mTailEntryMinBandRows}`),
+    condition('Ask-band EV/share', Boolean(bandRow && (bandRow.avgPnlPerShare ?? Number.NEGATIVE_INFINITY) >= appConfig.pm5mTailEntryMinEvPerShare), bandRow?.avgPnlPerShare == null ? 'missing' : `${bandRow.avgPnlPerShare.toFixed(4)} / min ${appConfig.pm5mTailEntryMinEvPerShare.toFixed(4)}`),
+    condition('Conservative win probability', bandWinLowerBound != null && plan?.vwap != null && bandWinLowerBound + EPSILON >= plan.vwap + appConfig.pm5mTailEntryWinProbabilityMargin, bandWinLowerBound == null || plan?.vwap == null ? 'missing' : `${formatPct(bandWinLowerBound)} lower bound / needs ${formatPct(plan.vwap + appConfig.pm5mTailEntryWinProbabilityMargin)}`),
+    condition('No Dual allocation this round', dualRoundOrders.length === 0, `${dualRoundOrders.length} tracked Dual orders`),
+    condition('Tail cooldown', !tailCooldown, tailCooldown ? `until ${tailCooldown.expiresAt} after ${tailCooldown.roundId}` : 'clear'),
     condition('Summary fill rate', row?.fillRate != null, row?.fillRate == null ? 'missing' : `${formatPct(row.fillRate)} reference only`),
     condition('Summary min VWAP', liveVwapFloor != null, `${liveVwapFloor.toFixed(3)} min strength floor`),
     condition('YES quote fresh', Boolean(yes), yes ? `${yes.ageMs}ms old` : 'missing/stale'),
@@ -157,7 +181,7 @@ export function evaluateTailEntry(snapshot: StateSnapshot, appConfig: AppConfig,
     ttlSeconds: Math.max(1, Math.ceil(snapshot.round.secondsToEnd)),
     createdAt: snapshot.capturedAt,
   };
-  return { ok: true, intent, check, checkpointSeconds: checkpoint, vwap: plan.vwap, bestAsk: selected.quote.bestAsk ?? plan.vwap, midpointGap: midpointGap ?? 0 };
+  return { ok: true, intent, check, checkpointSeconds: checkpoint, vwap: plan.vwap, bestAsk: selected.quote.bestAsk ?? plan.vwap, midpointGap: midpointGap ?? 0, askBand: liveAskBand! };
 }
 
 export async function executeTailEntry(params: {
@@ -166,6 +190,7 @@ export async function executeTailEntry(params: {
   store: InMemoryStore;
   snapshot: StateSnapshot;
   evaluation: TailEntryEvaluation;
+  revalidate?: () => TailEntryEvaluation;
 }): Promise<string[]> {
   if (!params.evaluation.ok) return [];
   const intent = params.evaluation.intent;
@@ -184,6 +209,24 @@ export async function executeTailEntry(params: {
     params.store.recordOrder(localOrder(params.snapshot, intent, executionKey, 'local'));
     params.store.updateIntent(intent.id, { status: 'executed' });
     return [`Monitor mode recorded tail entry for ${intent.label} @ ${intent.limitPrice.toFixed(3)}.`];
+  }
+
+  const revalidated = params.revalidate?.();
+  if (revalidated) {
+    const reason = !revalidated.ok
+      ? `TAIL_REVALIDATION_BLOCKED: ${revalidated.check.reason}`
+      : revalidated.intent.label !== intent.label
+        ? 'TAIL_REVALIDATION_SIDE_CHANGED'
+        : revalidated.askBand !== params.evaluation.askBand
+          ? 'TAIL_REVALIDATION_BAND_CHANGED'
+          : Math.abs(revalidated.vwap - params.evaluation.vwap) > params.appConfig.pm5mTailEntryMaxSlippage + EPSILON
+            ? 'TAIL_REVALIDATION_VWAP_MOVED'
+            : null;
+    if (reason) {
+      params.store.updateIntent(intent.id, { status: 'rejected', rejectionReason: reason });
+      params.store.recordRuntimeLog({ level: 'warn', source: 'execution', message: `Tail entry blocked before submit: ${reason}.`, details: { intentId: intent.id, roundId: intent.roundId } });
+      return [`Tail entry blocked before submit: ${reason}.`];
+    }
   }
 
   try {
@@ -343,6 +386,33 @@ function summaryMinVwapFloor(summary: TailSummary, asset: string, selectedRow: T
     .filter((item): item is { row: TailSummaryRow; floor: number } => item.floor != null)
     .sort((left, right) => left.floor - right.floor);
   return bandRows[0]?.floor ?? appConfig.pm5mTailEntryMinVwap;
+}
+
+function selectBandRow(summary: TailSummary, asset: string, checkpointSeconds: number | undefined, askBand: string): TailSummaryRow | null {
+  const rows = Array.isArray(summary.completed?.byAssetAskBand)
+    ? summary.completed!.byAssetAskBand!.filter((row) => row.asset === asset)
+    : asset === 'btc' ? summary.completed?.byAskBand || [] : [];
+  return rows.find((row) => row.checkpointSeconds === checkpointSeconds && row.askBand === askBand) ?? null;
+}
+
+function askBandForVwap(vwap: number): string {
+  if (vwap < 0.55) return '<55c';
+  if (vwap < 0.65) return '55-65c';
+  if (vwap < 0.75) return '65-75c';
+  if (vwap < 0.85) return '75-85c';
+  return '85c+';
+}
+
+function winProbabilityLowerBound(row: TailSummaryRow): number | null {
+  const n = row.fillable ?? 0;
+  if (n <= 0) return null;
+  const estimatedWins = row.wins ?? ((row.winRate ?? 0) * n);
+  const p = Math.min(1, Math.max(0, estimatedWins / n));
+  const z = 1.96;
+  const denominator = 1 + z * z / n;
+  const center = p + z * z / (2 * n);
+  const spread = z * Math.sqrt((p * (1 - p) + z * z / (4 * n)) / n);
+  return (center - spread) / denominator;
 }
 
 function askBandFloor(askBand: string | undefined): number | null {

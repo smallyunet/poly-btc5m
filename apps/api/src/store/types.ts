@@ -66,6 +66,23 @@ export type PersistedRuntimeState = {
   singleFillHedgeOutcomes?: Record<string, SingleFillHedgeOutcome>;
   singleFillCooldownEvents?: SingleFillCooldownEvent[];
   experimentStop?: ExperimentStopRecord | null;
+  tailCooldowns?: Record<string, TailCooldownRecord>;
+  tailCooldownEvents?: TailCooldownEvent[];
+};
+
+export type TailCooldownRecord = {
+  profileId: MarketProfileId;
+  roundId: string;
+  triggeredAt: string;
+  expiresAt: string;
+  recentLossCount: number;
+  pnl: number;
+};
+
+export type TailCooldownEvent = {
+  profileId: MarketProfileId;
+  roundId: string;
+  triggeredAt: string;
 };
 
 export type SingleFillCooldownRecord = {
