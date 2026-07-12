@@ -32,6 +32,7 @@ export type AppConfig = {
   binancePriceSampleMs: number;
   clobWsUrl: string;
   dualLimitPrice: number;
+  dualEntryEnabled: boolean;
   dynamicLimitEnabled: boolean;
   minDynamicLimitPrice: number;
   maxDynamicLimitPrice: number;
@@ -70,6 +71,8 @@ export type AppConfig = {
   pm5mAssetSelectorSinglePenalty: number;
   pm5mTailEntryEnabled: boolean;
   pm5mTailEntrySummaryPath: string;
+  pm15mTailEntrySummaryPath: string;
+  pm1hTailEntrySummaryPath: string;
   pm5mTailEntryMaxSummaryAgeMs: number;
   pm5mTailEntryMinRounds: number;
   pm5mTailEntryMinEvPerShare: number;
@@ -170,6 +173,7 @@ export function loadConfig(): AppConfig {
     binancePriceSampleMs: parsePositiveInteger(process.env.BINANCE_PRICE_SAMPLE_MS, 1_000),
     clobWsUrl: clobWsUrl(process.env.POLYMARKET_CLOB_WS_URL),
     dualLimitPrice: numberEnv('DUAL_LIMIT_PRICE', 0.45),
+    dualEntryEnabled: booleanEnv('DUAL_ENTRY_ENABLED', true),
     dynamicLimitEnabled: booleanEnv('DYNAMIC_LIMIT_ENABLED', false),
     minDynamicLimitPrice: numberEnv('MIN_DYNAMIC_LIMIT_PRICE', 0.42),
     maxDynamicLimitPrice: numberEnv('MAX_DYNAMIC_LIMIT_PRICE', 0.46),
@@ -206,8 +210,10 @@ export function loadConfig(): AppConfig {
     pm5mAssetSelectorEnabled: booleanEnv('PM_ASSET_SELECTOR_ENABLED', booleanEnv('PM5M_ASSET_SELECTOR_ENABLED', false)),
     pm5mAssetSelectorMaxAssets: parsePositiveInteger(process.env.PM_ASSET_SELECTOR_MAX_ASSETS || process.env.PM5M_ASSET_SELECTOR_MAX_ASSETS, 1),
     pm5mAssetSelectorSinglePenalty: numberEnv('PM_ASSET_SELECTOR_SINGLE_PENALTY', numberEnv('PM5M_ASSET_SELECTOR_SINGLE_PENALTY', 0.05)),
-    pm5mTailEntryEnabled: booleanEnv('PM5M_TAIL_ENTRY_ENABLED', false),
+    pm5mTailEntryEnabled: booleanEnv('PM_TAIL_ENTRY_ENABLED', booleanEnv('PM5M_TAIL_ENTRY_ENABLED', false)),
     pm5mTailEntrySummaryPath: process.env.PM5M_TAIL_ENTRY_SUMMARY_PATH || process.env.PM5M_TAIL_SUMMARY_PATH || 'data-lab/pm-5m-tail/summary.json',
+    pm15mTailEntrySummaryPath: process.env.PM15M_TAIL_ENTRY_SUMMARY_PATH || 'data-lab/pm-15m-tail/summary.json',
+    pm1hTailEntrySummaryPath: process.env.PM1H_TAIL_ENTRY_SUMMARY_PATH || 'data-lab/pm-1h-tail/summary.json',
     pm5mTailEntryMaxSummaryAgeMs: parsePositiveInteger(process.env.PM5M_TAIL_ENTRY_MAX_SUMMARY_AGE_MS, 10 * 60_000),
     pm5mTailEntryMinRounds: parsePositiveInteger(process.env.PM5M_TAIL_ENTRY_MIN_ROUNDS, 100),
     pm5mTailEntryMinEvPerShare: numberEnv('PM5M_TAIL_ENTRY_MIN_EV_PER_SHARE', 0),

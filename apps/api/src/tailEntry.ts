@@ -57,8 +57,8 @@ type QuoteSnapshot = {
 export function evaluateTailEntry(snapshot: StateSnapshot, appConfig: AppConfig, store: InMemoryStore): TailEntryEvaluation {
   const blockers: string[] = [];
   const conditions: StrategyCondition[] = [];
-  const enabled = appConfig.pm5mTailEntryEnabled && snapshot.interval === '5m' && snapshot.profileId === `${snapshot.asset}-5m`;
-  const summary = readTailSummary(appConfig);
+  const enabled = appConfig.pm5mTailEntryEnabled && snapshot.profileId === `${snapshot.asset}-${snapshot.interval}`;
+  const summary = readTailSummary(appConfig, snapshot.interval);
   const selectedSummaryRow = summary.value ? selectSummaryRow(summary.value, snapshot.asset, appConfig) : null;
   const checkpoint = selectedSummaryRow?.checkpointSeconds == null ? null : matchingCheckpoint(snapshot.round.secondsToEnd, selectedSummaryRow.checkpointSeconds, appConfig);
   const row = selectedSummaryRow;
@@ -114,7 +114,7 @@ export function evaluateTailEntry(snapshot: StateSnapshot, appConfig: AppConfig,
   if (existingOrders.length >= appConfig.pm5mTailEntryMaxOrdersPerRound) blockers.push('TAIL_ROUND_ORDER_LIMIT_REACHED');
 
   conditions.push(
-    condition('Tail entry enabled', enabled, enabled ? `${snapshot.asset}-5m tail path enabled` : 'disabled or non-5m profile'),
+    condition('Tail entry enabled', enabled, enabled ? `${snapshot.asset}-${snapshot.interval} tail path enabled` : 'disabled or mismatched profile'),
     condition('Tail checkpoint', checkpoint != null, selectedSummaryRow?.checkpointSeconds == null ? 'no summary-selected checkpoint' : checkpoint == null ? `${selectedSummaryRow.checkpointSeconds}s selected / ${snapshot.round.secondsToEnd.toFixed(1)}s to end` : `${checkpoint}s checkpoint / ${snapshot.round.secondsToEnd.toFixed(1)}s to end`),
     condition('Summary freshness', summary.ok, summary.label),
     condition('Summary selected row', Boolean(selectedSummaryRow), selectedSummaryRow ? `${selectedSummaryRow.checkpointSeconds}s / per-share EV ${formatPerShare(selectedSummaryRow.avgPnlPerShare)} / PnL ${formatMoney(selectedSummaryRow.totalPnl)}` : 'missing positive 12h PnL row'),
@@ -148,9 +148,9 @@ export function evaluateTailEntry(snapshot: StateSnapshot, appConfig: AppConfig,
     interval: snapshot.interval,
     strategy: TAIL_ENTRY_STRATEGY,
     roundId: snapshot.round.id,
-    title: '5m Tail Entry',
+    title: `${snapshot.interval} Tail Entry`,
     status: blockers.length ? 'blocked' : 'eligible',
-    summary: `Buy the stronger ${snapshot.asset.toUpperCase()} 5m side near expiry only when that asset's 12h tail simulator has positive PnL and current orderbook gates pass.`,
+    summary: `Buy the stronger ${snapshot.asset.toUpperCase()} ${snapshot.interval} side near expiry only when that profile's tail simulator has positive PnL and current orderbook gates pass.`,
     reason: blockers.length ? blockers.join(', ') : `Tail entry eligible: buy ${selectedLabel} ${liveSize.toFixed(2)} @ ${plan!.vwap!.toFixed(3)} VWAP from best 12h checkpoint row.`,
     blockers,
     amountUsd: plan?.cost,
@@ -176,7 +176,7 @@ export function evaluateTailEntry(snapshot: StateSnapshot, appConfig: AppConfig,
     limitPrice: tailLimitPrice!,
     shares: liveSize,
     maxSpendUsd: roundMoney(liveSize * tailLimitPrice!),
-    reason: `${snapshot.asset.toUpperCase()} 5m tail entry at ${checkpoint}s: selected ${selectedLabel}, simulator 12h per-share EV ${formatPerShare(row?.avgPnlPerShare)} with PnL ${formatMoney(row?.totalPnl)}, ${liveSize} reference shares / max spend ${formatMoney(liveSize * tailLimitPrice!)}, live VWAP ${plan.vwap.toFixed(3)} >= min ${liveVwapFloor.toFixed(3)}.`,
+    reason: `${snapshot.asset.toUpperCase()} ${snapshot.interval} tail entry at ${checkpoint}s: selected ${selectedLabel}, simulator per-share EV ${formatPerShare(row?.avgPnlPerShare)} with PnL ${formatMoney(row?.totalPnl)}, ${liveSize} reference shares / max spend ${formatMoney(liveSize * tailLimitPrice!)}, live VWAP ${plan.vwap.toFixed(3)} >= min ${liveVwapFloor.toFixed(3)}.`,
     status: 'generated',
     ttlSeconds: Math.max(1, Math.ceil(snapshot.round.secondsToEnd)),
     createdAt: snapshot.capturedAt,
@@ -340,8 +340,9 @@ function matchingCheckpoint(secondsToEnd: number, checkpoint: number, appConfig:
   return secondsToEnd <= checkpoint && secondsToEnd > checkpoint - windowSeconds ? checkpoint : null;
 }
 
-function readTailSummary(appConfig: AppConfig): { ok: true; value: TailSummary; label: string } | { ok: false; reason: string; label: string; value?: undefined } {
-  const summaryPath = path.resolve(process.cwd(), appConfig.pm5mTailEntrySummaryPath);
+function readTailSummary(appConfig: AppConfig, interval: StateSnapshot['interval']): { ok: true; value: TailSummary; label: string } | { ok: false; reason: string; label: string; value?: undefined } {
+  const configuredPath = interval === '15m' ? appConfig.pm15mTailEntrySummaryPath : interval === '1h' ? appConfig.pm1hTailEntrySummaryPath : appConfig.pm5mTailEntrySummaryPath;
+  const summaryPath = path.resolve(process.cwd(), configuredPath);
   try {
     if (!fs.existsSync(summaryPath)) return { ok: false, reason: 'TAIL_SUMMARY_MISSING', label: `missing at ${summaryPath}` };
     const value = JSON.parse(fs.readFileSync(summaryPath, 'utf8')) as TailSummary;

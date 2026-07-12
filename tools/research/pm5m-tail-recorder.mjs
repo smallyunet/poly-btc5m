@@ -5,7 +5,6 @@ import process from 'node:process';
 import WebSocket from 'ws';
 
 const DEFAULT_ASSETS = ['btc', 'eth', 'sol', 'doge', 'xrp', 'hype'];
-const ROUND_SECONDS = 300;
 const DEFAULT_GAMMA_URL = 'https://gamma-api.polymarket.com';
 const DEFAULT_CLOB_WS_URL = 'wss://ws-subscriptions-clob.polymarket.com/ws/market';
 
@@ -16,12 +15,13 @@ if (args.help) {
 }
 
 const config = {
+  interval: args.interval || '5m',
   assets: args.assets || DEFAULT_ASSETS,
   checkpoints: args.checkpoints || numberListFromEnv('PM5M_TAIL_CHECKPOINTS_SECONDS', [60, 45, 30, 20, 15, 10, 5]),
   size: args.size ?? firstNumberFromEnv(['PM5M_TAIL_SIZE', 'PM5M_TAIL_SIZES'], 5),
   topLevels: args.topLevels ?? numberFromEnv('PM5M_TAIL_TOP_LEVELS', 10),
   quoteMaxAgeMs: args.quoteMaxAgeMs ?? numberFromEnv('PM5M_TAIL_QUOTE_MAX_AGE_MS', 2_500),
-  outDir: path.resolve(args.outDir || 'data-lab/pm-5m-tail'),
+  outDir: path.resolve(args.outDir || `data-lab/pm-${args.interval || '5m'}-tail`),
   gammaUrl: stripTrailingSlash(args.gammaUrl || DEFAULT_GAMMA_URL),
   clobWsUrl: args.clobWsUrl || DEFAULT_CLOB_WS_URL,
   discoveryMs: args.discoveryMs ?? 30_000,
@@ -29,6 +29,7 @@ const config = {
   summaryMs: args.summaryMs ?? 5_000,
   lookbackHours: args.lookbackHours ?? numberFromEnv('PM5M_TAIL_LOOKBACK_HOURS', 12),
 };
+config.roundSeconds = config.interval === '1h' ? 3600 : config.interval === '15m' ? 900 : 300;
 
 config.checkpoints = [...new Set(config.checkpoints.filter((value) => value > 0))].sort((a, b) => b - a);
 config.size = Number.isFinite(config.size) && config.size > 0 ? config.size : 5;
@@ -45,7 +46,7 @@ let summaryTimer;
 
 fs.mkdirSync(config.outDir, { recursive: true });
 
-log('starting Polymarket 5m tail-entry recorder');
+log(`starting Polymarket ${config.interval} tail-entry recorder`);
 log(`assets=${config.assets.join(',')} checkpoints=${config.checkpoints.join(',')}s size=${config.size} out=${config.outDir}`);
 if (historicalResults.length) log(`loaded ${historicalResults.length} historical tail result rows`);
 
@@ -69,6 +70,10 @@ function parseArgs(argv) {
     const arg = argv[index];
     const next = argv[index + 1];
     if (arg === '--help' || arg === '-h') parsed.help = true;
+    else if (arg === '--interval') {
+      parsed.interval = next;
+      index += 1;
+    }
     else if (arg === '--assets') {
       parsed.assets = String(next || '').split(',').map((item) => item.trim().toLowerCase()).filter(Boolean);
       index += 1;
@@ -119,6 +124,7 @@ function printHelp() {
 
 Options:
   --assets btc,eth,sol,doge,xrp,hype
+  --interval 5m|15m|1h
   --checkpoints 60,45,30,20,15,10,5
   --size 5
   --top-levels 10
@@ -135,8 +141,8 @@ Options:
 
 async function discoverAll() {
   const nowSec = Math.floor(Date.now() / 1000);
-  const currentStart = Math.floor(nowSec / ROUND_SECONDS) * ROUND_SECONDS;
-  const starts = [currentStart, currentStart + ROUND_SECONDS];
+  const currentStart = Math.floor(nowSec / config.roundSeconds) * config.roundSeconds;
+  const starts = [currentStart, currentStart + config.roundSeconds];
   for (const asset of config.assets) {
     for (const startSec of starts) {
       await discoverRound(asset, startSec);
@@ -145,7 +151,7 @@ async function discoverAll() {
 }
 
 async function discoverRound(asset, startSec) {
-  const slug = `${asset}-updown-5m-${startSec}`;
+  const slug = `${asset}-updown-${config.interval}-${startSec}`;
   const key = `${asset}:${slug}`;
   if (rounds.has(key)) return;
   const market = await gammaMarket(slug);
@@ -158,7 +164,7 @@ async function discoverRound(asset, startSec) {
     slug,
     title: String(market.question || slug),
     startAt: new Date(startSec * 1000).toISOString(),
-    endAt: new Date((startSec + ROUND_SECONDS) * 1000).toISOString(),
+    endAt: new Date((startSec + config.roundSeconds) * 1000).toISOString(),
     yesTokenId: parsed.yesTokenId,
     noTokenId: parsed.noTokenId,
     firstSeenAt: new Date().toISOString(),
@@ -481,7 +487,7 @@ function writeSummary() {
     generatedAt: new Date().toISOString(),
     config: {
       assets: config.assets,
-      interval: '5m',
+      interval: config.interval,
       checkpoints: config.checkpoints,
       size: config.size,
       topLevels: config.topLevels,

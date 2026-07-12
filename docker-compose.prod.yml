@@ -126,12 +126,48 @@ services:
       - --
       - --assets
       - btc,eth,sol,doge,xrp,hype
+      - --interval
+      - 5m
       - --checkpoints
       - "60,45,30,20,15,10,5"
       - --size
       - "5"
     volumes:
       - ./data-lab:/app/data-lab
+
+  pm15m-tail-recorder:
+    extends:
+      service: pm5m-tail-recorder
+    command:
+      - npm
+      - run
+      - research:pm5m-tail
+      - --
+      - --assets
+      - btc
+      - --interval
+      - 15m
+      - --checkpoints
+      - "60,45,30,20,15,10,5"
+      - --size
+      - "5"
+
+  pm1h-tail-recorder:
+    extends:
+      service: pm5m-tail-recorder
+    command:
+      - npm
+      - run
+      - research:pm5m-tail
+      - --
+      - --assets
+      - btc
+      - --interval
+      - 1h
+      - --checkpoints
+      - "60,45,30,20,15,10,5"
+      - --size
+      - "5"
 
   caddy:
     image: caddy:2.10-alpine

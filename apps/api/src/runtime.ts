@@ -112,7 +112,9 @@ export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, dat
   );
   const snapshot: StateSnapshot = { ...baseSnapshot, regime: classifyRegime(baseSnapshot, risk) };
   snapshot.orderbookDepth = buildOrderbookDepthSnapshot(snapshot, entryAppConfig);
-  const evaluatedEntry = classicActive ? evaluateEntry(snapshot, risk) : evaluateExperimentEntry(snapshot, appConfig, store);
+  const evaluatedEntry = classicActive
+    ? appConfig.dualEntryEnabled ? evaluateEntry(snapshot, risk) : disabledDualEntry(snapshot)
+    : evaluateExperimentEntry(snapshot, appConfig, store);
   const confirmedEntry = classicActive
     ? applyEntryConfirmation(
       evaluatedEntry,
@@ -204,7 +206,7 @@ export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, dat
 }
 
 function shouldEvaluateCurrentTailEntry(appConfig: AppConfig, profile: MarketProfile): boolean {
-  return appConfig.pm5mTailEntryEnabled && profile.interval === '5m';
+  return appConfig.pm5mTailEntryEnabled;
 }
 
 function appConfigForProfile(appConfig: AppConfig, profile: MarketProfile): AppConfig {
@@ -587,6 +589,15 @@ function disabledExperimentExitCheck(snapshot: StateSnapshot): StrategyEvaluatio
     ],
   };
   return { intents: [], rejected: [], diagnostics: [], checks: [check] };
+}
+
+function disabledDualEntry(snapshot: StateSnapshot): StrategyEvaluation {
+  return {
+    intents: [],
+    rejected: [],
+    diagnostics: ['Dual entry disabled by DUAL_ENTRY_ENABLED=false.'],
+    checks: [disabledClassicCheck(snapshot, 'UPDOWN_DUAL_ENTRY', 'Up/Down Dual Entry', 'Disabled by DUAL_ENTRY_ENABLED=false.')],
+  };
 }
 
 function disabledClassicCheck(snapshot: StateSnapshot, strategy: StrategyCheck['strategy'], title: string, reason: string): StrategyCheck {

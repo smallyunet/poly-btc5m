@@ -25,6 +25,32 @@ test('evaluates BTC 5m tail entry from simulator row and live VWAP', () => {
   assert.equal(evaluation.check.status, 'eligible');
 });
 
+test('evaluates BTC 15m tail entry from the interval-specific simulator summary', () => {
+  const config = tailConfig();
+  config.pm15mTailEntrySummaryPath = config.pm5mTailEntrySummaryPath;
+  const current = snapshot();
+  const fifteenMinute = {
+    ...current,
+    profileId: 'btc-15m' as const,
+    interval: '15m' as const,
+    round: {
+      ...current.round,
+      id: 'btc-updown-15m-test',
+      eventSlug: 'btc-updown-15m-test',
+      title: 'BTC 15m test',
+    },
+  };
+
+  const evaluation = evaluateTailEntry(fifteenMinute, config, new InMemoryStore('monitor', 2_000, { persistencePath: false }));
+
+  assert.equal(evaluation.ok, true);
+  if (evaluation.ok) {
+    assert.equal(evaluation.intent.profileId, 'btc-15m');
+    assert.equal(evaluation.intent.interval, '15m');
+    assert.match(evaluation.intent.reason, /^BTC 15m tail entry/);
+  }
+});
+
 test('executes non-BTC live tail entries as FAK orders', async () => {
   const config = tailConfig({
     assetRows: [
