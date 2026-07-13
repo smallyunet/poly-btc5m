@@ -8,7 +8,7 @@ import type { PolymarketAdapter } from '../../../packages/polymarket/src';
 import type { OrderBookQuote, StateSnapshot, TradeIntent } from '../../../packages/shared/src';
 import { loadConfig } from './config';
 import { InMemoryStore } from './store';
-import { evaluateTailEntry, executeTailEntry } from './tailEntry';
+import { evaluateTailEntry, executeTailEntry, revalidateTailEntry } from './tailEntry';
 
 test('evaluates BTC 5m tail entry from simulator row and live VWAP', () => {
   const config = tailConfig();
@@ -49,6 +49,45 @@ test('evaluates BTC 15m tail entry from the interval-specific simulator summary'
     assert.equal(evaluation.intent.interval, '15m');
     assert.match(evaluation.intent.reason, /^BTC 15m tail entry/);
   }
+});
+
+test('executes BTC 15m live tail entries when the profile matches its interval', async () => {
+  const config = tailConfig();
+  config.pm15mTailEntrySummaryPath = config.pm5mTailEntrySummaryPath;
+  config.ownerPrivateKey = '0xabc';
+  config.depositWallet = '0xwallet';
+  const store = new InMemoryStore('live', 2_000, { persistencePath: false });
+  const current = snapshot();
+  const fifteenMinute = {
+    ...current,
+    profileId: 'btc-15m' as const,
+    interval: '15m' as const,
+    round: {
+      ...current.round,
+      id: 'btc-updown-15m-test',
+      eventSlug: 'btc-updown-15m-test',
+      title: 'BTC 15m test',
+    },
+  };
+  const evaluation = evaluateTailEntry(fifteenMinute, config, store);
+  assert.equal(evaluation.ok, true, evaluation.check.reason);
+  if (!evaluation.ok) return;
+
+  let posted = false;
+  const adapter = {
+    async getCollateralBalanceAllowance() { return { balance: 100, allowance: 100 }; },
+    async getOpenOrders() { return []; },
+    async executeLimitIntent() {
+      posted = true;
+      return { ok: true, orderId: 'tail-15m-order', price: 0.611, size: 5 };
+    },
+  } as unknown as PolymarketAdapter;
+
+  const diagnostics = await executeTailEntry({ appConfig: config, adapter, store, snapshot: fifteenMinute, evaluation });
+
+  assert.deepEqual(diagnostics, []);
+  assert.equal(posted, true);
+  assert.equal(store.roundOrders('btc-15m', fifteenMinute.round.id, 'UPDOWN_TAIL_ENTRY')[0]?.status, 'posted');
 });
 
 test('executes non-BTC live tail entries as FAK orders', async () => {
@@ -125,6 +164,48 @@ test('retries tail entry FAK no-match errors before recording the outcome', asyn
   assert.equal(orders.length, 1);
   assert.equal(orders[0]?.status, 'posted');
   assert.equal(orders[0]?.clobOrderId, 'tail-order-after-retry');
+});
+
+test('refreshes the tail plan before retrying a FAK no-match order', async () => {
+  const config = tailConfig();
+  config.ownerPrivateKey = '0xabc';
+  config.depositWallet = '0xwallet';
+  config.pm5mTailEntryQuoteMaxAgeMs = 500;
+  const store = new InMemoryStore('live', 2_000, { persistencePath: false });
+  const currentSnapshot = snapshot();
+  const evaluation = evaluateTailEntry(currentSnapshot, config, store);
+  assert.equal(evaluation.ok, true, evaluation.check.reason);
+  if (!evaluation.ok) return;
+
+  let attempts = 0;
+  let revalidations = 0;
+  const noMatch = 'no orders found to match with FAK order. FAK orders are partially filled or killed if no match is found.';
+  const adapter = {
+    async getCollateralBalanceAllowance() { return { balance: 100, allowance: 100 }; },
+    async getOpenOrders() { return []; },
+    async executeLimitIntent() {
+      attempts += 1;
+      return attempts === 1
+        ? { ok: false, price: 0.611, size: 5, error: noMatch }
+        : { ok: true, orderId: 'tail-order-after-refresh', price: 0.611, size: 5 };
+    },
+  } as unknown as PolymarketAdapter;
+
+  const diagnostics = await executeTailEntry({
+    appConfig: config,
+    adapter,
+    store,
+    snapshot: currentSnapshot,
+    evaluation,
+    revalidate: () => {
+      revalidations += 1;
+      return revalidateTailEntry(snapshot(), config, store);
+    },
+  });
+
+  assert.deepEqual(diagnostics, []);
+  assert.equal(attempts, 2);
+  assert.equal(revalidations, 2);
 });
 
 test('selects the best executable simulator checkpoint and ask-band pair by per-share edge', () => {
@@ -485,6 +566,45 @@ test('revalidates Tail immediately before live submit', async () => {
 
   assert.equal(posted, false);
   assert.match(diagnostics[0] || '', /TAIL_REVALIDATION_BLOCKED/);
+});
+
+test('keeps an initially eligible Tail signal valid during the bounded execution grace window', async () => {
+  const config = tailConfig();
+  config.ownerPrivateKey = '0xabc';
+  config.depositWallet = '0xwallet';
+  const store = new InMemoryStore('live', 2_000, { persistencePath: false });
+  const current = snapshot({ secondsToEnd: 59 });
+  const evaluation = evaluateTailEntry(current, config, store);
+  assert.equal(evaluation.ok, true, evaluation.check.reason);
+  if (!evaluation.ok) return;
+
+  const delayed = snapshot({ secondsToEnd: 55 });
+  const strict = evaluateTailEntry(delayed, config, store);
+  assert.equal(strict.ok, false);
+  assert.equal(strict.check.blockers.includes('NOT_IN_TAIL_CHECKPOINT_WINDOW'), true);
+  const executionRevalidation = revalidateTailEntry(delayed, config, store);
+  assert.equal(executionRevalidation.ok, true, executionRevalidation.check.reason);
+
+  let posted = false;
+  const adapter = {
+    async getCollateralBalanceAllowance() { return { balance: 100, allowance: 100 }; },
+    async getOpenOrders() { return []; },
+    async executeLimitIntent() {
+      posted = true;
+      return { ok: true, orderId: 'tail-order-after-gate', price: 0.611, size: 5 };
+    },
+  } as unknown as PolymarketAdapter;
+  const diagnostics = await executeTailEntry({
+    appConfig: config,
+    adapter,
+    store,
+    snapshot: current,
+    evaluation,
+    revalidate: () => executionRevalidation,
+  });
+
+  assert.deepEqual(diagnostics, []);
+  assert.equal(posted, true);
 });
 
 function tailConfig(options: {

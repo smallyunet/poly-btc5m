@@ -12,7 +12,7 @@ import type { RecurringCryptoRoundDiscovery } from './roundDiscovery';
 import { cancelFutureDualOrdersForPendingRisk } from './pendingSingleFillRisk';
 import type { InMemoryStore, SingleFillCooldownRecord } from './store';
 import { rankIntervalAssetCandidates, selectProfileEntryPrice, type IntervalAssetSelection } from './simPriceSelector';
-import { evaluateTailEntry, executeTailEntry } from './tailEntry';
+import { evaluateTailEntry, executeTailEntry, revalidateTailEntry } from './tailEntry';
 
 export async function runAllProfilesTick(appConfig: AppConfig, store: InMemoryStore, data: MarketDataService, adapter: PolymarketAdapter, discovery: RecurringCryptoRoundDiscovery, participationService: ParticipationService): Promise<StateSnapshot[]> {
   const enabledProfiles = appConfig.marketProfiles.filter((profile) => profile.status !== 'disabled');
@@ -154,7 +154,7 @@ export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, dat
     revalidate: () => {
       const capturedAt = new Date().toISOString();
       const secondsToEnd = (new Date(tailSnapshot.round.endAt).getTime() - Date.now()) / 1000;
-      return evaluateTailEntry({
+      return revalidateTailEntry({
         ...tailSnapshot,
         capturedAt,
         round: { ...tailSnapshot.round, secondsToEnd, secondsToStart: secondsToEnd - profile.roundDurationSeconds },

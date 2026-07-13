@@ -11,6 +11,7 @@ const MIN_MARKETABLE_BUY_NOTIONAL_USD = 1;
 const FAILED_ORDER_COOLDOWN_MS = 5 * 60_000;
 const FAK_NO_MATCH_RETRY_LIMIT = 2;
 const FAK_NO_MATCH_RETRY_DELAY_MS = 750;
+const TAIL_EXECUTION_CHECKPOINT_GRACE_SECONDS = 5;
 const EPSILON = 0.000001;
 const CLOB_MIN_LIMIT_PRICE = 0.01;
 const CLOB_MAX_LIMIT_PRICE = 0.99;
@@ -59,7 +60,12 @@ type QuoteSnapshot = {
   ageMs: number;
 };
 
-export function evaluateTailEntry(snapshot: StateSnapshot, appConfig: AppConfig, store: InMemoryStore): TailEntryEvaluation {
+export function evaluateTailEntry(
+  snapshot: StateSnapshot,
+  appConfig: AppConfig,
+  store: InMemoryStore,
+  options: { checkpointGraceSeconds?: number } = {},
+): TailEntryEvaluation {
   const blockers: string[] = [];
   const conditions: StrategyCondition[] = [];
   const enabled = appConfig.pm5mTailEntryEnabled && snapshot.profileId === `${snapshot.asset}-${snapshot.interval}`;
@@ -69,7 +75,12 @@ export function evaluateTailEntry(snapshot: StateSnapshot, appConfig: AppConfig,
   const selectedParameters = summary.value ? selectSummaryParameters(summary.value, snapshot.asset, snapshot.interval, appConfig) : null;
   const selectedSummaryRow = selectedParameters?.checkpointRow ?? null;
   const selectedBandRow = selectedParameters?.bandRow ?? null;
-  const checkpoint = selectedSummaryRow?.checkpointSeconds == null ? null : matchingCheckpoint(snapshot.round.secondsToEnd, selectedSummaryRow.checkpointSeconds, appConfig);
+  const checkpoint = selectedSummaryRow?.checkpointSeconds == null ? null : matchingCheckpoint(
+    snapshot.round.secondsToEnd,
+    selectedSummaryRow.checkpointSeconds,
+    appConfig,
+    options.checkpointGraceSeconds ?? 0,
+  );
   const row = selectedSummaryRow;
   const liveVwapFloor = Math.max(askBandFloor(selectedBandRow?.askBand) ?? appConfig.pm5mTailEntryMinVwap, appConfig.pm5mTailEntryMinVwap);
   const yes = quoteSnapshot(snapshot, snapshot.round.yesTokenId, appConfig);
@@ -195,6 +206,10 @@ export function evaluateTailEntry(snapshot: StateSnapshot, appConfig: AppConfig,
   return { ok: true, intent, check, checkpointSeconds: checkpoint, vwap: plan.vwap, bestAsk: selected.quote.bestAsk ?? plan.vwap, midpointGap: midpointGap ?? 0, askBand: liveAskBand! };
 }
 
+export function revalidateTailEntry(snapshot: StateSnapshot, appConfig: AppConfig, store: InMemoryStore): TailEntryEvaluation {
+  return evaluateTailEntry(snapshot, appConfig, store, { checkpointGraceSeconds: TAIL_EXECUTION_CHECKPOINT_GRACE_SECONDS });
+}
+
 export async function executeTailEntry(params: {
   appConfig: AppConfig;
   adapter: PolymarketAdapter;
@@ -204,7 +219,8 @@ export async function executeTailEntry(params: {
   revalidate?: () => TailEntryEvaluation;
 }): Promise<string[]> {
   if (!params.evaluation.ok) return [];
-  const intent = params.evaluation.intent;
+  const evaluation = params.evaluation;
+  const intent = evaluation.intent;
   params.store.recordIntents([intent]);
   const runtime = params.store.getRuntime();
   const executionKey = executionKeyFor(intent);
@@ -224,15 +240,7 @@ export async function executeTailEntry(params: {
 
   const revalidated = params.revalidate?.();
   if (revalidated) {
-    const reason = !revalidated.ok
-      ? `TAIL_REVALIDATION_BLOCKED: ${revalidated.check.reason}`
-      : revalidated.intent.label !== intent.label
-        ? 'TAIL_REVALIDATION_SIDE_CHANGED'
-        : revalidated.askBand !== params.evaluation.askBand
-          ? 'TAIL_REVALIDATION_BAND_CHANGED'
-          : Math.abs(revalidated.vwap - params.evaluation.vwap) > params.appConfig.pm5mTailEntryMaxSlippage + EPSILON
-            ? 'TAIL_REVALIDATION_VWAP_MOVED'
-            : null;
+    const reason = tailRevalidationFailure(evaluation, revalidated, params.appConfig.pm5mTailEntryMaxSlippage);
     if (reason) {
       params.store.updateIntent(intent.id, { status: 'rejected', rejectionReason: reason });
       params.store.recordRuntimeLog({ level: 'warn', source: 'execution', message: `Tail entry blocked before submit: ${reason}.`, details: { intentId: intent.id, roundId: intent.roundId } });
@@ -241,7 +249,7 @@ export async function executeTailEntry(params: {
   }
 
   try {
-    const { posted, intent: postedIntent, attempts, retryReasons } = await postTailEntryWithFakNoMatchRetry(params, intent);
+    const { posted, intent: postedIntent, attempts, retryReasons } = await postTailEntryWithFakNoMatchRetry({ ...params, evaluation }, intent);
     params.store.recordOrder({
       ...localOrder(params.snapshot, postedIntent, executionKey, posted.ok ? 'posted' : 'failed'),
       clobOrderId: posted.orderId,
@@ -269,7 +277,7 @@ export async function executeTailEntry(params: {
 
 async function tailExecutionGate(params: { appConfig: AppConfig; adapter: PolymarketAdapter; store: InMemoryStore; snapshot: StateSnapshot }, executionKey: string, intent: TradeIntent): Promise<{ ok: true } | { ok: false; reason: string; recordFailure: boolean }> {
   const reject = (reason: string, recordFailure = false) => ({ ok: false as const, reason, recordFailure });
-  if (params.snapshot.interval !== '5m' || params.snapshot.profileId !== `${params.snapshot.asset}-5m`) return reject('TAIL_ENTRY_PROFILE_NOT_ALLOWED');
+  if (params.snapshot.profileId !== `${params.snapshot.asset}-${params.snapshot.interval}`) return reject('TAIL_ENTRY_PROFILE_NOT_ALLOWED');
   if (params.snapshot.round.secondsToStart > 0) return reject('ROUND_NOT_STARTED');
   if (params.snapshot.round.secondsToEnd <= 0) return reject('ROUND_EXPIRED');
   if (intent.limitPrice > params.appConfig.pm5mTailEntryMaxVwap + EPSILON) return reject('TAIL_LIMIT_PRICE_ABOVE_MAX');
@@ -302,7 +310,8 @@ async function postTailEntryWithFakNoMatchRetry(
     adapter: PolymarketAdapter;
     store: InMemoryStore;
     snapshot: StateSnapshot;
-    evaluation: TailEntryEvaluation;
+    evaluation: Extract<TailEntryEvaluation, { ok: true }>;
+    revalidate?: () => TailEntryEvaluation;
   },
   initialIntent: TradeIntent,
 ): Promise<{ posted: Awaited<ReturnType<PolymarketAdapter['executeLimitIntent']>>; intent: TradeIntent; attempts: number; retryReasons: string[] }> {
@@ -316,14 +325,15 @@ async function postTailEntryWithFakNoMatchRetry(
 
     retryReasons.push(posted.error || 'FAK_NO_MATCH');
     await delay(FAK_NO_MATCH_RETRY_DELAY_MS);
-    const nextEvaluation = evaluateTailEntry(params.snapshot, params.appConfig, params.store);
-    if (!nextEvaluation.ok) {
+    const nextEvaluation = params.revalidate?.() ?? evaluateTailEntry(params.snapshot, params.appConfig, params.store);
+    const replanFailure = tailRevalidationFailure(params.evaluation, nextEvaluation, params.appConfig.pm5mTailEntryMaxSlippage);
+    if (replanFailure) {
       return {
         posted: {
           ok: false,
           price: intent.limitPrice,
           size: roundDownShares(intent.shares),
-          error: `FAK_RETRY_REPLAN_BLOCKED: ${nextEvaluation.check.reason}`,
+          error: `FAK_RETRY_REPLAN_BLOCKED: ${replanFailure}`,
           raw: { retryReasons },
         },
         intent,
@@ -331,6 +341,7 @@ async function postTailEntryWithFakNoMatchRetry(
         retryReasons,
       };
     }
+    if (!nextEvaluation.ok) throw new Error('Tail revalidation unexpectedly failed without a blocker');
     intent = { ...nextEvaluation.intent, id: initialIntent.id };
   }
   throw new Error('unreachable');
@@ -346,9 +357,18 @@ function hasRecentBlockingFailedTailOrder(store: InMemoryStore, intent: TradeInt
   });
 }
 
-function matchingCheckpoint(secondsToEnd: number, checkpoint: number, appConfig: AppConfig): number | null {
+function tailRevalidationFailure(initial: Extract<TailEntryEvaluation, { ok: true }>, next: TailEntryEvaluation, maxSlippage: number): string | null {
+  if (!next.ok) return `TAIL_REVALIDATION_BLOCKED: ${next.check.reason}`;
+  if (next.intent.roundId !== initial.intent.roundId) return 'TAIL_REVALIDATION_ROUND_CHANGED';
+  if (next.intent.label !== initial.intent.label) return 'TAIL_REVALIDATION_SIDE_CHANGED';
+  if (next.askBand !== initial.askBand) return 'TAIL_REVALIDATION_BAND_CHANGED';
+  if (Math.abs(next.vwap - initial.vwap) > maxSlippage + EPSILON) return 'TAIL_REVALIDATION_VWAP_MOVED';
+  return null;
+}
+
+function matchingCheckpoint(secondsToEnd: number, checkpoint: number, appConfig: AppConfig, graceSeconds = 0): number | null {
   const windowSeconds = Math.max(2, Math.min(5, appConfig.pm5mTailEntryQuoteMaxAgeMs / 1000 + 1));
-  return secondsToEnd <= checkpoint && secondsToEnd > checkpoint - windowSeconds ? checkpoint : null;
+  return secondsToEnd <= checkpoint && secondsToEnd > checkpoint - windowSeconds - graceSeconds ? checkpoint : null;
 }
 
 function readTailSummary(appConfig: AppConfig, interval: StateSnapshot['interval']): { ok: true; value: TailSummary; label: string } | { ok: false; reason: string; label: string; value?: undefined } {
