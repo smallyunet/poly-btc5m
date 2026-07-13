@@ -34,7 +34,7 @@ export const STRATEGY_RULES: StrategyRule[] = [
     entryRules: [
       'Runs independently for every enabled 5m, 15m, and 1h profile when PM_TAIL_ENTRY_ENABLED=true.',
       'The round must already be running and inside the checkpoint window auto-selected from the fresh simulation; PM5M_TAIL_ENTRY_CHECKPOINTS is only a manual allowlist when auto selection is disabled.',
-      'The tail simulation summary must be fresh, and both the selected best checkpoint row and the live VWAP ask-band row must pass interval-specific minimum fillable-sample and per-share EV thresholds.',
+      'The tail simulation summary must be fresh; checkpoint and VWAP-band pairs are ranked after interval-specific sample, positive-PnL, and per-share EV gates, and the live book must match the best pair.',
       'The ask-band 95% win-probability lower bound is recorded as a diagnostic and is enforced only when PM_TAIL_ENTRY_REQUIRE_WIN_PROBABILITY_MARGIN=true.',
       'YES and NO books must be live and fresh; the stronger side is selected by midpoint.',
       'A round already allocated to Dual is excluded from ordinary Tail entry; missing-side recovery remains owned by the capped hedge rule.',

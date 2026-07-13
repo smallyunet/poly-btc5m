@@ -28,6 +28,7 @@ rsync -az --delete \
   --exclude '.git' \
   --exclude 'node_modules' \
   --exclude 'dist' \
+  --exclude '.env' \
   --exclude 'data' \
   --exclude 'data-lab' \
   "${ROOT_DIR}/" "${SERVER}:${APP_DIR}/"
