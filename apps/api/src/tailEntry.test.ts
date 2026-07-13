@@ -127,7 +127,7 @@ test('retries tail entry FAK no-match errors before recording the outcome', asyn
   assert.equal(orders[0]?.clobOrderId, 'tail-order-after-retry');
 });
 
-test('selects the best positive-PnL simulator checkpoint by per-share edge', () => {
+test('selects the best executable simulator checkpoint and ask-band pair by per-share edge', () => {
   const config = tailConfig({
     rows: [
       { checkpointSeconds: 60, rows: 40, fillable: 24, fillRate: 0.6, avgPnlPerShare: 0.08, totalPnl: 16, avgVwap: 0.55 },
@@ -141,9 +141,9 @@ test('selects the best positive-PnL simulator checkpoint by per-share edge', () 
 
   assert.equal(evaluation.ok, true, evaluation.check.reason);
   if (!evaluation.ok) return;
-  assert.equal(evaluation.check.conditions.find((condition) => condition.label === 'Summary selected row')?.actual, '45s / per-share EV 0.2200 / PnL $33.00');
+  assert.equal(evaluation.check.conditions.find((condition) => condition.label === 'Selected simulation pair')?.actual, '45s / 55-65c / per-share EV 0.2200 / PnL $33.00');
   assert.equal(evaluation.intent.shares, 5);
-  assert.equal(evaluation.check.reason, 'Tail entry eligible: buy YES 5.00 @ 0.610 VWAP from best simulation checkpoint row.');
+  assert.equal(evaluation.check.reason, 'Tail entry eligible: buy YES 5.00 @ 0.610 VWAP from best simulation checkpoint and ask-band pair.');
 });
 
 test('auto-select mode ignores a fixed checkpoint allowlist and follows the best fresh simulation row', () => {
@@ -159,8 +159,49 @@ test('auto-select mode ignores a fixed checkpoint allowlist and follows the best
 
   assert.equal(evaluation.ok, true, evaluation.check.reason);
   if (!evaluation.ok) return;
-  assert.equal(evaluation.check.conditions.find((condition) => condition.label === 'Summary selected row')?.actual, '20s / per-share EV 0.2400 / PnL $28.00');
+  assert.equal(evaluation.check.conditions.find((condition) => condition.label === 'Selected simulation pair')?.actual, '20s / 55-65c / per-share EV 0.2400 / PnL $28.00');
   assert.equal(evaluation.check.conditions.find((condition) => condition.label === 'Checkpoint selection')?.actual, '20s auto-selected from fresh simulation');
+});
+
+test('auto-selects a profitable checkpoint and band pair when the highest checkpoint aggregate has no executable band', () => {
+  const config = tailConfig({
+    rows: [
+      { checkpointSeconds: 20, rows: 67, fillable: 67, fillRate: 1, avgPnlPerShare: 0.05, totalPnl: 6.78, avgVwap: 0.72 },
+      { checkpointSeconds: 45, rows: 111, fillable: 111, fillRate: 1, avgPnlPerShare: -0.0003, totalPnl: -0.08, avgVwap: 0.7 },
+    ],
+    askBandRows: [
+      { checkpointSeconds: 20, askBand: '75-85c', rows: 40, fillable: 40, fillRate: 1, avgPnlPerShare: 0.01, totalPnl: 0.8, avgVwap: 0.8 },
+      { checkpointSeconds: 45, askBand: '85c+', rows: 82, fillable: 81, fillRate: 0.99, avgPnlPerShare: 0.026, totalPnl: 4.22, avgVwap: 0.88 },
+    ],
+  });
+  config.pm5mTailEntryAutoSelectCheckpoint = true;
+  config.pm5mTailEntryMinBandFills = 20;
+  config.pm5mTailEntryMinEvPerShare = 0.02;
+  config.pm5mTailEntryMaxVwap = 0.99;
+
+  const evaluation = evaluateTailEntry(
+    snapshot({ secondsToEnd: 44, yesBid: 0.87, yesAsk: 0.88, noAsk: 0.14 }),
+    config,
+    new InMemoryStore('monitor', 2_000, { persistencePath: false }),
+  );
+
+  assert.equal(evaluation.ok, true, evaluation.check.reason);
+  assert.equal(evaluation.check.conditions.find((condition) => condition.label === 'Selected simulation pair')?.actual, '45s / 85c+ / per-share EV 0.0260 / PnL $4.22');
+});
+
+test('blocks a live ask band that differs from the best simulation pair', () => {
+  const config = tailConfig({
+    askBandRows: [
+      { checkpointSeconds: 60, askBand: '75-85c', rows: 100, fillable: 100, fillRate: 1, avgPnlPerShare: 0.04, totalPnl: 8, avgVwap: 0.8 },
+      { checkpointSeconds: 60, askBand: '55-65c', rows: 100, fillable: 100, fillRate: 1, avgPnlPerShare: 0.03, totalPnl: 6, avgVwap: 0.61 },
+    ],
+  });
+
+  const evaluation = evaluateTailEntry(snapshot(), config, new InMemoryStore('monitor', 2_000, { persistencePath: false }));
+
+  assert.equal(evaluation.ok, false);
+  assert.equal(evaluation.check.blockers.includes('TAIL_ASK_BAND_NOT_SELECTED'), true, evaluation.check.reason);
+  assert.equal(evaluation.check.conditions.find((condition) => condition.label === 'Live ask band selected')?.actual, '55-65c live / 75-85c selected');
 });
 
 test('manual checkpoint mode keeps the configured checkpoint allowlist', () => {
@@ -176,7 +217,7 @@ test('manual checkpoint mode keeps the configured checkpoint allowlist', () => {
 
   assert.equal(evaluation.ok, true, evaluation.check.reason);
   if (!evaluation.ok) return;
-  assert.equal(evaluation.check.conditions.find((condition) => condition.label === 'Summary selected row')?.actual, '15s / per-share EV 0.0800 / PnL $12.00');
+  assert.equal(evaluation.check.conditions.find((condition) => condition.label === 'Selected simulation pair')?.actual, '15s / 55-65c / per-share EV 0.0800 / PnL $12.00');
   assert.equal(evaluation.check.conditions.find((condition) => condition.label === 'Checkpoint selection')?.actual, '15s selected from configured allowlist');
 });
 
@@ -195,7 +236,7 @@ test('uses configured tail entry size for live order size', () => {
 
   assert.equal(evaluation.ok, true, evaluation.check.reason);
   if (!evaluation.ok) return;
-  assert.equal(evaluation.check.conditions.find((condition) => condition.label === 'Summary selected row')?.actual, '45s / per-share EV 0.2200 / PnL $33.00');
+  assert.equal(evaluation.check.conditions.find((condition) => condition.label === 'Selected simulation pair')?.actual, '45s / 55-65c / per-share EV 0.2200 / PnL $33.00');
   assert.equal(evaluation.intent.shares, 2);
   assert.equal(evaluation.intent.limitPrice, 0.611);
 });
@@ -222,6 +263,9 @@ test('caps tail entry limit price at the CLOB maximum', () => {
     rows: [
       { checkpointSeconds: 60, rows: 40, fillable: 20, fillRate: 0.5, avgPnlPerShare: 0.02, totalPnl: 5, avgVwap: 0.99 },
     ],
+    askBandRows: [
+      { checkpointSeconds: 60, askBand: '85c+', rows: 40, fillable: 20, fillRate: 0.5, avgPnlPerShare: 0.02, totalPnl: 5, avgVwap: 0.99 },
+    ],
     checkpoints: [60],
   });
   config.pm5mTailEntryMaxVwap = 0.99;
@@ -235,11 +279,15 @@ test('caps tail entry limit price at the CLOB maximum', () => {
   assert.equal(evaluation.check.limitPrice, 0.99);
 });
 
-test('blocks tail entry when every simulation-window parameter is losing', () => {
+test('blocks tail entry when every simulation checkpoint and ask-band pair is losing', () => {
   const config = tailConfig({
     rows: [
       { checkpointSeconds: 60, rows: 40, fillable: 28, fillRate: 0.7, avgPnlPerShare: -0.02, totalPnl: -4, avgVwap: 0.55 },
       { checkpointSeconds: 45, rows: 40, fillable: 30, fillRate: 0.75, avgPnlPerShare: -0.01, totalPnl: -3, avgVwap: 0.48 },
+    ],
+    askBandRows: [
+      { checkpointSeconds: 60, askBand: '55-65c', rows: 40, fillable: 28, fillRate: 0.7, avgPnlPerShare: -0.02, totalPnl: -4, avgVwap: 0.61 },
+      { checkpointSeconds: 45, askBand: '55-65c', rows: 40, fillable: 30, fillRate: 0.75, avgPnlPerShare: -0.01, totalPnl: -3, avgVwap: 0.61 },
     ],
     checkpoints: [60, 45],
   });
@@ -247,8 +295,8 @@ test('blocks tail entry when every simulation-window parameter is losing', () =>
   const evaluation = evaluateTailEntry(snapshot({ secondsToEnd: 59 }), config, store);
 
   assert.equal(evaluation.ok, false);
-  assert.equal(evaluation.check.blockers.includes('TAIL_SUMMARY_12H_PNL_NOT_POSITIVE'), true, evaluation.check.reason);
-  assert.equal(evaluation.check.conditions.find((condition) => condition.label === 'Summary selected row')?.actual, 'missing positive simulation-window PnL row');
+  assert.equal(evaluation.check.blockers.includes('TAIL_SIMULATION_PAIR_MISSING'), true, evaluation.check.reason);
+  assert.equal(evaluation.check.conditions.find((condition) => condition.label === 'Selected simulation pair')?.actual, 'no checkpoint and ask-band pair clears simulation gates');
 });
 
 test('uses each profile asset\'s own tail rows when the recorder contains multiple assets', () => {
@@ -270,7 +318,7 @@ test('uses each profile asset\'s own tail rows when the recorder contains multip
   const evaluation = evaluateTailEntry(snapshot({ secondsToEnd: 59 }), config, store);
 
   assert.equal(evaluation.ok, false);
-  assert.equal(evaluation.check.blockers.includes('TAIL_SUMMARY_12H_PNL_NOT_POSITIVE'), true, evaluation.check.reason);
+  assert.equal(evaluation.check.blockers.includes('TAIL_SIMULATION_PAIR_MISSING'), true, evaluation.check.reason);
 
   const ethEvaluation = evaluateTailEntry(snapshot({ asset: 'eth', secondsToEnd: 59 }), config, store);
   assert.equal(ethEvaluation.ok, true, ethEvaluation.check.reason);
@@ -286,7 +334,7 @@ test('blocks non-BTC tail entry when only a legacy combined summary is available
   const evaluation = evaluateTailEntry(snapshot({ asset: 'sol', secondsToEnd: 59 }), config, store);
 
   assert.equal(evaluation.ok, false);
-  assert.equal(evaluation.check.blockers.includes('TAIL_SUMMARY_12H_PNL_NOT_POSITIVE'), true, evaluation.check.reason);
+  assert.equal(evaluation.check.blockers.includes('TAIL_SIMULATION_PAIR_MISSING'), true, evaluation.check.reason);
 });
 
 test('blocks tail entry when live VWAP is below the simulator strength floor', () => {
@@ -318,7 +366,9 @@ test('blocks tail entry when live VWAP exceeds the configured ceiling', () => {
 });
 
 test('caps tail limit offset at the configured VWAP ceiling', () => {
-  const config = tailConfig();
+  const config = tailConfig({
+    askBandRows: [{ checkpointSeconds: 60, askBand: '85c+', rows: 100, fillable: 100, fillRate: 1, avgPnlPerShare: 0.13, totalPnl: 65, avgVwap: 0.85 }],
+  });
   const store = new InMemoryStore('monitor', 2_000, { persistencePath: false });
   const evaluation = evaluateTailEntry(snapshot({ yesBid: 0.84, yesAsk: 0.85, noAsk: 0.17 }), config, store);
 
@@ -389,8 +439,7 @@ test('requires fillable ask-band samples instead of observed rows', () => {
   const evaluation = evaluateTailEntry(snapshot(), config, new InMemoryStore('monitor', 2_000, { persistencePath: false }));
 
   assert.equal(evaluation.ok, false);
-  assert.equal(evaluation.check.blockers.includes('TAIL_ASK_BAND_SAMPLE_TOO_SMALL'), true, evaluation.check.reason);
-  assert.equal(evaluation.check.conditions.find((condition) => condition.label === 'Ask-band fillable sample')?.actual, '5 fillable / min 20 (100 observed)');
+  assert.equal(evaluation.check.blockers.includes('TAIL_SIMULATION_PAIR_MISSING'), true, evaluation.check.reason);
 });
 
 test('blocks Tail when Dual already allocated the same round', () => {
@@ -506,8 +555,8 @@ function tailConfig(options: {
     rows: 100,
     fillable: 100,
     fillRate: 1,
-    avgPnlPerShare: 0.13,
-    totalPnl: 65,
+    avgPnlPerShare: askBand === '55-65c' ? row.avgPnlPerShare : row.avgPnlPerShare - 0.01,
+    totalPnl: row.totalPnl ?? row.avgPnlPerShare * 500,
   })));
   const assetBandRows = options.assetBandRows || options.assetRows?.flatMap((row) => bands.map((askBand) => ({
     ...row,

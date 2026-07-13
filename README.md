@@ -81,9 +81,9 @@ final Gamma resolution, and writes summary data under `data-lab/pm-5m-tail/`. Th
 Tail Entry view reads `data-lab/pm-5m-tail/summary.json`; set
 `PM5M_TAIL_SUMMARY_PATH` to override the path. Production Docker Compose starts
 it as separate 5m, 15m, and 1h recorder services. Each live profile uses only
-its own interval summary and rolling window. The best positive-EV checkpoint
-and its current VWAP band must pass the configured fillable-sample and EV gates;
-otherwise that profile's live Tail stays blocked.
+its own interval summary and rolling window. The selector ranks checkpoint and
+VWAP-band pairs that pass the configured fillable-sample, positive-PnL, and EV
+gates; live Tail executes only when the current book matches the best pair.
 
 ## Runtime Model
 
@@ -278,7 +278,7 @@ Live entry orders are configured as CLOB limit order `price + size`:
 - `PM_SIM_REQUIRE_AVAILABLE=true` keeps simulator-selected entry fail-closed when the summary is missing, stale, or undersampled. `PM_SIM_REQUIRE_POSITIVE_EV=false` allows the experimental pure-EV selector to trade the least-negative historical row; it does not permit fallback while availability is required.
 - `PM_SIM_LOOKBACK_HOURS=84` is the experimental recorder lookback window, approximately 1,008 BTC 5m rounds and therefore close to the tested 1,000-round selector. Each interval has an independent summary and minimum sample threshold; when the rolling window is undersampled, the selector can use that same interval's all-time rows, but never another interval's rows.
 - `PM_ASSET_SELECTOR_ENABLED=true` ranks the six enabled assets independently inside each interval using `EV - SINGLE_PENALTY * singleRate`; the experimental BTC5m configuration sets the penalty to zero for pure-EV selection. With `PM_ASSET_SELECTOR_MAX_ASSETS=1`, at most one 5m, one 15m, and one 1h profile can pass the selector for their respective rounds.
-- Tail simulation uses interval-specific windows: 12h for 5m, 48h for 15m, and 168h for 1h. With `PM_TAIL_ENTRY_AUTO_SELECT_CHECKPOINT=true`, each profile reselects the positive-PnL checkpoint row with the highest per-share EV from its fresh interval summary; `PM5M_TAIL_ENTRY_CHECKPOINTS` is only a manual allowlist when auto selection is disabled. The current VWAP ask-band must clear interval-specific fillable-sample and per-share EV thresholds. The 95% win-probability lower bound remains visible as a diagnostic; it becomes a hard gate only when `PM_TAIL_ENTRY_REQUIRE_WIN_PROBABILITY_MARGIN=true`. Recorder and live Tail both use the same `PM5M_TAIL_SIZE=2` execution model.
+- Tail simulation uses interval-specific windows: 12h for 5m, 48h for 15m, and 168h for 1h. Each profile ranks checkpoint and VWAP-band pairs by per-share EV after applying checkpoint sample, band fillable-sample, positive-PnL, and minimum-EV gates; live Tail executes only when the current book matches the best pair. With `PM_TAIL_ENTRY_AUTO_SELECT_CHECKPOINT=false`, `PM5M_TAIL_ENTRY_CHECKPOINTS` limits which checkpoints may participate. The 95% win-probability lower bound remains visible as a diagnostic; it becomes a hard gate only when `PM_TAIL_ENTRY_REQUIRE_WIN_PROBABILITY_MARGIN=true`. Recorder and live Tail both use the same `PM5M_TAIL_SIZE=2` execution model.
 - Ordinary Tail is blocked for any round already allocated to Dual. Immediately before posting, the worker revalidates the selected side, ask band, and VWAP against the latest websocket book. A settled Tail loss starts an escalating Tail-only cooldown: 15 minutes for the first loss, 60 minutes for the second loss inside one hour, and 4 hours for the third or later loss.
 - `BYPASS_SINGLE_FILL_COOLDOWN=true` bypasses only the active single-fill cooldown entry blocker. It does not disable the single-fill hedge/profit-exit logic.
 - `REFRESH_SINGLE_FILL_COOLDOWN_ON_BOOT=true` recomputes any persisted active single-fill cooldown from the current profile cooldown config during process boot. It preserves fills, reviewed rounds, and repeat history, and only updates or clears active cooldown records.
