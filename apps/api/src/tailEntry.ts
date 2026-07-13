@@ -59,10 +59,12 @@ export function evaluateTailEntry(snapshot: StateSnapshot, appConfig: AppConfig,
   const conditions: StrategyCondition[] = [];
   const enabled = appConfig.pm5mTailEntryEnabled && snapshot.profileId === `${snapshot.asset}-${snapshot.interval}`;
   const summary = readTailSummary(appConfig, snapshot.interval);
-  const selectedSummaryRow = summary.value ? selectSummaryRow(summary.value, snapshot.asset, appConfig) : null;
+  const minRounds = tailEntryMinRounds(appConfig, snapshot.interval);
+  const minBandFills = tailEntryMinBandFills(appConfig, snapshot.interval);
+  const selectedSummaryRow = summary.value ? selectSummaryRow(summary.value, snapshot.asset, snapshot.interval, appConfig) : null;
   const checkpoint = selectedSummaryRow?.checkpointSeconds == null ? null : matchingCheckpoint(snapshot.round.secondsToEnd, selectedSummaryRow.checkpointSeconds, appConfig);
   const row = selectedSummaryRow;
-  const liveVwapFloor = selectedSummaryRow && summary.value ? summaryMinVwapFloor(summary.value, snapshot.asset, selectedSummaryRow, appConfig) : appConfig.pm5mTailEntryMinVwap;
+  const liveVwapFloor = selectedSummaryRow && summary.value ? summaryMinVwapFloor(summary.value, snapshot.asset, selectedSummaryRow, minBandFills, appConfig) : appConfig.pm5mTailEntryMinVwap;
   const yes = quoteSnapshot(snapshot, snapshot.round.yesTokenId, appConfig);
   const no = quoteSnapshot(snapshot, snapshot.round.noTokenId, appConfig);
   const selectedLabel = selectStrongSide(yes, no);
@@ -90,16 +92,17 @@ export function evaluateTailEntry(snapshot: StateSnapshot, appConfig: AppConfig,
   if (summary.ok && !selectedSummaryRow) blockers.push('TAIL_SUMMARY_ROW_MISSING');
   if (checkpoint == null) blockers.push('NOT_IN_TAIL_CHECKPOINT_WINDOW');
   if (!summary.ok) blockers.push(summary.reason);
-  if (row && (row.rows ?? 0) < appConfig.pm5mTailEntryMinRounds) blockers.push('TAIL_SUMMARY_SAMPLE_TOO_SMALL');
+  if (row && (row.rows ?? 0) < minRounds) blockers.push('TAIL_SUMMARY_SAMPLE_TOO_SMALL');
   if (summary.ok && !row) blockers.push('TAIL_SUMMARY_12H_PNL_NOT_POSITIVE');
   if (row && (row.totalPnl ?? Number.NEGATIVE_INFINITY) <= 0) blockers.push('TAIL_SUMMARY_12H_PNL_NOT_POSITIVE');
   if (row && (row.avgPnlPerShare ?? Number.NEGATIVE_INFINITY) < appConfig.pm5mTailEntryMinEvPerShare) blockers.push('TAIL_SUMMARY_EV_TOO_LOW');
   if (!bandRow) blockers.push('TAIL_ASK_BAND_HISTORY_MISSING');
-  if (bandRow && (bandRow.rows ?? 0) < appConfig.pm5mTailEntryMinBandRows) blockers.push('TAIL_ASK_BAND_SAMPLE_TOO_SMALL');
+  if (bandRow && (bandRow.fillable ?? 0) < minBandFills) blockers.push('TAIL_ASK_BAND_SAMPLE_TOO_SMALL');
   if (bandRow && (bandRow.totalPnl ?? Number.NEGATIVE_INFINITY) <= 0) blockers.push('TAIL_ASK_BAND_PNL_NOT_POSITIVE');
   if (bandRow && (bandRow.avgPnlPerShare ?? Number.NEGATIVE_INFINITY) < appConfig.pm5mTailEntryMinEvPerShare) blockers.push('TAIL_ASK_BAND_EV_TOO_LOW');
   const bandWinLowerBound = bandRow ? winProbabilityLowerBound(bandRow) : null;
-  if (bandWinLowerBound != null && plan?.vwap != null && bandWinLowerBound + EPSILON < plan.vwap + appConfig.pm5mTailEntryWinProbabilityMargin) blockers.push('TAIL_WIN_PROBABILITY_MARGIN_TOO_LOW');
+  const bandWinProbabilityPass = bandWinLowerBound != null && plan?.vwap != null && bandWinLowerBound + EPSILON >= plan.vwap + appConfig.pm5mTailEntryWinProbabilityMargin;
+  if (appConfig.pm5mTailEntryRequireWinProbabilityMargin && !bandWinProbabilityPass) blockers.push('TAIL_WIN_PROBABILITY_MARGIN_TOO_LOW');
   if (dualRoundOrders.length) blockers.push('TAIL_DUAL_ROUND_CONFLICT');
   if (tailCooldown) blockers.push('TAIL_COOLDOWN');
   if (!yes || !no) blockers.push('ORDERBOOK_MISSING');
@@ -118,15 +121,15 @@ export function evaluateTailEntry(snapshot: StateSnapshot, appConfig: AppConfig,
     condition('Tail checkpoint', checkpoint != null, selectedSummaryRow?.checkpointSeconds == null ? 'no summary-selected checkpoint' : checkpoint == null ? `${selectedSummaryRow.checkpointSeconds}s selected / ${snapshot.round.secondsToEnd.toFixed(1)}s to end` : `${checkpoint}s checkpoint / ${snapshot.round.secondsToEnd.toFixed(1)}s to end`),
     condition('Checkpoint selection', Boolean(selectedSummaryRow), selectedSummaryRow?.checkpointSeconds == null ? 'no eligible simulation row' : appConfig.pm5mTailEntryAutoSelectCheckpoint ? `${selectedSummaryRow.checkpointSeconds}s auto-selected from fresh simulation` : `${selectedSummaryRow.checkpointSeconds}s selected from configured allowlist`),
     condition('Summary freshness', summary.ok, summary.label),
-    condition('Summary selected row', Boolean(selectedSummaryRow), selectedSummaryRow ? `${selectedSummaryRow.checkpointSeconds}s / per-share EV ${formatPerShare(selectedSummaryRow.avgPnlPerShare)} / PnL ${formatMoney(selectedSummaryRow.totalPnl)}` : 'missing positive 12h PnL row'),
-    condition('Summary sample size', Boolean(row && (row.rows ?? 0) >= appConfig.pm5mTailEntryMinRounds), row ? `${row.rows ?? 0} / min ${appConfig.pm5mTailEntryMinRounds}` : 'missing'),
-    condition('Summary 12h PnL', Boolean(row && (row.totalPnl ?? Number.NEGATIVE_INFINITY) > 0), row?.totalPnl == null ? 'missing' : `${formatMoney(row.totalPnl)} / must be > 0`),
+    condition('Summary selected row', Boolean(selectedSummaryRow), selectedSummaryRow ? `${selectedSummaryRow.checkpointSeconds}s / per-share EV ${formatPerShare(selectedSummaryRow.avgPnlPerShare)} / PnL ${formatMoney(selectedSummaryRow.totalPnl)}` : 'missing positive simulation-window PnL row'),
+    condition('Summary sample size', Boolean(row && (row.rows ?? 0) >= minRounds), row ? `${row.rows ?? 0} / min ${minRounds}` : 'missing'),
+    condition('Summary window PnL', Boolean(row && (row.totalPnl ?? Number.NEGATIVE_INFINITY) > 0), row?.totalPnl == null ? 'missing' : `${formatMoney(row.totalPnl)} / must be > 0`),
     condition('Summary EV/share', row?.avgPnlPerShare != null, row?.avgPnlPerShare == null ? 'missing' : `${row.avgPnlPerShare.toFixed(4)} reference`),
     condition('Summary minimum EV/share', Boolean(row && (row.avgPnlPerShare ?? Number.NEGATIVE_INFINITY) >= appConfig.pm5mTailEntryMinEvPerShare), row?.avgPnlPerShare == null ? 'missing' : `${row.avgPnlPerShare.toFixed(4)} / min ${appConfig.pm5mTailEntryMinEvPerShare.toFixed(4)}`),
     condition('Current ask band', Boolean(bandRow), liveAskBand == null ? 'missing' : `${liveAskBand} / ${bandRow?.rows ?? 0} rows / EV ${formatPerShare(bandRow?.avgPnlPerShare)}`),
-    condition('Ask-band sample size', Boolean(bandRow && (bandRow.rows ?? 0) >= appConfig.pm5mTailEntryMinBandRows), `${bandRow?.rows ?? 0} / min ${appConfig.pm5mTailEntryMinBandRows}`),
+    condition('Ask-band fillable sample', Boolean(bandRow && (bandRow.fillable ?? 0) >= minBandFills), `${bandRow?.fillable ?? 0} fillable / min ${minBandFills} (${bandRow?.rows ?? 0} observed)`),
     condition('Ask-band EV/share', Boolean(bandRow && (bandRow.avgPnlPerShare ?? Number.NEGATIVE_INFINITY) >= appConfig.pm5mTailEntryMinEvPerShare), bandRow?.avgPnlPerShare == null ? 'missing' : `${bandRow.avgPnlPerShare.toFixed(4)} / min ${appConfig.pm5mTailEntryMinEvPerShare.toFixed(4)}`),
-    condition('Conservative win probability', bandWinLowerBound != null && plan?.vwap != null && bandWinLowerBound + EPSILON >= plan.vwap + appConfig.pm5mTailEntryWinProbabilityMargin, bandWinLowerBound == null || plan?.vwap == null ? 'missing' : `${formatPct(bandWinLowerBound)} lower bound / needs ${formatPct(plan.vwap + appConfig.pm5mTailEntryWinProbabilityMargin)}`),
+    condition('Conservative win probability', !appConfig.pm5mTailEntryRequireWinProbabilityMargin || bandWinProbabilityPass, bandWinLowerBound == null || plan?.vwap == null ? appConfig.pm5mTailEntryRequireWinProbabilityMargin ? 'missing / hard gate enabled' : 'missing / reference only' : `${formatPct(bandWinLowerBound)} lower bound / needs ${formatPct(plan.vwap + appConfig.pm5mTailEntryWinProbabilityMargin)} / ${appConfig.pm5mTailEntryRequireWinProbabilityMargin ? 'hard gate enabled' : 'reference only'}`),
     condition('No Dual allocation this round', dualRoundOrders.length === 0, `${dualRoundOrders.length} tracked Dual orders`),
     condition('Tail cooldown', !tailCooldown, tailCooldown ? `until ${tailCooldown.expiresAt} after ${tailCooldown.roundId}` : 'clear'),
     condition('Summary fill rate', row?.fillRate != null, row?.fillRate == null ? 'missing' : `${formatPct(row.fillRate)} reference only`),
@@ -152,7 +155,7 @@ export function evaluateTailEntry(snapshot: StateSnapshot, appConfig: AppConfig,
     title: `${snapshot.interval} Tail Entry`,
     status: blockers.length ? 'blocked' : 'eligible',
     summary: `Buy the stronger ${snapshot.asset.toUpperCase()} ${snapshot.interval} side near expiry only when that profile's tail simulator has positive PnL and current orderbook gates pass.`,
-    reason: blockers.length ? blockers.join(', ') : `Tail entry eligible: buy ${selectedLabel} ${liveSize.toFixed(2)} @ ${plan!.vwap!.toFixed(3)} VWAP from best 12h checkpoint row.`,
+    reason: blockers.length ? blockers.join(', ') : `Tail entry eligible: buy ${selectedLabel} ${liveSize.toFixed(2)} @ ${plan!.vwap!.toFixed(3)} VWAP from best simulation checkpoint row.`,
     blockers,
     amountUsd: plan?.cost,
     limitPrice: tailLimitPrice,
@@ -358,7 +361,7 @@ function readTailSummary(appConfig: AppConfig, interval: StateSnapshot['interval
   }
 }
 
-function selectSummaryRow(summary: TailSummary, asset: string, appConfig: AppConfig): TailSummaryRow | null {
+function selectSummaryRow(summary: TailSummary, asset: string, interval: StateSnapshot['interval'], appConfig: AppConfig): TailSummaryRow | null {
   const allowedCheckpoints = appConfig.pm5mTailEntryAutoSelectCheckpoint
     ? null
     : new Set(appConfig.pm5mTailEntryCheckpoints);
@@ -368,7 +371,7 @@ function selectSummaryRow(summary: TailSummary, asset: string, appConfig: AppCon
     : asset === 'btc' ? summary.completed?.byCheckpoint || summary.completed?.byCheckpointSize || [] : [];
   return rows
     .filter((row) => allowedCheckpoints == null || !allowedCheckpoints.size || (row.checkpointSeconds != null && allowedCheckpoints.has(row.checkpointSeconds)))
-    .filter((row) => (row.rows ?? 0) >= appConfig.pm5mTailEntryMinRounds)
+    .filter((row) => (row.rows ?? 0) >= tailEntryMinRounds(appConfig, interval))
     .filter((row) => (row.totalPnl ?? Number.NEGATIVE_INFINITY) > 0)
     .sort((left, right) => (
       (right.avgPnlPerShare ?? Number.NEGATIVE_INFINITY) - (left.avgPnlPerShare ?? Number.NEGATIVE_INFINITY)
@@ -378,18 +381,30 @@ function selectSummaryRow(summary: TailSummary, asset: string, appConfig: AppCon
     ))[0] ?? null;
 }
 
-function summaryMinVwapFloor(summary: TailSummary, asset: string, selectedRow: TailSummaryRow, appConfig: AppConfig): number {
+function summaryMinVwapFloor(summary: TailSummary, asset: string, selectedRow: TailSummaryRow, minBandFills: number, appConfig: AppConfig): number {
   const hasAssetBreakdown = Array.isArray(summary.completed?.byAssetAskBand);
   const bandRows = (hasAssetBreakdown
     ? summary.completed!.byAssetAskBand!.filter((row) => row.asset === asset)
     : asset === 'btc' ? summary.completed?.byAskBand || [] : [])
     .filter((row) => row.checkpointSeconds === selectedRow.checkpointSeconds)
-    .filter((row) => (row.rows ?? 0) >= appConfig.pm5mTailEntryMinBandRows)
+    .filter((row) => (row.fillable ?? 0) >= minBandFills)
     .filter((row) => (row.totalPnl ?? Number.NEGATIVE_INFINITY) > 0)
     .map((row) => ({ row, floor: askBandFloor(row.askBand) }))
     .filter((item): item is { row: TailSummaryRow; floor: number } => item.floor != null)
     .sort((left, right) => left.floor - right.floor);
   return bandRows[0]?.floor ?? appConfig.pm5mTailEntryMinVwap;
+}
+
+function tailEntryMinRounds(appConfig: AppConfig, interval: StateSnapshot['interval']): number {
+  if (interval === '15m') return appConfig.pm15mTailEntryMinRounds;
+  if (interval === '1h') return appConfig.pm1hTailEntryMinRounds;
+  return appConfig.pm5mTailEntryMinRounds;
+}
+
+function tailEntryMinBandFills(appConfig: AppConfig, interval: StateSnapshot['interval']): number {
+  if (interval === '15m') return appConfig.pm15mTailEntryMinBandFills;
+  if (interval === '1h') return appConfig.pm1hTailEntryMinBandFills;
+  return appConfig.pm5mTailEntryMinBandFills;
 }
 
 function selectBandRow(summary: TailSummary, asset: string, checkpointSeconds: number | undefined, askBand: string): TailSummaryRow | null {

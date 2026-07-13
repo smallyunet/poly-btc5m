@@ -62,6 +62,15 @@ const COOLDOWN_ENV_KEYS = [
   'PM_ASSET_SELECTOR_SINGLE_PENALTY',
   'PM_TAIL_ENTRY_AUTO_SELECT_CHECKPOINT',
   'PM5M_TAIL_ENTRY_AUTO_SELECT_CHECKPOINT',
+  'PM5M_TAIL_ENTRY_MIN_ROUNDS',
+  'PM15M_TAIL_ENTRY_MIN_ROUNDS',
+  'PM1H_TAIL_ENTRY_MIN_ROUNDS',
+  'PM5M_TAIL_ENTRY_MIN_BAND_FILLS',
+  'PM15M_TAIL_ENTRY_MIN_BAND_FILLS',
+  'PM1H_TAIL_ENTRY_MIN_BAND_FILLS',
+  'PM5M_TAIL_ENTRY_MIN_BAND_ROWS',
+  'PM_TAIL_ENTRY_REQUIRE_WIN_PROBABILITY_MARGIN',
+  'PM5M_TAIL_ENTRY_REQUIRE_WIN_PROBABILITY_MARGIN',
   'BTC_5M_SIM_PRICE_ENABLED',
   'BTC_5M_SIM_PRICE_MIN_ROUNDS',
   '5M_SINGLE_FILL_COOLDOWN_BASE_MS',
@@ -189,6 +198,28 @@ test('tail checkpoint selection defaults to simulation-driven auto mode and supp
     PM_TAIL_ENTRY_AUTO_SELECT_CHECKPOINT: 'false',
   }, () => {
     assert.equal(loadConfig().pm5mTailEntryAutoSelectCheckpoint, false);
+  });
+});
+
+test('tail gate config supports interval-specific samples and optional Wilson enforcement', () => {
+  withEnv(COOLDOWN_ENV_KEYS, {
+    PM5M_TAIL_ENTRY_MIN_ROUNDS: '20',
+    PM15M_TAIL_ENTRY_MIN_ROUNDS: '40',
+    PM1H_TAIL_ENTRY_MIN_ROUNDS: '60',
+    PM5M_TAIL_ENTRY_MIN_BAND_FILLS: '18',
+    PM15M_TAIL_ENTRY_MIN_BAND_FILLS: '12',
+    PM1H_TAIL_ENTRY_MIN_BAND_FILLS: '8',
+    PM_TAIL_ENTRY_REQUIRE_WIN_PROBABILITY_MARGIN: 'true',
+  }, () => {
+    const config = loadConfig();
+
+    assert.equal(config.pm5mTailEntryMinRounds, 20);
+    assert.equal(config.pm15mTailEntryMinRounds, 40);
+    assert.equal(config.pm1hTailEntryMinRounds, 60);
+    assert.equal(config.pm5mTailEntryMinBandFills, 18);
+    assert.equal(config.pm15mTailEntryMinBandFills, 12);
+    assert.equal(config.pm1hTailEntryMinBandFills, 8);
+    assert.equal(config.pm5mTailEntryRequireWinProbabilityMargin, true);
   });
 });
 

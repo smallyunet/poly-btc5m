@@ -75,12 +75,16 @@ export type AppConfig = {
   pm1hTailEntrySummaryPath: string;
   pm5mTailEntryMaxSummaryAgeMs: number;
   pm5mTailEntryMinRounds: number;
+  pm15mTailEntryMinRounds: number;
+  pm1hTailEntryMinRounds: number;
   pm5mTailEntryMinEvPerShare: number;
   pm5mTailEntryAutoSelectCheckpoint: boolean;
   pm5mTailEntryCheckpoints: number[];
   pm5mTailEntrySize: number;
   pm5mTailEntryMinVwap: number;
-  pm5mTailEntryMinBandRows: number;
+  pm5mTailEntryMinBandFills: number;
+  pm15mTailEntryMinBandFills: number;
+  pm1hTailEntryMinBandFills: number;
   pm5mTailEntryMaxVwap: number;
   pm5mTailEntryMaxSpread: number;
   pm5mTailEntryMaxOverround: number;
@@ -89,6 +93,7 @@ export type AppConfig = {
   pm5mTailEntryMaxSlippage: number;
   pm5mTailEntryPriceOffset: number;
   pm5mTailEntryMaxOrdersPerRound: number;
+  pm5mTailEntryRequireWinProbabilityMargin: boolean;
   pm5mTailEntryWinProbabilityMargin: number;
   pm5mTailCooldownBaseMs: number;
   pm5mTailCooldownRepeatWindowMs: number;
@@ -217,12 +222,16 @@ export function loadConfig(): AppConfig {
     pm1hTailEntrySummaryPath: process.env.PM1H_TAIL_ENTRY_SUMMARY_PATH || 'data-lab/pm-1h-tail/summary.json',
     pm5mTailEntryMaxSummaryAgeMs: parsePositiveInteger(process.env.PM5M_TAIL_ENTRY_MAX_SUMMARY_AGE_MS, 10 * 60_000),
     pm5mTailEntryMinRounds: parsePositiveInteger(process.env.PM5M_TAIL_ENTRY_MIN_ROUNDS, 100),
+    pm15mTailEntryMinRounds: parsePositiveInteger(process.env.PM15M_TAIL_ENTRY_MIN_ROUNDS, 40),
+    pm1hTailEntryMinRounds: parsePositiveInteger(process.env.PM1H_TAIL_ENTRY_MIN_ROUNDS, 40),
     pm5mTailEntryMinEvPerShare: numberEnv('PM5M_TAIL_ENTRY_MIN_EV_PER_SHARE', 0),
     pm5mTailEntryAutoSelectCheckpoint: booleanEnv('PM_TAIL_ENTRY_AUTO_SELECT_CHECKPOINT', booleanEnv('PM5M_TAIL_ENTRY_AUTO_SELECT_CHECKPOINT', true)),
     pm5mTailEntryCheckpoints: numberListEnv('PM5M_TAIL_ENTRY_CHECKPOINTS', [60, 45]),
-    pm5mTailEntrySize: numberEnv('PM5M_TAIL_ENTRY_SIZE', 5),
+    pm5mTailEntrySize: numberEnv('PM5M_TAIL_ENTRY_SIZE', 2),
     pm5mTailEntryMinVwap: numberEnv('PM5M_TAIL_ENTRY_MIN_VWAP', 0.55),
-    pm5mTailEntryMinBandRows: parsePositiveInteger(process.env.PM5M_TAIL_ENTRY_MIN_BAND_ROWS, 2),
+    pm5mTailEntryMinBandFills: parsePositiveInteger(process.env.PM5M_TAIL_ENTRY_MIN_BAND_FILLS || process.env.PM5M_TAIL_ENTRY_MIN_BAND_ROWS, 20),
+    pm15mTailEntryMinBandFills: parsePositiveInteger(process.env.PM15M_TAIL_ENTRY_MIN_BAND_FILLS, 12),
+    pm1hTailEntryMinBandFills: parsePositiveInteger(process.env.PM1H_TAIL_ENTRY_MIN_BAND_FILLS, 8),
     pm5mTailEntryMaxVwap: numberEnv('PM5M_TAIL_ENTRY_MAX_VWAP', 0.85),
     pm5mTailEntryMaxSpread: numberEnv('PM5M_TAIL_ENTRY_MAX_SPREAD', 0.02),
     pm5mTailEntryMaxOverround: numberEnv('PM5M_TAIL_ENTRY_MAX_OVERROUND', 1.03),
@@ -231,6 +240,7 @@ export function loadConfig(): AppConfig {
     pm5mTailEntryMaxSlippage: numberEnv('PM5M_TAIL_ENTRY_MAX_SLIPPAGE', 0.02),
     pm5mTailEntryPriceOffset: numberEnv('PM5M_TAIL_ENTRY_PRICE_OFFSET', 0.001),
     pm5mTailEntryMaxOrdersPerRound: parsePositiveInteger(process.env.PM5M_TAIL_ENTRY_MAX_ORDERS_PER_ROUND, 1),
+    pm5mTailEntryRequireWinProbabilityMargin: booleanEnv('PM_TAIL_ENTRY_REQUIRE_WIN_PROBABILITY_MARGIN', booleanEnv('PM5M_TAIL_ENTRY_REQUIRE_WIN_PROBABILITY_MARGIN', false)),
     pm5mTailEntryWinProbabilityMargin: numberEnv('PM5M_TAIL_ENTRY_WIN_PROBABILITY_MARGIN', 0.01),
     pm5mTailCooldownBaseMs: parsePositiveInteger(process.env.PM5M_TAIL_COOLDOWN_BASE_MS, 15 * 60_000),
     pm5mTailCooldownRepeatWindowMs: parsePositiveInteger(process.env.PM5M_TAIL_COOLDOWN_REPEAT_WINDOW_MS, 60 * 60_000),

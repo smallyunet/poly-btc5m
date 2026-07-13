@@ -131,7 +131,9 @@ services:
       - --checkpoints
       - "60,45,30,20,15,10,5"
       - --size
-      - "5"
+      - "${PM5M_TAIL_SIZE:-2}"
+      - --lookback-hours
+      - "${PM5M_TAIL_LOOKBACK_HOURS:-12}"
     volumes:
       - ./data-lab:/app/data-lab
 
@@ -150,7 +152,9 @@ services:
       - --checkpoints
       - "60,45,30,20,15,10,5"
       - --size
-      - "5"
+      - "${PM5M_TAIL_SIZE:-2}"
+      - --lookback-hours
+      - "${PM15M_TAIL_LOOKBACK_HOURS:-48}"
 
   pm1h-tail-recorder:
     extends:
@@ -167,7 +171,9 @@ services:
       - --checkpoints
       - "60,45,30,20,15,10,5"
       - --size
-      - "5"
+      - "${PM5M_TAIL_SIZE:-2}"
+      - --lookback-hours
+      - "${PM1H_TAIL_LOOKBACK_HOURS:-168}"
 
   caddy:
     image: caddy:2.10-alpine

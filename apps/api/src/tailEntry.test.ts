@@ -143,7 +143,7 @@ test('selects the best positive-PnL simulator checkpoint by per-share edge', () 
   if (!evaluation.ok) return;
   assert.equal(evaluation.check.conditions.find((condition) => condition.label === 'Summary selected row')?.actual, '45s / per-share EV 0.2200 / PnL $33.00');
   assert.equal(evaluation.intent.shares, 5);
-  assert.equal(evaluation.check.reason, 'Tail entry eligible: buy YES 5.00 @ 0.610 VWAP from best 12h checkpoint row.');
+  assert.equal(evaluation.check.reason, 'Tail entry eligible: buy YES 5.00 @ 0.610 VWAP from best simulation checkpoint row.');
 });
 
 test('auto-select mode ignores a fixed checkpoint allowlist and follows the best fresh simulation row', () => {
@@ -200,7 +200,7 @@ test('uses configured tail entry size for live order size', () => {
   assert.equal(evaluation.intent.limitPrice, 0.611);
 });
 
-test('does not require simulator fill rate when 12h PnL is positive', () => {
+test('does not require simulator fill rate when simulation-window PnL is positive', () => {
   const config = tailConfig({
     rows: [
       { checkpointSeconds: 20, rows: 40, fillable: 8, fillRate: 0.2, avgPnlPerShare: 0.03, totalPnl: 18, avgVwap: 0.7 },
@@ -235,7 +235,7 @@ test('caps tail entry limit price at the CLOB maximum', () => {
   assert.equal(evaluation.check.limitPrice, 0.99);
 });
 
-test('blocks tail entry when every 12h simulator parameter is losing', () => {
+test('blocks tail entry when every simulation-window parameter is losing', () => {
   const config = tailConfig({
     rows: [
       { checkpointSeconds: 60, rows: 40, fillable: 28, fillRate: 0.7, avgPnlPerShare: -0.02, totalPnl: -4, avgVwap: 0.55 },
@@ -248,7 +248,7 @@ test('blocks tail entry when every 12h simulator parameter is losing', () => {
 
   assert.equal(evaluation.ok, false);
   assert.equal(evaluation.check.blockers.includes('TAIL_SUMMARY_12H_PNL_NOT_POSITIVE'), true, evaluation.check.reason);
-  assert.equal(evaluation.check.conditions.find((condition) => condition.label === 'Summary selected row')?.actual, 'missing positive 12h PnL row');
+  assert.equal(evaluation.check.conditions.find((condition) => condition.label === 'Summary selected row')?.actual, 'missing positive simulation-window PnL row');
 });
 
 test('uses each profile asset\'s own tail rows when the recorder contains multiple assets', () => {
@@ -361,10 +361,36 @@ test('blocks the live ask band when its conservative win probability does not cl
     askBandRows: [{ checkpointSeconds: 60, askBand: '55-65c', rows: 100, fillable: 100, fillRate: 1, wins: 70, winRate: 0.7, avgPnlPerShare: 0.09, totalPnl: 45, avgVwap: 0.61 }],
   });
   config.pm5mTailEntryWinProbabilityMargin = 0.01;
+  config.pm5mTailEntryRequireWinProbabilityMargin = true;
   const evaluation = evaluateTailEntry(snapshot(), config, new InMemoryStore('monitor', 2_000, { persistencePath: false }));
 
   assert.equal(evaluation.ok, false);
   assert.equal(evaluation.check.blockers.includes('TAIL_WIN_PROBABILITY_MARGIN_TOO_LOW'), true, evaluation.check.reason);
+});
+
+test('keeps conservative win probability as reference-only when its hard gate is disabled', () => {
+  const config = tailConfig({
+    askBandRows: [{ checkpointSeconds: 60, askBand: '55-65c', rows: 100, fillable: 100, fillRate: 1, wins: 70, winRate: 0.7, avgPnlPerShare: 0.09, totalPnl: 45, avgVwap: 0.61 }],
+  });
+  config.pm5mTailEntryRequireWinProbabilityMargin = false;
+  config.pm5mTailEntryWinProbabilityMargin = 0.01;
+  const evaluation = evaluateTailEntry(snapshot(), config, new InMemoryStore('monitor', 2_000, { persistencePath: false }));
+
+  assert.equal(evaluation.ok, true, evaluation.check.reason);
+  assert.equal(evaluation.check.blockers.includes('TAIL_WIN_PROBABILITY_MARGIN_TOO_LOW'), false);
+  assert.match(evaluation.check.conditions.find((condition) => condition.label === 'Conservative win probability')?.actual || '', /reference only/);
+});
+
+test('requires fillable ask-band samples instead of observed rows', () => {
+  const config = tailConfig({
+    askBandRows: [{ checkpointSeconds: 60, askBand: '55-65c', rows: 100, fillable: 5, fillRate: 0.05, wins: 5, winRate: 1, avgPnlPerShare: 0.09, totalPnl: 2.25, avgVwap: 0.61 }],
+  });
+  config.pm5mTailEntryMinBandFills = 20;
+  const evaluation = evaluateTailEntry(snapshot(), config, new InMemoryStore('monitor', 2_000, { persistencePath: false }));
+
+  assert.equal(evaluation.ok, false);
+  assert.equal(evaluation.check.blockers.includes('TAIL_ASK_BAND_SAMPLE_TOO_SMALL'), true, evaluation.check.reason);
+  assert.equal(evaluation.check.conditions.find((condition) => condition.label === 'Ask-band fillable sample')?.actual, '5 fillable / min 20 (100 observed)');
 });
 
 test('blocks Tail when Dual already allocated the same round', () => {
@@ -507,12 +533,16 @@ function tailConfig(options: {
   config.pm5mTailEntrySummaryPath = summaryPath;
   config.pm5mTailEntryMaxSummaryAgeMs = 60_000;
   config.pm5mTailEntryMinRounds = 20;
+  config.pm15mTailEntryMinRounds = 20;
+  config.pm1hTailEntryMinRounds = 20;
   config.pm5mTailEntryMinEvPerShare = 0.03;
   config.pm5mTailEntryAutoSelectCheckpoint = false;
   config.pm5mTailEntryCheckpoints = options.checkpoints || [60];
   config.pm5mTailEntrySize = 5;
   config.pm5mTailEntryMinVwap = 0.55;
-  config.pm5mTailEntryMinBandRows = 2;
+  config.pm5mTailEntryMinBandFills = 2;
+  config.pm15mTailEntryMinBandFills = 2;
+  config.pm1hTailEntryMinBandFills = 2;
   config.pm5mTailEntryMaxVwap = 0.85;
   config.pm5mTailEntryMaxSpread = 0.02;
   config.pm5mTailEntryMaxOverround = 1.03;
@@ -521,6 +551,7 @@ function tailConfig(options: {
   config.pm5mTailEntryMaxSlippage = 0.02;
   config.pm5mTailEntryPriceOffset = 0.001;
   config.pm5mTailEntryMaxOrdersPerRound = 1;
+  config.pm5mTailEntryRequireWinProbabilityMargin = false;
   config.pm5mTailEntryWinProbabilityMargin = -1;
   return config;
 }

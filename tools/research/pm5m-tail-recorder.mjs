@@ -4,6 +4,8 @@ import path from 'node:path';
 import process from 'node:process';
 import WebSocket from 'ws';
 
+import { aggregateTailResults } from './pm5m-tail-summary.mjs';
+
 const DEFAULT_ASSETS = ['btc', 'eth', 'sol', 'doge', 'xrp', 'hype'];
 const DEFAULT_GAMMA_URL = 'https://gamma-api.polymarket.com';
 const DEFAULT_CLOB_WS_URL = 'wss://ws-subscriptions-clob.polymarket.com/ws/market';
@@ -18,7 +20,7 @@ const config = {
   interval: args.interval || '5m',
   assets: args.assets || DEFAULT_ASSETS,
   checkpoints: args.checkpoints || numberListFromEnv('PM5M_TAIL_CHECKPOINTS_SECONDS', [60, 45, 30, 20, 15, 10, 5]),
-  size: args.size ?? firstNumberFromEnv(['PM5M_TAIL_SIZE', 'PM5M_TAIL_SIZES'], 5),
+  size: args.size ?? firstNumberFromEnv(['PM5M_TAIL_SIZE', 'PM5M_TAIL_SIZES'], 2),
   topLevels: args.topLevels ?? numberFromEnv('PM5M_TAIL_TOP_LEVELS', 10),
   quoteMaxAgeMs: args.quoteMaxAgeMs ?? numberFromEnv('PM5M_TAIL_QUOTE_MAX_AGE_MS', 2_500),
   outDir: path.resolve(args.outDir || `data-lab/pm-${args.interval || '5m'}-tail`),
@@ -32,7 +34,7 @@ const config = {
 config.roundSeconds = config.interval === '1h' ? 3600 : config.interval === '15m' ? 900 : 300;
 
 config.checkpoints = [...new Set(config.checkpoints.filter((value) => value > 0))].sort((a, b) => b - a);
-config.size = Number.isFinite(config.size) && config.size > 0 ? config.size : 5;
+config.size = Number.isFinite(config.size) && config.size > 0 ? config.size : 2;
 
 const rounds = new Map();
 const tokenIndex = new Map();
@@ -126,7 +128,7 @@ Options:
   --assets btc,eth,sol,doge,xrp,hype
   --interval 5m|15m|1h
   --checkpoints 60,45,30,20,15,10,5
-  --size 5
+  --size 2
   --top-levels 10
   --quote-max-age-ms 2500
   --out-dir data-lab/pm-5m-tail
@@ -452,7 +454,7 @@ function resultRowsForRound(round) {
       checkpointSeconds: sample.checkpointSeconds,
       selectedSide: sample.selectedSide,
       winner: round.winner,
-      selectedWon: sample.selectedSide != null ? sample.selectedSide === round.winner : null,
+      selectedWon: sample.fillable && sample.selectedSide != null ? sample.selectedSide === round.winner : null,
       size: sample.size ?? config.size,
       fillable: sample.fillable,
       vwap: sample.vwap,
@@ -507,8 +509,8 @@ function writeSummary() {
       historicalRows: historicalResults.length,
     },
     active: activeSummary(),
-    completed: aggregate(windowResults),
-    completedAllTime: aggregate(allResults),
+    completed: aggregateTailResults(windowResults),
+    completedAllTime: aggregateTailResults(allResults),
     recentRounds: [...rounds.values()]
       .sort((a, b) => Date.parse(b.startAt) - Date.parse(a.startAt))
       .slice(0, 30)
@@ -551,86 +553,6 @@ function activeSummary() {
     samples: samples.length,
     latestSampleAt: samples.map((sample) => sample.recordedAt).sort().at(-1) || null,
   };
-}
-
-function aggregate(rows) {
-  return {
-    rows: rows.length,
-    byCheckpoint: aggregateBy(rows, (row) => `${row.checkpointSeconds}`, (row) => ({
-      checkpointSeconds: row.checkpointSeconds,
-    })),
-    byAssetCheckpoint: aggregateBy(rows, (row) => `${row.asset}:${row.checkpointSeconds}`, (row) => ({
-      asset: row.asset,
-      checkpointSeconds: row.checkpointSeconds,
-    })),
-    byAskBand: aggregateBy(rows, (row) => `${row.checkpointSeconds}:${askBand(row.selectedBestAsk)}`, (row) => ({
-      checkpointSeconds: row.checkpointSeconds,
-      askBand: askBand(row.selectedBestAsk),
-    })),
-    byAssetAskBand: aggregateBy(rows, (row) => `${row.asset}:${row.checkpointSeconds}:${askBand(row.selectedBestAsk)}`, (row) => ({
-      asset: row.asset,
-      checkpointSeconds: row.checkpointSeconds,
-      askBand: askBand(row.selectedBestAsk),
-    })),
-  };
-}
-
-function aggregateBy(rows, keyFn, seedFn) {
-  const map = new Map();
-  for (const row of rows) {
-    const key = keyFn(row);
-    const item = map.get(key) || {
-      ...seedFn(row),
-      rows: 0,
-      fillable: 0,
-      wins: 0,
-      totalPnl: 0,
-      totalPnlPerShare: 0,
-      totalVwap: 0,
-      totalSpread: 0,
-      totalOverroundAsk: 0,
-      vwapCount: 0,
-      spreadCount: 0,
-      overroundCount: 0,
-    };
-    item.rows += 1;
-    if (row.fillable) item.fillable += 1;
-    if (row.selectedWon) item.wins += 1;
-    if (row.pnl != null) item.totalPnl += row.pnl;
-    if (row.pnlPerShare != null) item.totalPnlPerShare += row.pnlPerShare;
-    if (row.vwap != null) {
-      item.totalVwap += row.vwap;
-      item.vwapCount += 1;
-    }
-    if (row.selectedSpread != null) {
-      item.totalSpread += row.selectedSpread;
-      item.spreadCount += 1;
-    }
-    if (row.overroundAsk != null) {
-      item.totalOverroundAsk += row.overroundAsk;
-      item.overroundCount += 1;
-    }
-    map.set(key, item);
-  }
-  return [...map.values()].map((item) => ({
-    ...item,
-    fillRate: roundRatio(item.rows ? item.fillable / item.rows : null),
-    winRate: roundRatio(item.fillable ? item.wins / item.fillable : null),
-    avgVwap: roundMoneyOrNull(item.vwapCount ? item.totalVwap / item.vwapCount : null),
-    avgSpread: roundMoneyOrNull(item.spreadCount ? item.totalSpread / item.spreadCount : null),
-    avgOverroundAsk: roundMoneyOrNull(item.overroundCount ? item.totalOverroundAsk / item.overroundCount : null),
-    avgPnlPerShare: roundMoneyOrNull(item.fillable ? item.totalPnlPerShare / item.fillable : null),
-    totalPnl: roundMoney(item.totalPnl),
-  })).sort((a, b) => String(a.asset || '').localeCompare(String(b.asset || '')) || (b.checkpointSeconds - a.checkpointSeconds) || String(a.askBand || '').localeCompare(String(b.askBand || '')));
-}
-
-function askBand(value) {
-  if (value == null) return 'missing';
-  if (value < 0.55) return '<55c';
-  if (value < 0.65) return '55-65c';
-  if (value < 0.75) return '65-75c';
-  if (value < 0.85) return '75-85c';
-  return '85c+';
 }
 
 function loadHistoricalResults() {
@@ -769,16 +691,8 @@ function writeJsonAtomic(filename, value) {
   fs.renameSync(tmp, target);
 }
 
-function roundRatio(value) {
-  return value == null || !Number.isFinite(value) ? null : Math.round(value * 10_000) / 10_000;
-}
-
 function roundMoney(value) {
   return Math.round(value * 1_000_000) / 1_000_000;
-}
-
-function roundMoneyOrNull(value) {
-  return value == null || !Number.isFinite(value) ? null : roundMoney(value);
 }
 
 function stripTrailingSlash(value) {
