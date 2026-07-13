@@ -146,6 +146,40 @@ test('selects the best positive-PnL simulator checkpoint by per-share edge', () 
   assert.equal(evaluation.check.reason, 'Tail entry eligible: buy YES 5.00 @ 0.610 VWAP from best 12h checkpoint row.');
 });
 
+test('auto-select mode ignores a fixed checkpoint allowlist and follows the best fresh simulation row', () => {
+  const config = tailConfig({
+    rows: [
+      { checkpointSeconds: 20, rows: 40, fillable: 24, fillRate: 0.6, avgPnlPerShare: 0.24, totalPnl: 28, avgVwap: 0.72 },
+      { checkpointSeconds: 15, rows: 40, fillable: 30, fillRate: 0.75, avgPnlPerShare: 0.08, totalPnl: 12, avgVwap: 0.8 },
+    ],
+    checkpoints: [15],
+  });
+  config.pm5mTailEntryAutoSelectCheckpoint = true;
+  const evaluation = evaluateTailEntry(snapshot({ secondsToEnd: 19 }), config, new InMemoryStore('monitor', 2_000, { persistencePath: false }));
+
+  assert.equal(evaluation.ok, true, evaluation.check.reason);
+  if (!evaluation.ok) return;
+  assert.equal(evaluation.check.conditions.find((condition) => condition.label === 'Summary selected row')?.actual, '20s / per-share EV 0.2400 / PnL $28.00');
+  assert.equal(evaluation.check.conditions.find((condition) => condition.label === 'Checkpoint selection')?.actual, '20s auto-selected from fresh simulation');
+});
+
+test('manual checkpoint mode keeps the configured checkpoint allowlist', () => {
+  const config = tailConfig({
+    rows: [
+      { checkpointSeconds: 20, rows: 40, fillable: 24, fillRate: 0.6, avgPnlPerShare: 0.24, totalPnl: 28, avgVwap: 0.72 },
+      { checkpointSeconds: 15, rows: 40, fillable: 30, fillRate: 0.75, avgPnlPerShare: 0.08, totalPnl: 12, avgVwap: 0.8 },
+    ],
+    checkpoints: [15],
+  });
+  config.pm5mTailEntryAutoSelectCheckpoint = false;
+  const evaluation = evaluateTailEntry(snapshot({ secondsToEnd: 14 }), config, new InMemoryStore('monitor', 2_000, { persistencePath: false }));
+
+  assert.equal(evaluation.ok, true, evaluation.check.reason);
+  if (!evaluation.ok) return;
+  assert.equal(evaluation.check.conditions.find((condition) => condition.label === 'Summary selected row')?.actual, '15s / per-share EV 0.0800 / PnL $12.00');
+  assert.equal(evaluation.check.conditions.find((condition) => condition.label === 'Checkpoint selection')?.actual, '15s selected from configured allowlist');
+});
+
 test('uses configured tail entry size for live order size', () => {
   const config = tailConfig({
     rows: [
@@ -474,6 +508,7 @@ function tailConfig(options: {
   config.pm5mTailEntryMaxSummaryAgeMs = 60_000;
   config.pm5mTailEntryMinRounds = 20;
   config.pm5mTailEntryMinEvPerShare = 0.03;
+  config.pm5mTailEntryAutoSelectCheckpoint = false;
   config.pm5mTailEntryCheckpoints = options.checkpoints || [60];
   config.pm5mTailEntrySize = 5;
   config.pm5mTailEntryMinVwap = 0.55;

@@ -116,6 +116,7 @@ export function evaluateTailEntry(snapshot: StateSnapshot, appConfig: AppConfig,
   conditions.push(
     condition('Tail entry enabled', enabled, enabled ? `${snapshot.asset}-${snapshot.interval} tail path enabled` : 'disabled or mismatched profile'),
     condition('Tail checkpoint', checkpoint != null, selectedSummaryRow?.checkpointSeconds == null ? 'no summary-selected checkpoint' : checkpoint == null ? `${selectedSummaryRow.checkpointSeconds}s selected / ${snapshot.round.secondsToEnd.toFixed(1)}s to end` : `${checkpoint}s checkpoint / ${snapshot.round.secondsToEnd.toFixed(1)}s to end`),
+    condition('Checkpoint selection', Boolean(selectedSummaryRow), selectedSummaryRow?.checkpointSeconds == null ? 'no eligible simulation row' : appConfig.pm5mTailEntryAutoSelectCheckpoint ? `${selectedSummaryRow.checkpointSeconds}s auto-selected from fresh simulation` : `${selectedSummaryRow.checkpointSeconds}s selected from configured allowlist`),
     condition('Summary freshness', summary.ok, summary.label),
     condition('Summary selected row', Boolean(selectedSummaryRow), selectedSummaryRow ? `${selectedSummaryRow.checkpointSeconds}s / per-share EV ${formatPerShare(selectedSummaryRow.avgPnlPerShare)} / PnL ${formatMoney(selectedSummaryRow.totalPnl)}` : 'missing positive 12h PnL row'),
     condition('Summary sample size', Boolean(row && (row.rows ?? 0) >= appConfig.pm5mTailEntryMinRounds), row ? `${row.rows ?? 0} / min ${appConfig.pm5mTailEntryMinRounds}` : 'missing'),
@@ -358,13 +359,15 @@ function readTailSummary(appConfig: AppConfig, interval: StateSnapshot['interval
 }
 
 function selectSummaryRow(summary: TailSummary, asset: string, appConfig: AppConfig): TailSummaryRow | null {
-  const allowedCheckpoints = new Set(appConfig.pm5mTailEntryCheckpoints);
+  const allowedCheckpoints = appConfig.pm5mTailEntryAutoSelectCheckpoint
+    ? null
+    : new Set(appConfig.pm5mTailEntryCheckpoints);
   const hasAssetBreakdown = Array.isArray(summary.completed?.byAssetCheckpoint);
   const rows = hasAssetBreakdown
     ? summary.completed!.byAssetCheckpoint!.filter((row) => row.asset === asset)
     : asset === 'btc' ? summary.completed?.byCheckpoint || summary.completed?.byCheckpointSize || [] : [];
   return rows
-    .filter((row) => !allowedCheckpoints.size || (row.checkpointSeconds != null && allowedCheckpoints.has(row.checkpointSeconds)))
+    .filter((row) => allowedCheckpoints == null || !allowedCheckpoints.size || (row.checkpointSeconds != null && allowedCheckpoints.has(row.checkpointSeconds)))
     .filter((row) => (row.rows ?? 0) >= appConfig.pm5mTailEntryMinRounds)
     .filter((row) => (row.totalPnl ?? Number.NEGATIVE_INFINITY) > 0)
     .sort((left, right) => (

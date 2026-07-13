@@ -60,6 +60,8 @@ const COOLDOWN_ENV_KEYS = [
   'PM_ASSET_SELECTOR_ENABLED',
   'PM_ASSET_SELECTOR_MAX_ASSETS',
   'PM_ASSET_SELECTOR_SINGLE_PENALTY',
+  'PM_TAIL_ENTRY_AUTO_SELECT_CHECKPOINT',
+  'PM5M_TAIL_ENTRY_AUTO_SELECT_CHECKPOINT',
   'BTC_5M_SIM_PRICE_ENABLED',
   'BTC_5M_SIM_PRICE_MIN_ROUNDS',
   '5M_SINGLE_FILL_COOLDOWN_BASE_MS',
@@ -175,6 +177,18 @@ test('asset selector config supports global per-interval top-N routing env', () 
     assert.equal(config.pm5mAssetSelectorSinglePenalty, 0.07);
     assert.equal(config.pm5mSimRequirePositiveEv, true);
     assert.equal(config.pm5mSimMinEvPerShare, 0.01);
+  });
+});
+
+test('tail checkpoint selection defaults to simulation-driven auto mode and supports manual override', () => {
+  withEnv(COOLDOWN_ENV_KEYS, {}, () => {
+    assert.equal(loadConfig().pm5mTailEntryAutoSelectCheckpoint, true);
+  });
+
+  withEnv(COOLDOWN_ENV_KEYS, {
+    PM_TAIL_ENTRY_AUTO_SELECT_CHECKPOINT: 'false',
+  }, () => {
+    assert.equal(loadConfig().pm5mTailEntryAutoSelectCheckpoint, false);
   });
 });
 

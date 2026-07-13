@@ -33,8 +33,8 @@ export const STRATEGY_RULES: StrategyRule[] = [
     summary: 'During an active recurring-crypto 5m round, buy the stronger side near expiry only when that asset\'s tail simulation parameters and live orderbook gates both pass.',
     entryRules: [
       'Runs independently for enabled BTC, ETH, SOL, DOGE, XRP, and HYPE 5m profiles when PM5M_TAIL_ENTRY_ENABLED=true.',
-      'The round must already be running and inside one configured PM5M_TAIL_ENTRY_CHECKPOINTS window.',
-      'The tail simulation summary must be fresh, and both the fixed checkpoint row and the live VWAP ask-band row must pass minimum sample and per-share EV thresholds.',
+      'The round must already be running and inside the checkpoint window auto-selected from the fresh simulation; PM5M_TAIL_ENTRY_CHECKPOINTS is only a manual allowlist when auto selection is disabled.',
+      'The tail simulation summary must be fresh, and both the selected best checkpoint row and the live VWAP ask-band row must pass minimum sample and per-share EV thresholds.',
       'The ask-band 95% win-probability lower bound must exceed live VWAP by the configured safety margin.',
       'YES and NO books must be live and fresh; the stronger side is selected by midpoint.',
       'A round already allocated to Dual is excluded from ordinary Tail entry; missing-side recovery remains owned by the capped hedge rule.',
