@@ -70,15 +70,17 @@ export const STRATEGY_RULES: StrategyRule[] = [
   },
   {
     id: 'UPDOWN_NEXT_ROUND_50_49_STOP_ON_SINGLE',
-    title: 'Up/Down Experimental Next-Round 50/49',
+    title: 'Up/Down Experimental Next-Round 50/50',
     allocationPct: 0,
-    summary: 'Experimental profile that continuously posts fixed next-round UP/DOWN entry limits and stops after a final single-sided fill.',
+    summary: 'Experimental profile that continuously posts fixed next-round UP/DOWN entry limits while bypassing classic entry gates.',
     entryRules: [
       'Only runs when ACTIVE_STRATEGY_PROFILE=experiment_next_round.',
       'For each next round before start, post UP/YES BUY LIMIT at EXPERIMENT_NEXT_ROUND_UP_LIMIT_PRICE.',
       'For each next round before start, post DOWN/NO BUY LIMIT at EXPERIMENT_NEXT_ROUND_DOWN_LIMIT_PRICE.',
       'Shares per side come from EXPERIMENT_NEXT_ROUND_SHARES_PER_SIDE.',
-      'After a final single-sided experimental fill, the experimental profile stops generating new entries.',
+      'Score, confirmation, simulator, asset-selection, participation, and orderbook-readiness gates are bypassed.',
+      'Collateral, credentials, token, timing, price/size, and duplicate-order execution gates remain enabled.',
+      'EXPERIMENT_STOP_ON_SINGLE can optionally stop new entries after a final single-sided fill; it is disabled by default.',
     ],
     exitRules: [
       'No profit exit is generated for experimental orders.',

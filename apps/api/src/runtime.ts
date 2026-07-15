@@ -123,8 +123,9 @@ export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, dat
       appConfig.bypassEntryScoreGating,
     )
     : evaluatedEntry;
-  const simGuardedEntry = applySimulatorSelection(confirmedEntry, dynamicEntryPrice);
-  const entry = applyIntervalAssetSelection(simGuardedEntry, intervalAssetSelection);
+  const entry = classicActive
+    ? applyIntervalAssetSelection(applySimulatorSelection(confirmedEntry, dynamicEntryPrice), intervalAssetSelection)
+    : confirmedEntry;
   const intents = entry.intents.map((intent) => withProfile(intent, profile));
   store.recordIntents([...intents, ...entry.rejected.map((intent) => withProfile(intent, profile))]);
   const executionDiagnostics = await executeLiveIntents({
@@ -482,17 +483,13 @@ function applyEntryConfirmation(entry: ReturnType<typeof evaluateEntry>, signalC
   return { ...entry, intents: [], rejected: [...entry.rejected, ...rejected], checks: [blockedCheck] };
 }
 
-function evaluateExperimentEntry(snapshot: StateSnapshot, appConfig: AppConfig, store: InMemoryStore): StrategyEvaluation {
+export function evaluateExperimentEntry(snapshot: StateSnapshot, appConfig: AppConfig, store: InMemoryStore): StrategyEvaluation {
   const reasons: string[] = [];
-  const stopped = store.getExperimentStop();
+  const stopped = appConfig.experimentStopOnSingle ? store.getExperimentStop() : null;
   const inDecisionWindow = snapshot.round.secondsToStart >= appConfig.entryMinSecondsToStart;
   const shares = roundShares(appConfig.experimentNextRoundSharesPerSide);
   const upPrice = roundPrice(appConfig.experimentNextRoundUpLimitPrice);
   const downPrice = roundPrice(appConfig.experimentNextRoundDownLimitPrice);
-  const yesQuote = snapshot.orderbooks.find((quote) => quote.tokenId === snapshot.round.yesTokenId);
-  const noQuote = snapshot.orderbooks.find((quote) => quote.tokenId === snapshot.round.noTokenId);
-  const yesReady = buyQuoteReady(yesQuote, appConfig.maxOrderbookAgeSeconds);
-  const noReady = buyQuoteReady(noQuote, appConfig.maxOrderbookAgeSeconds);
   const upExecutionKey = experimentExecutionKey(snapshot, 'YES');
   const downExecutionKey = experimentExecutionKey(snapshot, 'NO');
   const experimentRunStartedAt = store.getExperimentRunStartedAt();
@@ -504,8 +501,6 @@ function evaluateExperimentEntry(snapshot: StateSnapshot, appConfig: AppConfig, 
   if (!Number.isFinite(upPrice) || upPrice <= 0 || upPrice >= 1) reasons.push('INVALID_UP_LIMIT_PRICE');
   if (!Number.isFinite(downPrice) || downPrice <= 0 || downPrice >= 1) reasons.push('INVALID_DOWN_LIMIT_PRICE');
   if (shares < appConfig.minOrderShares) reasons.push('ORDER_SHARES_TOO_SMALL');
-  if (!yesReady) reasons.push('UP_ORDERBOOK_NOT_TRADABLE');
-  if (!noReady) reasons.push('DOWN_ORDERBOOK_NOT_TRADABLE');
 
   const base = [
     ...(!upAlreadyPlaced ? [experimentIntent(snapshot, 'YES', snapshot.round.yesTokenId, shares, upPrice)] : []),
@@ -519,24 +514,24 @@ function evaluateExperimentEntry(snapshot: StateSnapshot, appConfig: AppConfig, 
     asset: snapshot.asset,
     interval: snapshot.interval,
     strategy: 'UPDOWN_NEXT_ROUND_50_49_STOP_ON_SINGLE',
-    title: 'Up/Down Experimental Next-Round 50/49',
+    title: 'Up/Down Experimental Next-Round 50/50',
     status: reasons.includes('EXPERIMENT_ORDERS_ALREADY_PLACED') ? 'not-applicable' : reasons.length ? 'blocked' : 'eligible',
-    summary: 'Posts fixed next-round UP and DOWN BUY limits and stops after a final single-sided experimental fill.',
+    summary: 'Posts fixed next-round UP and DOWN BUY limits while bypassing classic strategy-entry gates.',
     reason: reasons.length ? reasons.join(', ') : `Experimental entry eligible: UP ${upPrice.toFixed(3)} / DOWN ${downPrice.toFixed(3)} / ${shares.toFixed(2)} shares.`,
     blockers: reasons,
     amountUsd: shares * (upPrice + downPrice),
     limitPrice: Math.max(upPrice, downPrice),
     conditions: [
       condition('Active profile', appConfig.activeStrategyProfile === 'experiment_next_round', appConfig.activeStrategyProfile),
-      condition('Experiment not stopped', !stopped, stopped ? `${stopped.reason} on ${stopped.roundId}` : 'active'),
+      condition('Experiment not stopped', !stopped, appConfig.experimentStopOnSingle ? (stopped ? `${stopped.reason} on ${stopped.roundId}` : 'active') : 'stop-on-single disabled'),
       condition('Round before start', inDecisionWindow, `${snapshot.round.secondsToStart.toFixed(1)}s to start / min ${appConfig.entryMinSecondsToStart}s`),
       condition('UP limit price', upPrice > 0 && upPrice < 1, upPrice.toFixed(3)),
       condition('DOWN limit price', downPrice > 0 && downPrice < 1, downPrice.toFixed(3)),
       condition('Shares per side', shares >= appConfig.minOrderShares, `${shares.toFixed(2)} / min ${appConfig.minOrderShares.toFixed(2)}`),
       condition('UP order not already placed', !upAlreadyPlaced, upAlreadyPlaced ? 'already placed for this round' : 'clear'),
       condition('DOWN order not already placed', !downAlreadyPlaced, downAlreadyPlaced ? 'already placed for this round' : 'clear'),
-      condition('UP book tradable', yesReady, quoteAgeLabel(yesQuote)),
-      condition('DOWN book tradable', noReady, quoteAgeLabel(noQuote)),
+      condition('Classic entry gates', true, 'score, confirmation, simulator, asset selector, participation, and orderbook readiness bypassed'),
+      condition('Execution safety gates', true, 'collateral, credentials, token, timing, price/size, and duplicate-order checks remain enabled'),
       condition('Profit exit disabled', true, 'no SELL generated by experimental profile'),
       condition('Hedge disabled', true, 'no single-fill hedge generated by experimental profile'),
     ],
@@ -1162,19 +1157,6 @@ function riskConfig(
     pendingSingleFillRiskUntil,
     pendingSingleFillRiskReason,
   };
-}
-
-function buyQuoteReady(quote: StateSnapshot['orderbooks'][number] | undefined, maxAgeSeconds: number): boolean {
-  if (!quote || quote.source === 'mock' || quote.bestAsk == null) return false;
-  const ageMs = Date.now() - new Date(quote.updatedAt).getTime();
-  return Number.isFinite(ageMs) && ageMs <= maxAgeSeconds * 1000;
-}
-
-function quoteAgeLabel(quote: StateSnapshot['orderbooks'][number] | undefined): string {
-  if (!quote) return 'missing';
-  const ageSeconds = (Date.now() - new Date(quote.updatedAt).getTime()) / 1000;
-  const ask = quote.bestAsk == null ? ', ask missing' : '';
-  return `${quote.source}, ${Number.isFinite(ageSeconds) ? ageSeconds.toFixed(1) : 'unknown'}s old${ask}`;
 }
 
 function condition(label: string, passed: boolean, actual: string): StrategyCondition {
