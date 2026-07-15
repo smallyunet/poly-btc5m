@@ -50,8 +50,17 @@ export class RecurringCryptoRoundDiscovery {
     for (const candidate of candidates) {
       const result = await this.marketFromSlug(candidate.slug);
       if (!isUsableMarket(result.market, profile, candidate.slug)) continue;
+      const actualRoundStartSec = marketRoundStartSec(result.market, profile);
+      if (actualRoundStartSec == null) {
+        diagnostics.push(`Rejected ${candidate.slug}: market start time is unavailable.`);
+        continue;
+      }
+      if (actualRoundStartSec !== candidate.roundStartSec) {
+        diagnostics.push(`Rejected ${candidate.slug}: market starts at ${new Date(actualRoundStartSec * 1000).toISOString()}, expected ${new Date(candidate.roundStartSec * 1000).toISOString()}.`);
+        continue;
+      }
       return {
-        round: this.marketToRound(profile, result.market, params.latestPrice, params.persistedStrike, candidate.roundStartSec),
+        round: this.marketToRound(profile, result.market, actualRoundStartSec, params.latestPrice, params.persistedStrike),
         diagnostics,
       };
     }
@@ -75,9 +84,8 @@ export class RecurringCryptoRoundDiscovery {
     return result;
   }
 
-  private marketToRound(profile: MarketProfile, market: GammaMarket, latestPrice?: number | null, persistedStrike?: (roundId: string) => number | undefined, candidateRoundStartSec?: number): BtcRoundConfig {
+  private marketToRound(profile: MarketProfile, market: GammaMarket, roundStartSec: number, latestPrice?: number | null, persistedStrike?: (roundId: string) => number | undefined): BtcRoundConfig {
     const slug = String(market.slug || '');
-    const roundStartSec = parseRoundStartSec(slug, profile, candidateRoundStartSec);
     const endAt = normalizeDate(market.endDate) || new Date((roundStartSec + profile.roundDurationSeconds) * 1000).toISOString();
     const startAt = new Date(roundStartSec * 1000).toISOString();
     const tokenIds = parseStringArray(market.clobTokenIds);
@@ -140,7 +148,7 @@ function hourlyHumanSlug(profile: MarketProfile, roundStartSec: number): string 
     xrp: 'xrp',
     hype: 'hyperliquid',
   }[profile.asset];
-  const marketStartMs = (roundStartSec - profile.roundDurationSeconds) * 1000;
+  const marketStartMs = roundStartSec * 1000;
   const parts = new Intl.DateTimeFormat('en-US', {
     timeZone: 'America/New_York',
     month: 'long',
@@ -183,14 +191,15 @@ function fallbackRound(profile: MarketProfile, nextRoundStartSec: number, latest
   };
 }
 
-function parseRoundStartSec(slug: string, profile: MarketProfile, fallback?: number): number {
+function marketRoundStartSec(market: GammaMarket, profile: MarketProfile): number | null {
+  const slug = String(market.slug || '');
   const match = slug.match(new RegExp(`${escapeRegExp(profile.seriesSlug)}-(\\d+)$`));
   const parsed = Number(match?.[1]);
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    if (Number.isFinite(fallback) && Number(fallback) > 0) return Math.floor(Number(fallback));
-    return Math.floor(Date.now() / 1000 / profile.roundDurationSeconds) * profile.roundDurationSeconds;
-  }
-  return Math.floor(parsed);
+  if (Number.isFinite(parsed) && parsed > 0) return Math.floor(parsed);
+
+  const endMs = typeof market.endDate === 'string' ? Date.parse(market.endDate) : Number.NaN;
+  if (!Number.isFinite(endMs)) return null;
+  return Math.floor(endMs / 1000) - profile.roundDurationSeconds;
 }
 
 function escapeRegExp(value: string): string {

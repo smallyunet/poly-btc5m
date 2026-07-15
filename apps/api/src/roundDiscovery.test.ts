@@ -57,7 +57,7 @@ const btc1hProfile: MarketProfile = {
   },
 };
 
-test('discovers BTC 1h human-readable hourly slug when unix slug is absent', async () => {
+test('discovers the next BTC 1h human-readable hourly slug when unix slug is absent', async () => {
   const originalNow = Date.now;
   const originalFetch = globalThis.fetch;
   const urls: string[] = [];
@@ -66,13 +66,13 @@ test('discovers BTC 1h human-readable hourly slug when unix slug is absent', asy
     const url = String(input);
     urls.push(url);
     const slug = decodeURIComponent(url.split('/').pop() || '');
-    if (slug === 'bitcoin-up-or-down-july-4-2026-12pm-et') {
+    if (slug === 'bitcoin-up-or-down-july-4-2026-1pm-et') {
       return {
         ok: true,
         json: async () => ({
           slug,
-          question: 'Bitcoin Up or Down - July 4, 12PM ET',
-          endDate: '2026-07-04T17:00:00Z',
+          question: 'Bitcoin Up or Down - July 4, 1PM ET',
+          endDate: '2026-07-04T18:00:00Z',
           active: true,
           closed: false,
           acceptingOrders: true,
@@ -93,13 +93,52 @@ test('discovers BTC 1h human-readable hourly slug when unix slug is absent', asy
     const result = await discovery.discover({ profile: btc1hProfile, latestPrice: 100_000 });
 
     assert.ok(urls.some((url) => url.endsWith('/markets/slug/btc-updown-1h-1783184400')));
-    assert.ok(urls.some((url) => url.endsWith('/markets/slug/bitcoin-up-or-down-july-4-2026-12pm-et')));
-    assert.equal(result.round.eventSlug, 'bitcoin-up-or-down-july-4-2026-12pm-et');
+    assert.ok(urls.some((url) => url.endsWith('/markets/slug/bitcoin-up-or-down-july-4-2026-1pm-et')));
+    assert.ok(urls.every((url) => !url.endsWith('/markets/slug/bitcoin-up-or-down-july-4-2026-12pm-et')));
+    assert.equal(result.round.eventSlug, 'bitcoin-up-or-down-july-4-2026-1pm-et');
     assert.equal(result.round.yesTokenId, 'up-token');
     assert.equal(result.round.noTokenId, 'down-token');
     assert.equal(result.round.startAt, '2026-07-04T17:00:00.000Z');
-    assert.equal(result.round.endAt, '2026-07-04T17:00:00.000Z');
+    assert.equal(result.round.endAt, '2026-07-04T18:00:00.000Z');
     assert.equal(result.diagnostics.length, 0);
+  } finally {
+    Date.now = originalNow;
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('rejects an hourly market whose real start time does not match the target next round', async () => {
+  const originalNow = Date.now;
+  const originalFetch = globalThis.fetch;
+  Date.now = () => 1783182600 * 1000;
+  globalThis.fetch = async (input: string | URL | Request) => {
+    const slug = decodeURIComponent(String(input).split('/').pop() || '');
+    if (slug === 'bitcoin-up-or-down-july-4-2026-1pm-et') {
+      return {
+        ok: true,
+        json: async () => ({
+          slug,
+          question: 'Bitcoin Up or Down - July 4, 1PM ET',
+          endDate: '2026-07-04T17:00:00Z',
+          active: true,
+          closed: false,
+          acceptingOrders: true,
+          outcomes: '["Up", "Down"]',
+          clobTokenIds: '["current-up-token", "current-down-token"]',
+        }),
+      } as Response;
+    }
+    return { ok: false, json: async () => null } as Response;
+  };
+
+  try {
+    const discovery = new RecurringCryptoRoundDiscovery(configWithProfile(btc1hProfile));
+    const result = await discovery.discover({ profile: btc1hProfile, latestPrice: 100_000 });
+
+    assert.equal(result.round.eventSlug, 'btc-updown-1h-1783184400');
+    assert.equal(result.round.yesTokenId, '');
+    assert.equal(result.round.noTokenId, '');
+    assert.ok(result.diagnostics.some((item) => item.includes('market starts at 2026-07-04T16:00:00.000Z, expected 2026-07-04T17:00:00.000Z')));
   } finally {
     Date.now = originalNow;
     globalThis.fetch = originalFetch;
