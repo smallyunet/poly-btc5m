@@ -1,38 +1,189 @@
 # poly-btc5m
 
-Deployable Polymarket recurring crypto Up/Down strategy worker and operator dashboard.
+Research and execution infrastructure for recurring Polymarket crypto Up/Down
+markets.
 
-The current production path runs recurring crypto Up/Down markets. It supports BTC, ETH, SOL, DOGE, XRP, and HYPE 5m, 15m, and 1h profiles, with isolated state, orders, fills, settlements, cooldowns, price samples, and dashboard views. Non-BTC profiles are disabled by default until explicitly enabled.
+> [!WARNING]
+> This repository is a **completed strategy research project, not a profitable
+> trading system**. The production stack was stopped on 2026-07-16 after the
+> tested Dual, Tail, and 50/50 strategies failed to establish stable positive
+> expected value. The code can still place real orders when configured for
+> `live`; use `monitor` unless you are deliberately conducting a new,
+> independently validated experiment.
 
-## Structure
+## What this project established
+
+The original idea was simple: place low-priced orders on both sides of a
+recurring market and keep the spread when both orders fill. The project grew
+into a multi-asset research and execution platform with independent recorders,
+simulation-driven parameter selection, single-fill risk controls, Tail entry,
+and a live operations dashboard.
+
+The engineering worked. The tested strategies did not produce a durable edge.
+
+### Main findings
+
+1. **Dual's small paired profit did not cover its single-fill tail risk.**
+   When both sides fill, profit per share is `1 - YES price - NO price`. When
+   only one side fills, the position becomes an unproven directional bet. In
+   both simulation and live execution, infrequent large single losses consumed
+   many small paired wins.
+
+2. **Changing price, asset, interval, selector, exit, or cooldown did not make
+   Dual reliably positive EV.**
+   Prices from 29c through 49c, dynamic 42c-46c pricing, CHOP filters, six
+   assets, 5m/15m/1h intervals, automatic Top-1 selection, and multiple
+   cooldown policies were tested. At one early snapshot 29c was merely the
+   least-negative row (`-0.047595` EV/share across assets and `-0.004897` for
+   BTC); the larger final retained BTC sample was about `-0.1415` EV/share.
+   Cooldown reduced exposure and losses, but did not create an edge.
+
+3. **Tail was more defensible conceptually, but its early positive result did
+   not survive execution-aware validation.**
+   The first 25-round sample showed positive PnL at every checkpoint and size.
+   Later work exposed sample-size, fillability, ask-band, size-selection,
+   stale-book, and FAK retry biases. Some rolling simulation rows remained
+   positive, while reconstructed PnL from retained actual Tail fills was about
+   `-$13.42`. High win rate was not enough to offset occasional full losses.
+
+4. **The final 50c + 50c experiment made the structural problem explicit.**
+   A paired fill has approximately zero gross edge, so every single fill is
+   uncompensated risk. Over eight hours, 57 settled rounds produced:
+
+   | Outcome | Rounds | PnL |
+   |---|---:|---:|
+   | Both sides filled | 25 | `+$0.085` |
+   | One side filled | 32 | `-$19.55` |
+   | **Total** | **57** | **`-$19.465`** |
+
+   Estimated account value fell from about `$20.01` to `$0.5497` (about
+   `-97.3%`, assuming no deposits or withdrawals). This experiment triggered
+   the final production shutdown.
+
+The bounded conclusion is:
+
+> Within the prices, assets, intervals, selectors, cooldowns, exits, and live
+> execution paths tested by this project, there is no evidence that Dual or
+> Tail is ready for stable profitable deployment. "Best available" must never
+> be confused with "positive EV."
+
+## Read the full retrospective
+
+- [Technical audit and complete parameter/result inventory](docs/poly-btc5m-strategy-project-postmortem-zh.md)
+- [Chronological, story-style project retrospective](docs/poly-btc5m-strategy-project-story-zh.md)
+
+The technical audit is the source of truth for historical figures. It separates
+simulation, execution-adjusted replay, and actual live results, and records the
+limitations of each evidence source.
+
+## Strategy families tested
+
+### Dual: paired next-round limit orders
+
+Dual posts YES and NO limit orders before a round starts.
 
 ```text
-apps/api              Express API, worker loop, Binance/CLOB data service
-apps/web              React dashboard served by the API in production
-packages/shared       Shared schemas and dashboard/runtime types
-packages/strategy     Profile-neutral Up/Down entry and risk engine
-packages/polymarket   Local Polymarket CLOB adapter
-configs               Non-secret market/round configs
-deploy                Docker/Caddy/Nginx deployment files
-docs                  Strategy notes
-skills                Scenario guides for monitor, live, Docker, deploy, and troubleshooting flows
+paired PnL/share = 1 - yesPrice - noPrice
+single win/share = 1 - entryPrice
+single loss/share = -entryPrice
 ```
 
-## Skills / Scenario Guides
+The project tested:
 
-Focused scenario guides live under `skills/`:
+- fixed 29c-50c prices and dynamic 42c-46c pricing;
+- fixed and score-scaled order sizes;
+- BTC, ETH, SOL, DOGE, XRP, and HYPE;
+- 5m, 15m, and 1h recurring markets;
+- Binance path/CHOP filters and an entry-score bypass experiment;
+- simulation-selected price and automatic Top-1 asset selection;
+- single penalties of `0`, `0.05`, `0.1`, and `0.2` in selector research;
+- confirmation ticks, participation checks, queue-imbalance diagnostics, and
+  positive-EV availability gates;
+- staged hedge, profit exit, loss exit, provisional single-risk blocking, and
+  cooldowns from minutes to hours.
 
-- `skills/btc5m-monitor/` - first run and monitor-mode dashboard validation.
-- `skills/btc5m-live/` - live trading setup, safety checklist, and risk knobs.
-- `skills/btc5m-docker/` - local Docker run path.
-- `skills/btc5m-deploy/` - server deployment with Docker Compose and Caddy.
-- `skills/btc5m-troubleshooting/` - feed, round, order, and dashboard diagnosis.
+The important failure mode was structural: increasing price improved paired
+fill probability while shrinking paired edge and increasing single loss;
+decreasing price increased nominal paired edge but made useful paired fills too
+rare. Parameter searches occasionally found positive low-frequency cells—for
+example 30c plus a six-hour cooldown traded only 16 of 452 rounds—but those
+cells were not credible out-of-sample evidence.
 
-Start with `skills/btc5m-monitor/SKILL.md` for dry-run validation. The current
-production default is `EXECUTION_MODE=live`; use `monitor` when feeds, round
-discovery, orderbooks, wallet config, or dashboard state still need validation.
+### Tail: buy the stronger side near round end
 
-## Local Development
+Tail asks a different question: whether the stronger side's estimated win
+probability is greater than the executable ask-book VWAP near settlement.
+
+The recorder sampled 60s, 45s, 30s, 20s, 15s, 10s, and 5s checkpoints. The
+implementation evolved from checkpoint-level ranking into checkpoint plus
+ask-band selection with fixed-size VWAP, minimum samples, EV gates, optional
+Wilson-bound margin, submit-time book revalidation, same-round Dual exclusion,
+and Tail-only escalating cooldown.
+
+This removed several optimistic modeling errors, but it did not establish live
+positive EV. Tail remains the more coherent hypothesis for future research,
+not a validated strategy in this repository.
+
+### `experiment_next_round`: 50/49 and 50/50
+
+The experiment profile deliberately bypassed most strategy-selection logic to
+test raw next-round fill structure. It preserved credentials, balance, timing,
+price/size, and duplicate-order safety gates, but disabled ordinary Tail and
+classic exit/hedge paths.
+
+The 50/50 run is historical evidence, not a template to repeat. Its paired edge
+was zero before fees and execution costs, while `EXPERIMENT_STOP_ON_SINGLE=false`
+allowed repeated single exposure.
+
+## Evidence retained
+
+At shutdown, the research/runtime surfaces retained approximately:
+
+| Evidence | Retained scale |
+|---|---:|
+| 5m touch simulation completed rows | 261,072 |
+| 5m touch all-time completed rounds | 13,193 |
+| 5m Tail completed rows | 74,100 |
+| 5m Tail sampled rounds | 10,631 |
+| Runtime orders/fills/intents/settlements | up to 1,000 each |
+| Single-fill hedge outcomes | 678 |
+| Single-fill cooldown events | 39 |
+| Tail cooldown events | 1 |
+
+These figures are not all directly additive:
+
+- runtime arrays were capped at 1,000 records and are not complete project
+  history;
+- wallets changed during the project;
+- rounds containing entry and exit activity can overlap strategy-level PnL
+  reconstructions;
+- touch simulation modeled best-ask touch, not queue position, latency,
+  cancellation, partial fill, or actual order persistence;
+- the Tail summary schema and execution model changed during the project.
+
+Use the following evidence order when evaluating a claim:
+
+1. actual settled live orders;
+2. execution-adjusted replay;
+3. static simulation;
+4. small-sample exploratory results.
+
+## Repository structure
+
+```text
+apps/api              Express API, worker loop, data services, execution
+apps/web              React operations and research dashboard
+packages/shared       Shared schemas and runtime/dashboard types
+packages/strategy     Profile-neutral Up/Down entry and risk engine
+packages/polymarket   Local Polymarket CLOB adapter
+tools/research        Independent touch and Tail recorders/repricing tools
+configs               Non-secret market/round configuration examples
+deploy                Docker, Caddy, Nginx, and historical deployment scripts
+docs                  Strategy notes and full project retrospectives
+skills                Monitor, live, Docker, deploy, and troubleshooting guides
+```
+
+## Safe local setup
 
 ```bash
 cp .env.example .env
@@ -40,17 +191,25 @@ npm install
 npm run typecheck
 npm test
 npm run build
-npm run dev:api
 ```
 
-Open the dashboard at http://localhost:8788.
+Set `EXECUTION_MODE=monitor` in `.env`, then start the API and dashboard:
 
-The production default mode is `EXECUTION_MODE=live`. In monitor mode the worker records local order intents but does not post CLOB orders.
+```bash
+npm run dev:api
+npm run dev:web
+```
 
-## Independent Touch Simulators
+- API and production-served dashboard: <http://localhost:8788>
+- Vite development dashboard: <http://localhost:5173>
 
-Run the standalone recorder in a separate shell when you want fresh paired/single
-touch-fill statistics without changing bot execution:
+Monitor mode records local order intents without posting CLOB orders. A default
+in code or in `.env.example` must not be treated as a recommendation for live
+trading.
+
+## Independent research recorders
+
+### Paired/single touch recorder
 
 ```bash
 npm run research:pm5m-touch -- --assets btc,eth,sol,doge,xrp,hype --min-price 0.29 --max-price 0.49
@@ -58,51 +217,52 @@ npm run research:pm5m-touch -- --assets btc,eth,sol,doge,xrp,hype --interval 15m
 npm run research:pm5m-touch -- --assets btc,eth,sol,doge,xrp,hype --interval 1h --min-price 0.29 --max-price 0.49
 ```
 
-The recorder only uses Gamma HTTP and the Polymarket CLOB market websocket. It
-does not import bot runtime code, does not place orders, and writes ignored
-research files under interval-specific directories such as `data-lab/pm-5m-touch/`,
-`data-lab/pm-15m-touch/`, and `data-lab/pm-1h-touch/`. The dashboard Simulation tab reads
-`data-lab/pm-5m-touch/summary.json` through a read-only API endpoint; set
-`PM5M_TOUCH_SUMMARY_PATH` if the summary file lives somewhere else. Production
-Docker Compose starts separate `pm5m-touch-recorder`, `pm15m-touch-recorder`, and `pm1h-touch-recorder` services
-and shares `./data-lab` with the API container.
+The recorder uses Gamma HTTP and the Polymarket CLOB market websocket. It does
+not import the bot runtime or place orders. Results are written to ignored
+interval-specific paths such as `data-lab/pm-5m-touch/`. The dashboard reads a
+summary through a read-only API endpoint.
 
-Run the independent tail-entry recorder when you want to evaluate buying the
-higher-probability side near round end using live orderbook VWAP:
+Treat its EV as an optimistic screening statistic, not executable PnL. The
+static model cannot reproduce real queue and persistence behavior.
+
+### Tail orderbook recorder
 
 ```bash
 npm run research:pm5m-tail -- --assets btc,eth,sol,doge,xrp,hype --checkpoints 60,45,30,20,15,10,5 --size 2
 ```
 
-This recorder is separate from the touch-fill simulator. It samples YES/NO
-orderbooks at configured seconds-to-end checkpoints, selects the stronger side
-by midpoint, computes ask-book VWAP for one fixed simulation size, waits for
-final Gamma resolution, and writes summary data under `data-lab/pm-5m-tail/`. The dashboard
-Tail Entry view reads `data-lab/pm-5m-tail/summary.json`; set
-`PM5M_TAIL_SUMMARY_PATH` to override the path. Production Docker Compose starts
-it as separate 5m, 15m, and 1h recorder services. Each live profile uses only
-its own interval summary and rolling window. The selector ranks checkpoint and
-VWAP-band pairs that pass the configured fillable-sample, positive-PnL, and EV
-gates; live Tail executes only when the current book matches the best pair.
+This recorder samples YES/NO orderbooks at configured seconds-to-end
+checkpoints, chooses the stronger side by midpoint, computes fixed-size ask-book
+VWAP, waits for Gamma resolution, and writes results under
+`data-lab/pm-5m-tail/` (with equivalent interval-specific directories).
 
-## Runtime Model
+Changing checkpoint, lookback, size, or ask band after inspecting the same
+sample is parameter search. Validate any selected rule on a later untouched
+window before drawing a profitability conclusion.
 
-The worker runs every `BOT_TICK_MS` and produces a multi-profile `DashboardState`:
+## Runtime model
 
-- Discovers the next enabled 5m/15m/1h rounds from deterministic `<asset>-updown-<interval>-<roundStartSec>` slugs and Gamma `/markets/slug/:slug`.
-- Maintains recent per-asset price samples only from Binance public aggTrade websockets.
-- Maintains YES/NO CLOB orderbooks only from the Polymarket CLOB market websocket.
-- Computes per-asset path features including `cross120s`, realized range bps, two-sided excursion bps, drift/momentum ratios, range percentile, and a `chopScore` for diagnostics.
-- Generates paired fixed-price entry intents during each enabled profile's pre-round decision window. With `BYPASS_ENTRY_SCORE_GATING=true`, entry no longer depends on CHOP classification.
-- Optionally performs a capped three-stage BUY hedge when one side filled and the other side did not.
-- Optionally performs a capped SELL loss exit before hedge when one side filled, moved against us, and is still inside the configured loss budget.
-- Reconciles recent fills and estimates settlement/PnL after a round has ended.
+For every enabled asset/interval profile, the worker can:
+
+- discover deterministic recurring Up/Down rounds through Gamma;
+- sample per-asset Binance aggregate-trade prices;
+- maintain YES/NO books from the Polymarket CLOB websocket;
+- compute price-path features and CHOP diagnostics;
+- create Dual or Tail intents according to the active strategy profile;
+- reconcile orders/fills, execute bounded risk actions, and estimate settlement;
+- expose profile state, simulation summaries, orders, fills, cooldowns, and
+  settlements in the dashboard.
+
+There is no HTTP/manual/simulated fallback for the live crypto price or CLOB
+orderbook. Missing, disconnected, or stale required feeds block entry.
 
 ## Configuration
 
-Edit `.env` and `configs/btc5m.example.json`.
+Configuration lives in `.env` and `configs/btc5m.example.json`. The full set of
+environment keys and historical values is documented in `.env.example` and in
+the technical retrospective.
 
-Required for real trading:
+Real order signing requires:
 
 ```dotenv
 EXECUTION_MODE=live
@@ -110,234 +270,72 @@ POLYMARKET_DEPOSIT_WALLET=0x...
 OWNER_PRIVATE_KEY=...
 ```
 
-Profile status controls:
+Those values only enable execution; they do not make the selected strategy
+profitable. Do not switch to `live` merely because feeds, tests, or simulation
+are green.
 
-```dotenv
-# BTC 5m follows EXECUTION_MODE by default. Keep 15m/1h in monitor until shadow
-# data proves the paired-fill/single-fill profile is acceptable.
-BTC_5M_PROFILE_STATUS=live
-BTC_15M_PROFILE_STATUS=monitor
-BTC_1H_PROFILE_STATUS=monitor
-ETH_5M_PROFILE_STATUS=disabled
-ETH_15M_PROFILE_STATUS=disabled
-ETH_1H_PROFILE_STATUS=disabled
-SOL_5M_PROFILE_STATUS=disabled
-SOL_15M_PROFILE_STATUS=disabled
-SOL_1H_PROFILE_STATUS=disabled
-DOGE_5M_PROFILE_STATUS=disabled
-DOGE_15M_PROFILE_STATUS=disabled
-DOGE_1H_PROFILE_STATUS=disabled
-XRP_5M_PROFILE_STATUS=disabled
-XRP_15M_PROFILE_STATUS=disabled
-XRP_1H_PROFILE_STATUS=disabled
-HYPE_5M_PROFILE_STATUS=disabled
-HYPE_15M_PROFILE_STATUS=disabled
-HYPE_1H_PROFILE_STATUS=disabled
-```
+For operational guidance, use:
 
-Recommended live feed settings:
+- `skills/btc5m-monitor/SKILL.md` — feed, discovery, book, and dashboard checks;
+- `skills/btc5m-live/SKILL.md` — historical live execution controls and risks;
+- `skills/btc5m-docker/SKILL.md` — local Docker path;
+- `skills/btc5m-deploy/SKILL.md` — historical server deployment path;
+- `skills/btc5m-troubleshooting/SKILL.md` — round, feed, order, and UI diagnosis.
 
-```dotenv
-BINANCE_WS_URL=wss://stream.binance.com:9443/stream?streams=btcusdt@aggTrade/ethusdt@aggTrade/solusdt@aggTrade/dogeusdt@aggTrade/xrpusdt@aggTrade/hypeusdt@aggTrade
-BINANCE_PRICE_SAMPLE_MS=1000
-POLYMARKET_CLOB_WS_URL=wss://ws-subscriptions-clob.polymarket.com/ws/market
-POLYMARKET_GAMMA_API_URL=https://gamma-api.polymarket.com
-POLYMARKET_DATA_API_URL=https://data-api.polymarket.com
-BOT_TICK_MS=2000
-MAX_ORDERBOOK_AGE_SECONDS=5
-RUNTIME_MAX_RECORDS=1000
-```
-
-Crypto price has no HTTP/manual/simulated fallback. The worker subscribes to the configured Binance stream and records samples by symbol, so BTC profiles read `btcusdt` and ETH profiles read `ethusdt`. It samples the latest trade into the strategy path every `BINANCE_PRICE_SAMPLE_MS` milliseconds by default, so the CHOP thresholds keep a stable seconds-level meaning instead of scaling with raw trade count. If Binance is not connected or no matching trade has arrived for a profile, the regime remains `UNKNOWN` and entry orders are blocked.
-Orderbook price also has no REST fallback. For each enabled profile, the worker discovers the next recurring Up/Down market from Gamma, maps `Up` to the local `YES` side and `Down` to the local `NO` side, then subscribes to both token IDs over the CLOB market websocket. If discovery fails, the CLOB websocket is not connected, or books are missing/stale, entry orders are blocked.
-
-The round strike is the asset price at the beginning of the profile's Polymarket range. Before the next round starts, the dashboard shows the latest matching Binance price as an estimate. Once the round starts, the first available sampled Binance price for that profile is persisted as that round's opening strike.
-
-The current dynamic BTC path thresholds are intentionally kept unchanged after the Binance switch because the runtime feeds the strategy with sampled Binance prices, not every raw trade. `rangeBps`, two-sided excursion, drift ratio, and momentum ratio are price-path measures and remain comparable. `cross120s` also remains comparable because the 1s sampling prevents high-frequency trade noise from multiplying strike crosses.
-
-`RUNTIME_MAX_RECORDS` bounds retained intents, orders, fills, and settlement records in memory and in `runtime-state.json`. The dashboard paginates long activity and log lists so the UI does not render the full retained history at once.
-
-Strategy thresholds:
-
-```dotenv
-DUAL_LIMIT_PRICE=0.45
-DYNAMIC_LIMIT_ENABLED=false
-MIN_DYNAMIC_LIMIT_PRICE=0.42
-MAX_DYNAMIC_LIMIT_PRICE=0.46
-MAX_PAIR_COST=0.92
-ORDER_SHARES_PER_SIDE=5
-DYNAMIC_SHARES_ENABLED=false
-MAX_ORDER_SHARES_PER_SIDE=6.25
-MIN_ORDER_SHARES=5
-MIN_CROSS_120S=2
-MAX_ABS_DRIFT_120S=40
-MAX_ABS_MOMENTUM_30S=28
-MIN_CHOP_SCORE=70
-MIN_RANGE_BPS_120S=3
-MIN_BI_EXCURSION_BPS_120S=1
-MAX_DRIFT_RATIO_120S=0.45
-MAX_MOMENTUM_RATIO_30S=0.55
-MAX_ENTRY_QUEUE_IMBALANCE=5
-MIN_LIVE_CHOP_SCORE=70
-BYPASS_ENTRY_SCORE_GATING=true
-BYPASS_SINGLE_FILL_COOLDOWN=false
-REFRESH_SINGLE_FILL_COOLDOWN_ON_BOOT=true
-ENTRY_CONFIRM_TICKS=3
-PARTICIPATION_ENABLED=true
-PARTICIPATION_CACHE_MS=30000
-PARTICIPATION_TOP_HOLDERS_PER_SIDE=8
-MIN_PARTICIPATION_HOLDERS_PER_SIDE=3
-MIN_PARTICIPATION_TOP_HOLDER_SHARES_PER_SIDE=300
-MIN_PARTICIPATION_TOP_POSITION_PNL=40
-MIN_PARTICIPATION_POSITION_PNL_SUM=100
-MAX_PARTICIPATION_HOLDER_CONCENTRATION=0.75
-PM_SIM_PRICE_ENABLED=true
-PM5M_SIM_PRICE_SUMMARY_PATH=data-lab/pm-5m-touch/summary.json
-PM15M_SIM_PRICE_SUMMARY_PATH=data-lab/pm-15m-touch/summary.json
-PM1H_SIM_PRICE_SUMMARY_PATH=data-lab/pm-1h-touch/summary.json
-PM_SIM_LOOKBACK_HOURS=84
-PM_SIM_PRICE_REFRESH_MS=30000
-PM_SIM_PRICE_MIN=0.29
-PM_SIM_PRICE_MAX=0.49
-PM5M_SIM_PRICE_MIN_ROUNDS=900
-PM15M_SIM_PRICE_MIN_ROUNDS=100
-PM1H_SIM_PRICE_MIN_ROUNDS=100
-PM_SIM_PRICE_FALLBACK=0.31
-PM_SIM_PRICE_MAX_SUMMARY_AGE_MS=600000
-PM_SIM_REQUIRE_POSITIVE_EV=false
-PM_SIM_REQUIRE_AVAILABLE=true
-PM_SIM_MIN_EV_PER_SHARE=0
-PM5M_TAIL_SUMMARY_PATH=data-lab/pm-5m-tail/summary.json
-PM5M_TAIL_LOOKBACK_HOURS=12
-PM15M_TAIL_LOOKBACK_HOURS=48
-PM1H_TAIL_LOOKBACK_HOURS=168
-PM5M_TAIL_SIZE=2
-PM_TAIL_ENTRY_ENABLED=true
-PM5M_TAIL_ENTRY_SUMMARY_PATH=data-lab/pm-5m-tail/summary.json
-PM5M_TAIL_ENTRY_MAX_SUMMARY_AGE_MS=600000
-PM5M_TAIL_ENTRY_MIN_ROUNDS=20
-PM15M_TAIL_ENTRY_MIN_ROUNDS=40
-PM1H_TAIL_ENTRY_MIN_ROUNDS=40
-PM5M_TAIL_ENTRY_MIN_EV_PER_SHARE=0.02
-PM_TAIL_ENTRY_AUTO_SELECT_CHECKPOINT=true
-PM5M_TAIL_ENTRY_CHECKPOINTS=60,45,30,20,15,10,5
-PM5M_TAIL_ENTRY_SIZE=2
-PM5M_TAIL_ENTRY_MIN_BAND_FILLS=20
-PM15M_TAIL_ENTRY_MIN_BAND_FILLS=12
-PM1H_TAIL_ENTRY_MIN_BAND_FILLS=8
-PM5M_TAIL_ENTRY_MAX_VWAP=0.99
-PM_TAIL_ENTRY_REQUIRE_WIN_PROBABILITY_MARGIN=false
-PM5M_TAIL_ENTRY_WIN_PROBABILITY_MARGIN=0.01
-PM5M_TAIL_COOLDOWN_BASE_MS=900000
-PM5M_TAIL_COOLDOWN_REPEAT_WINDOW_MS=3600000
-PM5M_TAIL_COOLDOWN_SECOND_MS=3600000
-PM5M_TAIL_COOLDOWN_THIRD_MS=14400000
-PM_ASSET_SELECTOR_ENABLED=true
-PM_ASSET_SELECTOR_MAX_ASSETS=1
-PM_ASSET_SELECTOR_SINGLE_PENALTY=0
-BTC_5M_SINGLE_FILL_COOLDOWN_BASE_MS=7200000
-BTC_5M_SINGLE_FILL_COOLDOWN_PRICE_CAP_MS=7200000
-BTC_5M_SINGLE_FILL_COOLDOWN_EXECUTION_MS=7200000
-BTC_5M_SINGLE_FILL_COOLDOWN_REPEAT_WINDOW_MS=7200000
-BTC_5M_SINGLE_FILL_COOLDOWN_SECOND_MS=7200000
-BTC_5M_SINGLE_FILL_COOLDOWN_THIRD_MS=7200000
-SINGLE_FILL_HEDGE_ENABLED=true
-SINGLE_FILL_EARLY_HEDGE_WINDOW_SECONDS=60
-SINGLE_FILL_EARLY_HEDGE_MAX_PAIR_COST=1.02
-SINGLE_FILL_EMERGENCY_HEDGE_WINDOW_SECONDS=15
-SINGLE_FILL_EMERGENCY_HEDGE_MAX_PRICE=0.75
-SINGLE_FILL_EMERGENCY_HEDGE_MAX_PAIR_COST=1.20
-SINGLE_FILL_HEDGE_WINDOW_SECONDS=30
-SINGLE_FILL_HEDGE_MIN_SECONDS_TO_END=5
-SINGLE_FILL_HEDGE_MAX_PRICE=0.65
-SINGLE_FILL_HEDGE_PRICE_OFFSET=0.01
-SINGLE_FILL_HEDGE_MAX_PAIR_COST=1.10
-SINGLE_FILL_PROFIT_EXIT_ENABLED=true
-SINGLE_FILL_PROFIT_EXIT_MIN_RATE=0.05
-SINGLE_FILL_PROFIT_EXIT_MIN_PNL_USD=0.30
-SINGLE_FILL_PROFIT_EXIT_PRICE_OFFSET=0.01
-SINGLE_FILL_PROFIT_EXIT_MAX_ORDERBOOK_AGE_MS=1000
-SINGLE_FILL_PROFIT_EXIT_MIN_SECONDS_TO_END=20
-SINGLE_FILL_PROFIT_EXIT_MAX_SECONDS_TO_END=240
-SINGLE_FILL_LOSS_EXIT_ENABLED=false
-SINGLE_FILL_LOSS_EXIT_MAX_LOSS_USD=0.75
-SINGLE_FILL_LOSS_EXIT_MIN_BID=0.30
-SINGLE_FILL_LOSS_EXIT_PRICE_OFFSET=0.01
-SINGLE_FILL_LOSS_EXIT_MAX_ORDERBOOK_AGE_MS=1000
-SINGLE_FILL_LOSS_EXIT_MIN_SECONDS_TO_END=20
-SINGLE_FILL_LOSS_EXIT_MAX_SECONDS_TO_END=180
-```
-
-The worker targets the next round for each enabled profile. It posts paired BUY limit orders before round start as GTC orders because short GTD expirations can be rejected by CLOB. After start, it normally only reconciles fills and records settlement estimates unless an explicit single-fill risk path triggers: a profit exit can cancel the missing-side BUY and sell the filled side with a capped FAK SELL limit when the filled side is already profitable; an optional loss exit can sell the filled side while the loss is still inside budget; the three-stage hedge can cancel stale missing-side BUY orders and submit a capped aggressive FAK BUY LIMIT for the missing side. It never sends uncapped market orders.
-
-Live entry orders are configured as CLOB limit order `price + size`:
-
-- With `DYNAMIC_LIMIT_ENABLED=true`, CHOP score maps to 42c/44c/45c/46c, capped by `MAX_PAIR_COST`.
-- In live mode, `MIN_LIVE_CHOP_SCORE=80` blocks edge-score 42c setups from posting real orders.
-- `BYPASS_ENTRY_SCORE_GATING=true` bypasses strategy entry blockers and the entry orderbook quote gate so each round can attempt paired entry, but it does not bypass `SINGLE_FILL_COOLDOWN` or the provisional `PENDING_SINGLE_FILL_RISK` lock. It still leaves execution-level duplicate/open-order, balance, credential, round-start, invalid price/size, and exit/hedge rules in place.
-- `ACTIVE_STRATEGY_PROFILE=experiment_next_round` uses the fixed `EXPERIMENT_NEXT_ROUND_*` prices and size for every enabled profile's next round. It bypasses classic score, confirmation, simulator, asset-selection, participation, and orderbook-readiness gates while preserving collateral, credential, token, timing, price/size, and local/Polymarket duplicate-order gates. Tail entry and classic exit/hedge paths are disabled while this profile is active. The default experiment is YES 0.50 + NO 0.50 with `EXPERIMENT_STOP_ON_SINGLE=false`.
-- `PM_SIM_REQUIRE_AVAILABLE=true` keeps simulator-selected entry fail-closed when the summary is missing, stale, or undersampled. `PM_SIM_REQUIRE_POSITIVE_EV=false` allows the experimental pure-EV selector to trade the least-negative historical row; it does not permit fallback while availability is required.
-- `PM_SIM_LOOKBACK_HOURS=84` is the experimental recorder lookback window, approximately 1,008 BTC 5m rounds and therefore close to the tested 1,000-round selector. Each interval has an independent summary and minimum sample threshold; when the rolling window is undersampled, the selector can use that same interval's all-time rows, but never another interval's rows.
-- `PM_ASSET_SELECTOR_ENABLED=true` ranks the six enabled assets independently inside each interval using `EV - SINGLE_PENALTY * singleRate`; the experimental BTC5m configuration sets the penalty to zero for pure-EV selection. With `PM_ASSET_SELECTOR_MAX_ASSETS=1`, at most one 5m, one 15m, and one 1h profile can pass the selector for their respective rounds.
-- Tail simulation uses interval-specific windows: 12h for 5m, 48h for 15m, and 168h for 1h. Each profile ranks checkpoint and VWAP-band pairs by per-share EV after applying checkpoint sample, band fillable-sample, positive-PnL, and minimum-EV gates; live Tail executes only when the current book matches the best pair. With `PM_TAIL_ENTRY_AUTO_SELECT_CHECKPOINT=false`, `PM5M_TAIL_ENTRY_CHECKPOINTS` limits which checkpoints may participate. The 95% win-probability lower bound remains visible as a diagnostic; it becomes a hard gate only when `PM_TAIL_ENTRY_REQUIRE_WIN_PROBABILITY_MARGIN=true`. Recorder and live Tail both use the same `PM5M_TAIL_SIZE=2` execution model.
-- Ordinary Tail is blocked for any round already allocated to Dual. Immediately before posting, the worker revalidates the selected side, ask band, and VWAP against the latest websocket book. A settled Tail loss starts an escalating Tail-only cooldown: 15 minutes for the first loss, 60 minutes for the second loss inside one hour, and 4 hours for the third or later loss.
-- `BYPASS_SINGLE_FILL_COOLDOWN=true` bypasses only the active single-fill cooldown entry blocker. It does not disable the single-fill hedge/profit-exit logic.
-- `REFRESH_SINGLE_FILL_COOLDOWN_ON_BOOT=true` recomputes any persisted active single-fill cooldown from the current profile cooldown config during process boot. It preserves fills, reviewed rounds, and repeat history, and only updates or clears active cooldown records.
-- `ENTRY_CONFIRM_TICKS=3` requires the full entry setup to remain eligible across three consecutive bot ticks before orders are posted.
-- `DUAL_LIMIT_PRICE` is the fixed fallback price when dynamic limit pricing is disabled.
-- With `DYNAMIC_SHARES_ENABLED=true`, CHOP score maps to `0.5x/1.0x/1.0x/1.25x` of `ORDER_SHARES_PER_SIDE`, capped by `MAX_ORDER_SHARES_PER_SIDE`.
-- The resulting shares value becomes the `size` sent to `createOrder` for each YES/NO side.
-- `MAX_ENTRY_QUEUE_IMBALANCE` only blocks extreme YES/NO bid-queue imbalance at the entry limit. If full bid levels are unavailable, the check stays diagnostic and does not block.
-- `PARTICIPATION_*` adds a conservative PM data-api gate using event `conditionId`, top holders, and limited per-holder positions. It blocks only when fetched data shows clearly weak participation; missing/unavailable data is visible in the dashboard and does not block.
-- `SINGLE_FILL_EARLY_HEDGE_*` controls the 60s-to-30s opportunity hedge. It only runs when the combined pair cost is near breakeven.
-- `SINGLE_FILL_HEDGE_*` controls the 30s-to-15s final risk hedge. It can accept the wider final pair-cost cap to avoid carrying a single-sided exposure into settlement.
-- `SINGLE_FILL_EMERGENCY_HEDGE_*` controls the 15s-to-5s emergency hedge. It can accept a larger locked loss, up to the emergency missing-side price and pair-cost caps, only at the end of the round.
-- `SINGLE_FILL_PROFIT_EXIT_*` controls the single-fill take-profit exit. The capped FAK SELL limit must realize at least `SINGLE_FILL_PROFIT_EXIT_MIN_RATE` profit on the filled side and at least `SINGLE_FILL_PROFIT_EXIT_MIN_PNL_USD`; stale quotes above `SINGLE_FILL_PROFIT_EXIT_MAX_ORDERBOOK_AGE_MS` are rejected.
-- `SINGLE_FILL_LOSS_EXIT_*` controls the single-fill stop-loss exit. When enabled, the capped FAK SELL limit can exit the filled side only while the expected loss is no larger than `SINGLE_FILL_LOSS_EXIT_MAX_LOSS_USD`, the filled-side bid is at least `SINGLE_FILL_LOSS_EXIT_MIN_BID`, and the quote is fresh under `SINGLE_FILL_LOSS_EXIT_MAX_ORDERBOOK_AGE_MS`.
-- `CROSS_PROFILE_SINGLE_FILL_RISK_ENABLED=true` makes a finalized 5m single-fill event immediately re-check same-asset 15m/1h single-leg exposure. It tries an early profit exit first, then loss exit if enabled, then a strict capped hedge if no sell exit ran.
-- Final single-fill cooldown is adaptive, profile-scoped, and only applies to rounds with tracked strategy BUY orders. External/manual fills without local strategy orders are ignored. Defaults use the BTC 5m baseline for every interval: 30m / 60m / 2h / 2h / 2h / 4h for base, price-cap, execution, repeat-window, second-repeat, and third-repeat. Same-asset cooldowns are shared across enabled intervals, and each target keeps the active record with the latest expiry. Override a profile with keys like `BTC_15M_SINGLE_FILL_COOLDOWN_BASE_MS`, or an interval with `15M_SINGLE_FILL_COOLDOWN_BASE_MS`.
-
-## Docker
+## Validation
 
 ```bash
-cp .env.example .env
-docker compose up --build api web
+npm run typecheck
+npm test
+npm run build
 ```
 
-API + dashboard: http://localhost:8788
+Unit tests cover the strategy engine, multi-profile runtime, selectors, Tail
+entry, execution, pending single risk, hedge, profit/loss exits, discovery,
+market data, persistence, and notifications. They validate implementation
+behavior, not economic profitability.
 
-Standalone web container: http://localhost:4174
+## Historical deployment notes
 
-## Server Deployment
-
-If `ssh a` logs into the target server:
+The former server deployment used:
 
 ```bash
 ./deploy/deploy-a.sh
 ```
 
-Production uses Caddy as the public reverse proxy in front of the API/dashboard container. Defaults are `HTTP_PORT=8088` and `HTTPS_PORT=8444` so this project can run on the same server as `poly-elon` without taking 80/443.
-
-Runtime state is persisted on the server under:
+Runtime state was persisted at:
 
 ```text
 ~/apps/poly-btc5m/data/runtime-state.json
 ```
 
-`docker-compose.prod.yml` bind-mounts `./data` into the API container and overrides `RUNTIME_STATE_PATH` to `/app/data/runtime-state.json`. The deploy script creates `data/` and excludes it from `rsync --delete`, so order intents, posted orders, fills, settlements, and captured round strikes survive container rebuilds and redeploys.
+The deployment script preserves `data/` and the server-owned `.env` across
+syncs. The production stack is intentionally stopped; this section remains for
+forensic reproducibility, not as an instruction to restart it.
 
-The repository expects a certificate at:
+## Safety and future research rules
 
-```text
-certs/b.dark20.xyz.pem
-certs/b.dark20.xyz.key
-```
+- Default to `monitor`; treat every live run as a separately authorized
+  experiment with a hard loss budget.
+- Require an absolute positive-EV gate. Never trade the top-ranked candidate
+  when every candidate is negative.
+- Freeze parameters before the forward window. Do not tune and evaluate on the
+  same rounds.
+- Model queue position, latency, cancellation, partial fills, order persistence,
+  fees, and slippage before promoting simulation results.
+- Judge paired and single outcomes together. Paired fill rate alone is not a
+  strategy metric.
+- Treat cooldown, hedge, and exits as loss-shaping controls, not sources of
+  edge.
+- Require sufficient out-of-sample volume and a positive lower confidence bound
+  on net EV before considering live capital.
+- Stop automatically on data disagreement, unexpected round timing, repeated
+  single fills, or a breached loss budget.
+- Do not commit `.env`, private keys, wallet secrets, runtime state, or raw
+  account data.
+- Do not expose the dashboard publicly without authentication or a private
+  network boundary.
 
-The included local certificate is self-signed for `b.dark20.xyz`. With that certificate, set Cloudflare SSL/TLS mode to `Full`, not `Full strict`, and set the Origin Rule destination port to `8444`. For `Full strict`, replace these files with a Cloudflare Origin Certificate for `b.dark20.xyz`.
-
-## Safety
-
-- Keep `EXECUTION_MODE=monitor` until Binance price feed, Gamma round discovery, CLOB token subscriptions, balances, and signed-order posting are verified.
-- Do not commit `.env`, private keys, or deposit-wallet secrets.
-- Do not expose the dashboard publicly without authentication or a private network boundary.
-- Treat local `settlement` rows as estimates until validated against Polymarket final resolution data.
+The project's most reusable result is methodological: a sophisticated selector,
+a high win rate, or a loss-reducing cooldown cannot rescue a strategy whose
+execution-adjusted expected value remains negative.
