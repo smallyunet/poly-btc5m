@@ -232,7 +232,51 @@ export async function executeTailEntry(params: {
     return [`Tail entry blocked for ${intent.label}: ${gate.reason}.`];
   }
 
-  if (runtime.executionMode !== 'live') {
+  if (runtime.executionMode === 'paper') {
+    const order = {
+      ...localOrder(params.snapshot, intent, executionKey, 'posted'),
+      price: evaluation.vwap,
+      rawResponse: {
+        paper: true,
+        fillModel: 'fak-vwap-immediate-full-fill-v1',
+        checkpointSeconds: evaluation.checkpointSeconds,
+        bestAsk: evaluation.bestAsk,
+        askBand: evaluation.askBand,
+      },
+    };
+    params.store.recordOrder(order);
+    const fill = {
+      id: `paper-fill-${order.id}`,
+      profileId: intent.profileId,
+      asset: intent.asset,
+      interval: intent.interval,
+      strategy: intent.strategy,
+      strategyProfile: 'classic',
+      roundId: intent.roundId,
+      eventSlug: params.snapshot.round.eventSlug,
+      marketTitle: params.snapshot.round.title,
+      imageUrl: params.snapshot.round.imageUrl,
+      tokenId: intent.tokenId,
+      label: intent.label,
+      side: intent.side,
+      price: evaluation.vwap,
+      size: roundDownShares(intent.shares),
+      matchedAt: new Date().toISOString(),
+      raw: { paper: true, fillModel: 'fak-vwap-immediate-full-fill-v1' },
+    } as const;
+    params.store.recordFills([fill]);
+    params.store.recordOrder({
+      ...order,
+      status: 'filled',
+      filledSize: fill.size,
+      avgFillPrice: fill.price,
+      updatedAt: fill.matchedAt,
+    });
+    params.store.updateIntent(intent.id, { status: 'executed' });
+    return [`Paper mode filled tail entry for ${intent.label} @ ${evaluation.vwap.toFixed(3)}.`];
+  }
+
+  if (runtime.executionMode === 'monitor') {
     params.store.recordOrder(localOrder(params.snapshot, intent, executionKey, 'local'));
     params.store.updateIntent(intent.id, { status: 'executed' });
     return [`Monitor mode recorded tail entry for ${intent.label} @ ${intent.limitPrice.toFixed(3)}.`];

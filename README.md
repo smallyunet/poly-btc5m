@@ -71,6 +71,8 @@ The bounded conclusion is:
 
 - [Technical audit and complete parameter/result inventory](docs/poly-btc5m-strategy-project-postmortem-zh.md)
 - [Chronological, story-style project retrospective](docs/poly-btc5m-strategy-project-story-zh.md)
+- [Paper Trading rebuild archive and retained-data baseline](docs/paper-trading-rebuild-baseline-2026-08-08.md)
+- [Paper Trading runtime, ledger, fill models, and API](docs/paper-trading.md)
 
 The technical audit is the source of truth for historical figures. It separates
 simulation, execution-adjusted replay, and actual live results, and records the
@@ -206,6 +208,10 @@ npm run dev:web
 Monitor mode records local order intents without posting CLOB orders. A default
 in code or in `.env.example` must not be treated as a recommendation for live
 trading.
+
+For persistent Paper execution, use `EXECUTION_MODE=paper` or the credential-
+isolated `docker-compose.paper.yml`. Paper mode writes uncapped history to
+SQLite while keeping `/api/state` bounded; see [Paper Trading runtime](docs/paper-trading.md).
 
 ## Independent research recorders
 

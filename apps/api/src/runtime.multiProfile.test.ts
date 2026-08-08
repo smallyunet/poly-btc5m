@@ -23,6 +23,7 @@ test('entry signal confirmation counts are isolated by market profile', () => {
 test('runAllProfilesTick captures isolated six-asset 5m, 15m, and 1h profile snapshots', async () => {
   const config = loadConfig();
   config.executionMode = 'monitor';
+  config.activeStrategyProfile = 'classic';
   config.ownerPrivateKey = undefined;
   config.depositWallet = undefined;
   config.pm5mSimPriceEnabled = false;
@@ -169,6 +170,7 @@ test('runAllProfilesTick captures isolated six-asset 5m, 15m, and 1h profile sna
 test('runBotTick blocks 5m entry intents when the asset selector does not select the profile', async () => {
   const config = loadConfig();
   config.executionMode = 'monitor';
+  config.activeStrategyProfile = 'classic';
   config.ownerPrivateKey = undefined;
   config.depositWallet = undefined;
   config.pm5mSimPriceEnabled = false;

@@ -1,8 +1,9 @@
-import type { OrderBookQuote, OrderRecord, StateSnapshot, TradeIntent } from '../../../packages/shared/src';
+import type { FillRecord, MarketProfileId, OrderBookQuote, OrderRecord, StateSnapshot, TradeIntent } from '../../../packages/shared/src';
 import type { StrategyRiskConfig } from '../../../packages/strategy/src';
 import type { PolymarketAdapter } from '../../../packages/polymarket/src';
 import type { AppConfig } from './config';
 import type { InMemoryStore } from './store';
+import { isRoundEnded } from './store/helpers';
 
 const FAILED_ORDER_COOLDOWN_MS = 5 * 60_000;
 const MIN_MARKETABLE_BUY_NOTIONAL_USD = 1;
@@ -23,7 +24,12 @@ export async function executeLiveIntents(params: ExecuteIntentsParams): Promise<
   const runtime = params.store.getRuntime();
   if (!params.intents.length) return diagnostics;
 
-  if (runtime.executionMode !== 'live') {
+  if (runtime.executionMode === 'paper') {
+    diagnostics.push(...executePaperIntents(params));
+    return diagnostics;
+  }
+
+  if (runtime.executionMode === 'monitor') {
     for (const intent of params.intents) {
       params.store.recordOrder(localOrder(params.snapshot, intent));
       params.store.updateIntent(intent.id, { status: 'executed' });
@@ -57,6 +63,60 @@ export async function executeLiveIntents(params: ExecuteIntentsParams): Promise<
     if (result) diagnostics.push(result);
   }
   return diagnostics;
+}
+
+function executePaperIntents(params: ExecuteIntentsParams): string[] {
+  const diagnostics: string[] = [];
+  for (const intent of params.intents) {
+    const executionKey = executionKeyFor(intent);
+    if (params.store.hasNonFailedOrder(executionKey)) {
+      params.store.updateIntent(intent.id, { status: 'rejected', rejectionReason: 'LOCAL_STRATEGY_ORDER_EXISTS' });
+      diagnostics.push(`Paper execution blocked for ${intent.label}: LOCAL_STRATEGY_ORDER_EXISTS.`);
+      continue;
+    }
+    const order = paperOrder(params.snapshot, intent, executionKey);
+    params.store.recordOrder(order);
+    params.store.updateIntent(intent.id, { status: 'executed' });
+    const quote = params.snapshot.orderbooks.find((item) => item.tokenId === intent.tokenId);
+    const fill = paperTouchFill(order, quote);
+    if (fill) {
+      params.store.recordFills([fill]);
+      params.store.recordOrder({
+        ...order,
+        status: 'filled',
+        filledSize: fill.size,
+        avgFillPrice: fill.price,
+        updatedAt: fill.matchedAt,
+      });
+    }
+  }
+  diagnostics.push(`Paper mode recorded ${params.intents.length} simulated GTC order intents without posting to CLOB.`);
+  return diagnostics;
+}
+
+export function reconcilePaperOrders(params: { store: InMemoryStore; profileId: MarketProfileId; quotes: OrderBookQuote[]; nowMs?: number }): FillRecord[] {
+  if (params.store.getRuntime().executionMode !== 'paper') return [];
+  const nowMs = params.nowMs ?? Date.now();
+  const quotes = new Map(params.quotes.map((quote) => [quote.tokenId, quote]));
+  const fills: FillRecord[] = [];
+  for (const order of params.store.ordersNeedingReconciliation(params.profileId, 1_000)) {
+    if (paperOrderExpired(order, nowMs)) {
+      params.store.recordOrder({ ...order, status: 'cancelled', updatedAt: new Date(nowMs).toISOString() });
+      continue;
+    }
+    const fill = paperTouchFill(order, quotes.get(order.tokenId), nowMs);
+    if (!fill) continue;
+    params.store.recordFills([fill]);
+    params.store.recordOrder({
+      ...order,
+      status: 'filled',
+      filledSize: fill.size,
+      avgFillPrice: fill.price,
+      updatedAt: fill.matchedAt,
+    });
+    fills.push(fill);
+  }
+  return fills;
 }
 
 async function executeOneIntent(params: ExecuteIntentsParams, intent: TradeIntent): Promise<string | null> {
@@ -252,6 +312,57 @@ function localOrder(snapshot: StateSnapshot, intent: TradeIntent): OrderRecord {
     createdAt: new Date().toISOString(),
     rawResponse: { monitor: true },
   };
+}
+
+function paperOrder(snapshot: StateSnapshot, intent: TradeIntent, executionKey: string): OrderRecord {
+  return {
+    ...localOrder(snapshot, intent),
+    id: `paper-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+    executionKey,
+    status: 'posted',
+    rawResponse: {
+      paper: true,
+      fillModel: 'best-ask-touch-full-fill-v1',
+      submittedQuote: snapshot.orderbooks.find((quote) => quote.tokenId === intent.tokenId) || null,
+    },
+  };
+}
+
+function paperTouchFill(order: OrderRecord, quote: OrderBookQuote | undefined, nowMs = Date.now()): FillRecord | null {
+  if (!quote || quote.source !== 'ws' || quote.bestAsk == null || quote.bestAsk > order.price) return null;
+  const matchedAt = new Date(nowMs).toISOString();
+  return {
+    id: `paper-fill-${order.id}`,
+    profileId: order.profileId,
+    asset: order.asset,
+    interval: order.interval,
+    strategy: order.strategy,
+    strategyProfile: order.strategyProfile,
+    roundId: order.roundId,
+    eventSlug: order.eventSlug,
+    marketTitle: order.marketTitle,
+    imageUrl: order.imageUrl,
+    tokenId: order.tokenId,
+    label: order.label,
+    side: order.side,
+    price: Math.min(order.price, quote.bestAsk),
+    size: order.size,
+    matchedAt,
+    raw: {
+      paper: true,
+      fillModel: 'best-ask-touch-full-fill-v1',
+      quote,
+    },
+  };
+}
+
+function paperOrderExpired(order: OrderRecord, nowMs: number): boolean {
+  const durationSeconds = order.interval === '1h' ? 3_600 : order.interval === '15m' ? 900 : 300;
+  return isRoundEnded(order.roundId, nowMs, 0, durationSeconds);
+}
+
+function executionKeyFor(intent: TradeIntent): string {
+  return [intent.profileId, intent.roundId, intent.strategy, intent.tokenId, intent.side].filter(Boolean).join(':');
 }
 
 function failedOrder(snapshot: StateSnapshot, intent: TradeIntent, executionKey: string, error: string): OrderRecord {

@@ -3,9 +3,13 @@ import cors from 'cors';
 import path from 'node:path';
 import fs from 'node:fs';
 import type { AppConfig } from './config';
+import type { PaperLedger } from './paper/PaperLedger';
+import type { DurableEntityType } from './store/types';
 import type { InMemoryStore } from './store';
 
-export function createServer(appConfig: AppConfig, store: InMemoryStore, manualTick: () => Promise<void>): express.Express {
+const PAPER_ENTITY_TYPES = new Set<DurableEntityType>(['intent', 'order', 'fill', 'settlement', 'snapshot', 'strategy_check']);
+
+export function createServer(appConfig: AppConfig, store: InMemoryStore, manualTick: () => Promise<void>, paperLedger?: PaperLedger): express.Express {
   const app = express();
   app.use(cors());
   app.use(express.json());
@@ -43,6 +47,29 @@ export function createServer(appConfig: AppConfig, store: InMemoryStore, manualT
   app.get('/api/orders', (_req, res) => res.json(store.dashboardState().orders));
   app.get('/api/fills', (_req, res) => res.json(store.dashboardState().fills));
   app.get('/api/settlements', (_req, res) => res.json(store.dashboardState().settlements));
+  app.get('/api/paper/stats', (req, res) => {
+    if (!paperLedger) return res.status(404).json({ ok: false, error: 'Paper ledger is not enabled.' });
+    const runId = stringQuery(req.query.runId);
+    return res.json(paperLedger.stats(runId));
+  });
+  app.get('/api/paper/events', (req, res) => {
+    if (!paperLedger) return res.status(404).json({ ok: false, error: 'Paper ledger is not enabled.' });
+    const rawEntityType = stringQuery(req.query.entityType);
+    if (rawEntityType && !PAPER_ENTITY_TYPES.has(rawEntityType as DurableEntityType)) {
+      return res.status(400).json({ ok: false, error: `Unsupported entityType: ${rawEntityType}` });
+    }
+    const limit = boundedInteger(req.query.limit, appConfig.paperApiDefaultLimit, appConfig.paperApiMaxLimit);
+    const cursor = optionalPositiveInteger(req.query.cursor);
+    if (req.query.cursor != null && cursor == null) return res.status(400).json({ ok: false, error: 'cursor must be a positive integer.' });
+    return res.json(paperLedger.page({
+      entityType: rawEntityType as DurableEntityType | undefined,
+      strategyId: stringQuery(req.query.strategyId),
+      profileId: stringQuery(req.query.profileId),
+      runId: stringQuery(req.query.runId),
+      cursor,
+      limit,
+    }));
+  });
   app.get('/api/rules', (_req, res) => res.json(store.dashboardState().rules));
   app.get('/api/research/pm5m-touch/summary', (_req, res) => {
     const summaryPath = path.resolve(process.cwd(), process.env.PM5M_TOUCH_SUMMARY_PATH || 'data-lab/pm-5m-touch/summary.json');
@@ -133,4 +160,20 @@ export function createServer(appConfig: AppConfig, store: InMemoryStore, manualT
   });
 
   return app;
+}
+
+function stringQuery(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function boundedInteger(value: unknown, fallback: number, max: number): number {
+  const parsed = typeof value === 'string' ? Number(value) : NaN;
+  if (!Number.isInteger(parsed) || parsed <= 0) return fallback;
+  return Math.min(parsed, max);
+}
+
+function optionalPositiveInteger(value: unknown): number | undefined {
+  if (value == null) return undefined;
+  const parsed = typeof value === 'string' ? Number(value) : NaN;
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
 }

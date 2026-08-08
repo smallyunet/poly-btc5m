@@ -19,6 +19,7 @@
     "apps/api/src/execution.ts",
     "apps/api/src/main.ts",
     "apps/api/src/marketData.ts",
+    "apps/api/src/paper/**/*.ts",
     "apps/api/src/runtime.ts",
     "apps/api/src/server.ts",
     "apps/api/src/store.ts",

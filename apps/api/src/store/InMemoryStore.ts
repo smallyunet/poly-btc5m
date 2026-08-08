@@ -5,7 +5,7 @@ import { STRATEGY_RULES } from '../../../../packages/strategy/src';
 import type { BotRuntimeStatus, DashboardState, DataFeedStatus, DynamicEntryPriceSelection, EntryRuntimeConfig, ExecutionMode, FillRecord, MarketProfile, MarketProfileId, OrderRecord, RuntimeLogRecord, SettlementRecord, StateSnapshot, StrategyCheck, StrategyId, StrategyProfile, TradeIntent } from '../../../../packages/shared/src';
 import { CLASSIC_ENTRY_STRATEGY, EXPERIMENT_STRATEGY, FINAL_SINGLE_FILL_GRACE_MS } from './constants';
 import { cooldownCategory, entrySignalScope, fillStrategy, finalSingleFillReviewMs, isExperimentStopLike, isFillRecordLike, isMarketProfileId, isOrderRecordLike, isRoundEnded, isSameCooldownEvent, isSingleFillCooldownEventLike, isSingleFillCooldownLike, isSingleFillHedgeOutcomeLike, isTelegramNotificationStateLike, isTradeIntentLike, matchingOrderFills, maxCooldown, netShares, normalizeCooldownPolicy, optionalEnv, orderStrategy, parseProfileRoundKey, profileAsset, profileDurationMs, profileDurationSeconds, profileIntervals, profileRoundKey, roundMoney, roundStartMs, runtimeVersion, strategyProfileForStrategy, sum, toTime } from './helpers';
-import type { ExperimentStopRecord, OpenOrderLike, PendingSingleFillRiskRecord, PersistedRuntimeState, SingleFillCooldownEvent, SingleFillCooldownPolicy, SingleFillCooldownRecord, SingleFillHedgeCandidate, SingleFillHedgeOutcome, SingleFillProfitExitCandidate, StoreOptions, TailCooldownEvent, TailCooldownRecord, TelegramNotificationState } from './types';
+import type { DurableRuntimeLedger, ExperimentStopRecord, OpenOrderLike, PendingSingleFillRiskRecord, PersistedRuntimeState, SingleFillCooldownEvent, SingleFillCooldownPolicy, SingleFillCooldownRecord, SingleFillHedgeCandidate, SingleFillHedgeOutcome, SingleFillProfitExitCandidate, StoreOptions, TailCooldownEvent, TailCooldownRecord, TelegramNotificationState } from './types';
 
 export class InMemoryStore {
   private runtime: BotRuntimeStatus;
@@ -33,11 +33,13 @@ export class InMemoryStore {
   private experimentRunStartedAt = new Date().toISOString();
   private readonly persistencePath?: string;
   private readonly maxRecords: number;
+  private readonly ledger?: DurableRuntimeLedger;
 
   constructor(mode: ExecutionMode, private readonly tickIntervalMs: number, options: StoreOptions = {}, activeStrategyProfile: StrategyProfile = 'classic', entryConfig?: EntryRuntimeConfig, profiles: MarketProfile[] = []) {
     this.profiles = profiles;
     this.persistencePath = options.persistencePath === false ? undefined : options.persistencePath;
     this.maxRecords = options.maxRecords ?? 10_000;
+    this.ledger = options.ledger;
     const startedAt = new Date();
     this.runtime = {
       status: 'running',
@@ -84,11 +86,13 @@ export class InMemoryStore {
       lastTickAt: snapshot.capturedAt,
       nextTickAt: new Date(capturedAtMs + this.tickIntervalMs).toISOString(),
     };
+    this.ledger?.recordSnapshot(snapshot);
   }
 
   recordIntents(intents: TradeIntent[]): void {
     const seen = new Set(this.intents.map((item) => item.id));
     this.intents = [...intents.filter((item) => !seen.has(item.id)), ...this.intents].slice(0, this.maxRecords);
+    for (const intent of intents) this.ledger?.record('intent', intent.id, 'recorded', intent, intent.createdAt);
     this.persistState();
   }
 
@@ -99,7 +103,10 @@ export class InMemoryStore {
       updated = { ...intent, ...patch };
       return updated;
     });
-    if (updated) this.persistState();
+    if (updated) {
+      this.ledger?.record('intent', intentId, 'updated', updated, new Date().toISOString());
+      this.persistState();
+    }
     return updated;
   }
 
@@ -110,6 +117,7 @@ export class InMemoryStore {
     } else {
       this.orders = [order, ...this.orders].slice(0, this.maxRecords);
     }
+    this.ledger?.record('order', order.id, existing >= 0 ? 'updated' : 'recorded', order, order.updatedAt || order.createdAt);
     this.persistState();
   }
 
@@ -121,6 +129,7 @@ export class InMemoryStore {
       .map((fill) => this.fillWithStrategySource(fill));
     if (!nextFills.length) return [];
     this.fills = [...nextFills, ...this.fills].slice(0, this.maxRecords);
+    for (const fill of nextFills) this.ledger?.record('fill', fill.id, 'recorded', fill, fill.matchedAt);
     this.reconcileOrderFillStatus();
     this.persistState();
     return nextFills;
@@ -134,6 +143,7 @@ export class InMemoryStore {
     } else {
       this.settlements = [settlement, ...this.settlements].slice(0, this.maxRecords);
     }
+    this.ledger?.record('settlement', settlement.id, existing >= 0 ? 'updated' : 'recorded', settlement, settlement.resolvedAt);
     this.persistState();
   }
 
@@ -171,6 +181,7 @@ export class InMemoryStore {
 
   recordStrategyChecks(checks: StrategyCheck[], profileId: MarketProfileId): void {
     this.strategyChecksByProfile.set(profileId, checks);
+    this.ledger?.recordStrategyChecks(checks, profileId);
   }
 
   recordDynamicEntryPrice(selection: DynamicEntryPriceSelection): void {

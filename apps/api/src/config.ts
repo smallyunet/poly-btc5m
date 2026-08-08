@@ -28,6 +28,11 @@ export type AppConfig = {
   tickIntervalMs: number;
   runtimeStatePath: string;
   runtimeMaxRecords: number;
+  paperDatabasePath: string;
+  paperRunId: string;
+  paperFillModelVersion: string;
+  paperApiDefaultLimit: number;
+  paperApiMaxLimit: number;
   binanceWsUrl: string;
   binancePriceSampleMs: number;
   clobWsUrl: string;
@@ -161,20 +166,26 @@ export type AppConfig = {
 export function loadConfig(): AppConfig {
   const orderSharesPerSide = numberEnv('ORDER_SHARES_PER_SIDE', 5);
   const marketProfiles = loadMarketProfiles(orderSharesPerSide);
+  const executionMode = parseExecutionMode(process.env.EXECUTION_MODE);
   return {
     port: Number(process.env.PORT || 8788),
     dashboardInternalApiKey: process.env.DASHBOARD_INTERNAL_API_KEY,
-    executionMode: parseExecutionMode(process.env.EXECUTION_MODE),
+    executionMode,
     activeStrategyProfile: parseStrategyProfile(process.env.ACTIVE_STRATEGY_PROFILE),
     clobApiUrl: process.env.POLYMARKET_CLOB_API_URL || 'https://clob.polymarket.com',
     gammaApiUrl: process.env.POLYMARKET_GAMMA_API_URL || 'https://gamma-api.polymarket.com',
     dataApiUrl: process.env.POLYMARKET_DATA_API_URL || 'https://data-api.polymarket.com',
     chainId: Number(process.env.POLYMARKET_CHAIN_ID || 137),
-    ownerPrivateKey: process.env.OWNER_PRIVATE_KEY,
-    depositWallet: process.env.POLYMARKET_DEPOSIT_WALLET,
+    ownerPrivateKey: privateKeyForMode(executionMode, process.env.OWNER_PRIVATE_KEY),
+    depositWallet: walletForMode(executionMode, process.env.POLYMARKET_DEPOSIT_WALLET),
     tickIntervalMs: parsePositiveInteger(process.env.BOT_TICK_MS, 2_000),
-    runtimeStatePath: process.env.RUNTIME_STATE_PATH || path.resolve(process.cwd(), 'data/runtime-state.json'),
+    runtimeStatePath: process.env.RUNTIME_STATE_PATH || path.resolve(process.cwd(), executionMode === 'paper' ? 'data/paper-runtime-state.json' : 'data/runtime-state.json'),
     runtimeMaxRecords: parsePositiveInteger(process.env.RUNTIME_MAX_RECORDS, 1_000),
+    paperDatabasePath: process.env.PAPER_DATABASE_PATH || path.resolve(process.cwd(), 'data/paper.sqlite'),
+    paperRunId: process.env.PAPER_RUN_ID?.trim() || 'paper-default',
+    paperFillModelVersion: process.env.PAPER_FILL_MODEL_VERSION?.trim() || 'touch-v1',
+    paperApiDefaultLimit: parsePositiveInteger(process.env.PAPER_API_DEFAULT_LIMIT, 100),
+    paperApiMaxLimit: parsePositiveInteger(process.env.PAPER_API_MAX_LIMIT, 500),
     binanceWsUrl: binanceWsUrl(process.env.BINANCE_WS_URL || process.env.BINANCE_BTC_WS_URL, marketProfiles),
     binancePriceSampleMs: parsePositiveInteger(process.env.BINANCE_PRICE_SAMPLE_MS, 1_000),
     clobWsUrl: clobWsUrl(process.env.POLYMARKET_CLOB_WS_URL),
@@ -465,9 +476,19 @@ function parseProfileStatus(value: string | undefined, fallback: MarketProfile['
   return fallback;
 }
 
-function parseExecutionMode(value: string | undefined): ExecutionMode {
+export function parseExecutionMode(value: string | undefined): ExecutionMode {
   if (!value?.trim()) return 'live';
-  return value === 'live' ? 'live' : 'monitor';
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'live' || normalized === 'paper' || normalized === 'monitor') return normalized;
+  throw new Error(`EXECUTION_MODE must be "monitor", "paper", or "live", got "${value}".`);
+}
+
+export function privateKeyForMode(mode: ExecutionMode, privateKey: string | undefined): string | undefined {
+  return mode === 'paper' ? undefined : privateKey;
+}
+
+export function walletForMode(mode: ExecutionMode, wallet: string | undefined): string | undefined {
+  return mode === 'paper' ? undefined : wallet;
 }
 
 function parseStrategyProfile(value: string | undefined): StrategyProfile {

@@ -1,4 +1,4 @@
-export type ExecutionMode = 'monitor' | 'live';
+export type ExecutionMode = 'monitor' | 'paper' | 'live';
 
 export type TradeSide = 'BUY' | 'SELL';
 

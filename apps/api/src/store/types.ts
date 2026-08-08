@@ -1,4 +1,12 @@
-import type { ExecutionMode, FillRecord, MarketProfileId, OrderRecord, SettlementRecord, TradeIntent } from '../../../../packages/shared/src';
+import type { ExecutionMode, FillRecord, MarketProfileId, OrderRecord, SettlementRecord, StateSnapshot, StrategyCheck, TradeIntent } from '../../../../packages/shared/src';
+
+export type DurableEntityType = 'intent' | 'order' | 'fill' | 'settlement' | 'snapshot' | 'strategy_check';
+
+export type DurableRuntimeLedger = {
+  record(entityType: DurableEntityType, entityId: string, eventType: string, payload: unknown, occurredAt?: string): void;
+  recordSnapshot(snapshot: StateSnapshot): void;
+  recordStrategyChecks(checks: StrategyCheck[], profileId: MarketProfileId): void;
+};
 
 export type OpenOrderLike = {
   id: string;
@@ -49,6 +57,7 @@ export type SingleFillCooldownPolicy = {
 export type StoreOptions = {
   persistencePath?: string | false;
   maxRecords?: number;
+  ledger?: DurableRuntimeLedger;
 };
 
 export type PersistedRuntimeState = {

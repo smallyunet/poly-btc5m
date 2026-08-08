@@ -3,7 +3,7 @@ import { classifyRegime, evaluateEntry, evaluateExit, type StrategyEvaluation, t
 import { PolymarketAdapter, type FillTarget } from '../../../packages/polymarket/src';
 import type { AppConfig } from './config';
 import { activeHedgeWindowSeconds, buildSingleFillHedgeCheck, executeSingleFillHedges, hedgeExposureOrders, planSingleFillHedge } from './hedge';
-import { executeLiveIntents } from './execution';
+import { executeLiveIntents, reconcilePaperOrders } from './execution';
 import { buildSingleFillProfitExitCheck, executeSingleFillProfitExits, planSingleFillProfitExit, profitExitExposureOrders } from './profitExit';
 import { buildSingleFillLossExitCheck, executeSingleFillLossExits, lossExitExposureOrders, planSingleFillLossExit } from './lossExit';
 import type { MarketDataService } from './marketData';
@@ -63,9 +63,13 @@ export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, dat
     ? store.profitExitWatchTokenIds(profile.id, appConfig.singleFillLossExitMaxSecondsToEnd, appConfig.singleFillLossExitMinSecondsToEnd)
     : [];
   const tailTokenIds = tailRound ? [tailRound.yesTokenId, tailRound.noTokenId] : [];
-  data.syncClobRound(round, [...tailTokenIds, ...hedgeWatchTokenIds, ...profitExitWatchTokenIds, ...lossExitWatchTokenIds]);
+  const paperOrders = store.getRuntime().executionMode === 'paper' ? store.ordersNeedingReconciliation(profile.id, 1_000) : [];
+  const paperWatchTokenIds = paperOrders.map((order) => order.tokenId);
+  data.syncClobRound(round, [...tailTokenIds, ...hedgeWatchTokenIds, ...profitExitWatchTokenIds, ...lossExitWatchTokenIds, ...paperWatchTokenIds]);
   const orderbooks = await data.refreshOrderbooks(round);
   const tailOrderbooks = tailRound ? await data.refreshOrderbooks(tailRound) : [];
+  const paperOrderbooks = paperWatchTokenIds.length ? data.refreshOrderbooksForTokenIds(paperWatchTokenIds) : [];
+  reconcilePaperOrders({ store, profileId: profile.id, quotes: paperOrderbooks });
   const participation = await participationService.refresh(round);
   diagnostics.push(...participation.diagnostics);
   const features = data.features(round, profile);
@@ -76,8 +80,9 @@ export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, dat
   const portfolio = await loadPortfolio(appConfig, adapter, tokenLabels, store.settledPnl(), diagnostics);
   const positions = portfolio.positions.filter((position) => position.label !== 'UNKNOWN');
   const roundSnapshot = roundToSnapshot(appConfig, store, round);
-  const fillCooldowns = await reconcileFills(appConfig, adapter, store, roundSnapshot, tokenLabels, diagnostics, profile);
-  const orderCooldowns = await reconcileTrackedOrders(appConfig, adapter, store, diagnostics, profile);
+  const liveReconciliationEnabled = store.getRuntime().executionMode === 'live';
+  const fillCooldowns = liveReconciliationEnabled ? await reconcileFills(appConfig, adapter, store, roundSnapshot, tokenLabels, diagnostics, profile) : [];
+  const orderCooldowns = liveReconciliationEnabled ? await reconcileTrackedOrders(appConfig, adapter, store, diagnostics, profile) : [];
   const pendingSingleFillRisk = store.getPendingSingleFillRisk(profile.id);
   if (pendingSingleFillRisk) {
     diagnostics.push(...await cancelFutureDualOrdersForPendingRisk(store, adapter, pendingSingleFillRisk));

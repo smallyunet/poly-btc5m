@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { loadConfig } from './config';
+import { loadConfig, parseExecutionMode, privateKeyForMode, walletForMode } from './config';
 
 const COOLDOWN_ENV_KEYS = [
   'SINGLE_FILL_COOLDOWN_BASE_MS',
@@ -85,6 +85,18 @@ const COOLDOWN_ENV_KEYS = [
   'SINGLE_FILL_LOSS_EXIT_MAX_SECONDS_TO_END',
   'CROSS_PROFILE_SINGLE_FILL_RISK_ENABLED',
 ];
+
+test('paper execution mode discards signing credentials', () => {
+  assert.equal(parseExecutionMode('paper'), 'paper');
+  assert.equal(privateKeyForMode('paper', 'must-not-survive'), undefined);
+  assert.equal(walletForMode('paper', 'must-not-survive'), undefined);
+  assert.equal(privateKeyForMode('live', 'live-key'), 'live-key');
+  assert.equal(walletForMode('live', 'live-wallet'), 'live-wallet');
+});
+
+test('unknown execution modes fail closed instead of silently becoming monitor', () => {
+  assert.throws(() => parseExecutionMode('typo'), /EXECUTION_MODE must be/);
+});
 
 test('market profile cooldown defaults match the documented global cooldown policy', () => {
   withEnv(COOLDOWN_ENV_KEYS, {}, () => {

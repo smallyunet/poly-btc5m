@@ -418,7 +418,7 @@ export function App() {
       tone: state.profiles.some((item) => item.entryCooldownUntil && new Date(item.entryCooldownUntil).getTime() > Date.now()) ? 'warn' as const : 'neutral' as const,
     }
     : decisionState;
-  const executionLabel = state.runtime.executionMode === 'live' ? 'LIVE' : 'MONITOR';
+  const executionLabel = state.runtime.executionMode === 'live' ? 'LIVE' : state.runtime.executionMode === 'paper' ? 'PAPER' : 'MONITOR';
   const feedLabel = `${viewState.feed.source.toUpperCase()} / CLOB ${viewState.feed.clobConnected ? 'ON' : 'OFF'}`;
   const hedgeCheck = viewState.strategyChecks.find((check) => check.strategy === 'UPDOWN_SINGLE_FILL_HEDGE');
   const profitExitCheck = viewState.strategyChecks.find((check) => check.strategy === 'UPDOWN_SINGLE_FILL_PROFIT_EXIT');

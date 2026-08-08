@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import type { AppConfig } from './config';
-import { executeLiveIntents } from './execution';
+import { executeLiveIntents, reconcilePaperOrders } from './execution';
 import { InMemoryStore } from './store';
 import type { PolymarketAdapter } from '../../../packages/polymarket/src';
 import type { StateSnapshot, TradeIntent } from '../../../packages/shared/src';
@@ -246,6 +246,121 @@ test('bypasses entry orderbook execution gate when entry bypass is enabled', asy
 
   assert.deepEqual(diagnostics, []);
   assert.equal(posted, 1);
+});
+
+test('paper mode never calls the CLOB adapter and records a touch fill', async () => {
+  const store = new InMemoryStore('paper', 2_000, { persistencePath: false });
+  const paperIntent = intent('YES', {
+    profileId: 'btc-5m',
+    asset: 'btc',
+    interval: '5m',
+    limitPrice: 0.46,
+  });
+  store.recordIntents([paperIntent]);
+  let adapterCalls = 0;
+  const adapter = {
+    async getCollateralBalanceAllowance() {
+      adapterCalls += 1;
+      throw new Error('paper mode must not read signed collateral');
+    },
+    async getOpenOrders() {
+      adapterCalls += 1;
+      throw new Error('paper mode must not read live open orders');
+    },
+    async executeLimitIntent() {
+      adapterCalls += 1;
+      throw new Error('paper mode must not submit live orders');
+    },
+  } as unknown as PolymarketAdapter;
+  const paperSnapshot = snapshot();
+  paperSnapshot.profileId = 'btc-5m';
+  paperSnapshot.asset = 'btc';
+  paperSnapshot.interval = '5m';
+
+  const diagnostics = await executeLiveIntents({
+    appConfig: appConfig(),
+    adapter,
+    store,
+    snapshot: paperSnapshot,
+    intents: [paperIntent],
+    risk: risk(),
+  });
+
+  const state = store.dashboardState();
+  assert.equal(adapterCalls, 0);
+  assert.match(diagnostics[0], /Paper mode recorded/);
+  assert.equal(state.orders.length, 1);
+  assert.equal(state.orders[0].status, 'filled');
+  assert.equal(state.orders[0].avgFillPrice, 0.45);
+  assert.equal(state.fills.length, 1);
+  assert.equal(state.fills[0].price, 0.45);
+  assert.equal(state.fills[0].raw && (state.fills[0].raw as { paper?: boolean }).paper, true);
+});
+
+test('paper mode leaves an untouched GTC order open for later reconciliation', async () => {
+  const store = new InMemoryStore('paper', 2_000, { persistencePath: false });
+  const paperIntent = intent('YES', {
+    profileId: 'btc-5m',
+    asset: 'btc',
+    interval: '5m',
+    limitPrice: 0.44,
+  });
+  store.recordIntents([paperIntent]);
+  const paperSnapshot = snapshot();
+  paperSnapshot.profileId = 'btc-5m';
+  paperSnapshot.asset = 'btc';
+  paperSnapshot.interval = '5m';
+
+  await executeLiveIntents({
+    appConfig: appConfig(),
+    adapter: {} as PolymarketAdapter,
+    store,
+    snapshot: paperSnapshot,
+    intents: [paperIntent],
+    risk: risk(),
+  });
+
+  assert.equal(store.dashboardState().orders[0].status, 'posted');
+  assert.equal(store.dashboardState().fills.length, 0);
+});
+
+test('paper reconciliation fills a resting Dual order on a later best-ask touch', async () => {
+  const store = new InMemoryStore('paper', 2_000, { persistencePath: false });
+  const startSeconds = Math.floor(Date.now() / 1_000) + 300;
+  const roundId = `btc-updown-5m-${startSeconds}`;
+  const paperIntent = intent('YES', {
+    profileId: 'btc-5m',
+    asset: 'btc',
+    interval: '5m',
+    roundId,
+    limitPrice: 0.44,
+  });
+  store.recordIntents([paperIntent]);
+  const paperSnapshot = snapshot({
+    id: roundId,
+    eventSlug: roundId,
+    startAt: new Date(startSeconds * 1_000).toISOString(),
+    endAt: new Date((startSeconds + 300) * 1_000).toISOString(),
+  });
+  paperSnapshot.profileId = 'btc-5m';
+  paperSnapshot.asset = 'btc';
+  paperSnapshot.interval = '5m';
+
+  await executeLiveIntents({
+    appConfig: appConfig(),
+    adapter: {} as PolymarketAdapter,
+    store,
+    snapshot: paperSnapshot,
+    intents: [paperIntent],
+    risk: risk(),
+  });
+  const touchedQuote = quote('yes-token');
+  touchedQuote.bestAsk = 0.43;
+  const fills = reconcilePaperOrders({ store, profileId: 'btc-5m', quotes: [touchedQuote] });
+
+  assert.equal(fills.length, 1);
+  assert.equal(fills[0].price, 0.43);
+  assert.equal(store.dashboardState().orders[0].status, 'filled');
 });
 
 function intent(label: 'YES' | 'NO', patch: Partial<TradeIntent> = {}): TradeIntent {

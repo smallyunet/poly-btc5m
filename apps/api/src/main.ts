@@ -1,6 +1,9 @@
+import { createHash } from 'node:crypto';
+
 import { PolymarketAdapter } from '../../../packages/polymarket/src';
 import { loadConfig } from './config';
 import { MarketDataService } from './marketData';
+import { PaperLedger } from './paper/PaperLedger';
 import { ParticipationService } from './participation';
 import { RecurringCryptoRoundDiscovery } from './roundDiscovery';
 import { runAllProfilesTick } from './runtime';
@@ -10,7 +13,20 @@ import { TelegramNotifier } from './telegramNotifier';
 
 async function main() {
   const config = loadConfig();
-  const store = new InMemoryStore(config.executionMode, config.tickIntervalMs, { persistencePath: config.runtimeStatePath, maxRecords: config.runtimeMaxRecords }, config.activeStrategyProfile, entryRuntimeConfig(config), config.marketProfiles);
+  const paperConfig = paperConfigSnapshot(config);
+  const paperLedger = config.executionMode === 'paper' ? new PaperLedger({
+    databasePath: config.paperDatabasePath,
+    runId: config.paperRunId,
+    codeSha: process.env.GIT_SHA || process.env.BUILD_SHA,
+    configHash: createHash('sha256').update(JSON.stringify(paperConfig)).digest('hex'),
+    fillModelVersion: config.paperFillModelVersion,
+    config: paperConfig,
+  }) : undefined;
+  const store = new InMemoryStore(config.executionMode, config.tickIntervalMs, {
+    persistencePath: config.runtimeStatePath,
+    maxRecords: config.runtimeMaxRecords,
+    ledger: paperLedger,
+  }, config.activeStrategyProfile, entryRuntimeConfig(config), config.marketProfiles);
   if (config.refreshSingleFillCooldownOnBoot) {
     const result = store.refreshActiveSingleFillCooldowns();
     if (result.refreshed || result.cleared) console.log('[api] refreshed single-fill cooldowns on boot', JSON.stringify(result));
@@ -74,10 +90,20 @@ async function main() {
 
   await tick('initial');
   setInterval(() => void tick('scheduled'), config.tickIntervalMs);
-  const app = createServer(config, store, () => tick('manual'));
+  const app = createServer(config, store, () => tick('manual'), paperLedger);
   app.listen(config.port, () => {
     console.log(`[api] listening on :${config.port}`);
   });
+}
+
+function paperConfigSnapshot(config: ReturnType<typeof loadConfig>) {
+  const {
+    ownerPrivateKey: _ownerPrivateKey,
+    telegramBotToken: _telegramBotToken,
+    dashboardInternalApiKey: _dashboardInternalApiKey,
+    ...safeConfig
+  } = config;
+  return safeConfig;
 }
 
 function entryRuntimeConfig(config: ReturnType<typeof loadConfig>) {
