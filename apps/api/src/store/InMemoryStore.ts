@@ -92,7 +92,7 @@ export class InMemoryStore {
   recordIntents(intents: TradeIntent[]): void {
     const seen = new Set(this.intents.map((item) => item.id));
     this.intents = [...intents.filter((item) => !seen.has(item.id)), ...this.intents].slice(0, this.maxRecords);
-    for (const intent of intents) this.ledger?.record('intent', intent.id, 'recorded', intent, intent.createdAt);
+    for (const intent of intents) this.ledger?.recordIntent(intent, 'recorded');
     this.persistState();
   }
 
@@ -104,7 +104,7 @@ export class InMemoryStore {
       return updated;
     });
     if (updated) {
-      this.ledger?.record('intent', intentId, 'updated', updated, new Date().toISOString());
+      this.ledger?.recordIntent(updated, 'updated');
       this.persistState();
     }
     return updated;
@@ -181,7 +181,7 @@ export class InMemoryStore {
 
   recordStrategyChecks(checks: StrategyCheck[], profileId: MarketProfileId): void {
     this.strategyChecksByProfile.set(profileId, checks);
-    this.ledger?.recordStrategyChecks(checks, profileId);
+    this.ledger?.recordStrategyChecks(checks, profileId, this.latestSnapshots.get(profileId)?.round.id);
   }
 
   recordDynamicEntryPrice(selection: DynamicEntryPriceSelection): void {

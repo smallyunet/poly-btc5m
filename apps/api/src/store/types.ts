@@ -4,8 +4,9 @@ export type DurableEntityType = 'intent' | 'order' | 'fill' | 'settlement' | 'sn
 
 export type DurableRuntimeLedger = {
   record(entityType: DurableEntityType, entityId: string, eventType: string, payload: unknown, occurredAt?: string): void;
+  recordIntent(intent: TradeIntent, eventType: 'recorded' | 'updated'): void;
   recordSnapshot(snapshot: StateSnapshot): void;
-  recordStrategyChecks(checks: StrategyCheck[], profileId: MarketProfileId): void;
+  recordStrategyChecks(checks: StrategyCheck[], profileId: MarketProfileId, observedRoundId?: string): void;
 };
 
 export type OpenOrderLike = {

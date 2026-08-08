@@ -3,7 +3,7 @@ import path from 'node:path';
 
 import Database from 'better-sqlite3';
 
-import type { MarketProfileId, StateSnapshot, StrategyCheck } from '../../../../packages/shared/src';
+import type { MarketProfileId, StateSnapshot, StrategyCheck, TradeIntent } from '../../../../packages/shared/src';
 import type { DurableEntityType, DurableRuntimeLedger } from '../store/types';
 
 export type PaperLedgerOptions = {
@@ -12,7 +12,9 @@ export type PaperLedgerOptions = {
   codeSha?: string;
   configHash: string;
   fillModelVersion: string;
+  observationSampleIntervalMs?: number;
   config: unknown;
+  now?: () => number;
 };
 
 export type PaperLedgerEvent = {
@@ -52,6 +54,9 @@ export class PaperLedger implements DurableRuntimeLedger {
   private readonly database: Database.Database;
   private readonly insertEvent: Database.Statement;
   private readonly runId: string;
+  private readonly observationSampleIntervalMs: number;
+  private readonly now: () => number;
+  private readonly observationStates = new Map<string, { fingerprint: string; recordedAtMs: number }>();
 
   constructor(options: PaperLedgerOptions) {
     fs.mkdirSync(path.dirname(options.databasePath), { recursive: true });
@@ -61,6 +66,8 @@ export class PaperLedger implements DurableRuntimeLedger {
     this.database.pragma('foreign_keys = ON');
     this.migrate();
     this.runId = options.runId;
+    this.observationSampleIntervalMs = options.observationSampleIntervalMs ?? 30_000;
+    this.now = options.now ?? Date.now;
     this.database.prepare(`
       INSERT INTO paper_runs (
         run_id, started_at, code_sha, config_hash, fill_model_version, config_json
@@ -112,16 +119,42 @@ export class PaperLedger implements DurableRuntimeLedger {
     );
   }
 
+  recordIntent(intent: TradeIntent, eventType: 'recorded' | 'updated'): void {
+    const occurredAt = eventType === 'recorded' ? intent.createdAt : new Date(this.now()).toISOString();
+    if (intent.status === 'executed' || intent.status === 'failed') {
+      this.record('intent', intent.id, eventType, intent, occurredAt);
+      return;
+    }
+    const scope = [
+      'intent',
+      intent.profileId,
+      intent.roundId,
+      intent.strategy,
+      intent.tokenId,
+      intent.side,
+      eventType,
+      intent.status,
+      intent.rejectionReason || 'none',
+    ].join(':');
+    if (!this.shouldRecordObservation(scope, intentFingerprint(intent))) return;
+    this.record('intent', intent.id, eventType, intent, occurredAt);
+  }
+
   recordSnapshot(snapshot: StateSnapshot): void {
+    const scope = `snapshot:${snapshot.profileId}`;
+    if (!this.shouldRecordObservation(scope, snapshotFingerprint(snapshot))) return;
     this.record('snapshot', snapshot.id, 'captured', snapshot, snapshot.capturedAt);
   }
 
-  recordStrategyChecks(checks: StrategyCheck[], profileId: MarketProfileId): void {
-    const recordedAt = new Date().toISOString();
+  recordStrategyChecks(checks: StrategyCheck[], profileId: MarketProfileId, observedRoundId?: string): void {
+    const recordedAt = new Date(this.now()).toISOString();
     const insertMany = this.database.transaction((items: StrategyCheck[]) => {
       for (const check of items) {
-        const entityId = [profileId, check.roundId || 'current', check.strategy, recordedAt].join(':');
-        this.record('strategy_check', entityId, 'evaluated', check, recordedAt);
+        const effectiveCheck = check.roundId || !observedRoundId ? check : { ...check, roundId: observedRoundId };
+        const scope = ['strategy_check', profileId, effectiveCheck.roundId || 'current', effectiveCheck.strategy].join(':');
+        if (!this.shouldRecordObservation(scope, strategyCheckFingerprint(effectiveCheck))) continue;
+        const entityId = [profileId, effectiveCheck.roundId || 'current', effectiveCheck.strategy, recordedAt].join(':');
+        this.record('strategy_check', entityId, 'evaluated', effectiveCheck, recordedAt);
       }
     });
     insertMany(checks);
@@ -178,6 +211,18 @@ export class PaperLedger implements DurableRuntimeLedger {
     this.database.close();
   }
 
+  private shouldRecordObservation(scope: string, fingerprint: string): boolean {
+    const nowMs = this.now();
+    const previous = this.observationStates.get(scope);
+    if (
+      previous
+      && previous.fingerprint === fingerprint
+      && nowMs - previous.recordedAtMs < this.observationSampleIntervalMs
+    ) return false;
+    this.observationStates.set(scope, { fingerprint, recordedAtMs: nowMs });
+    return true;
+  }
+
   private migrate(): void {
     this.database.exec(`
       CREATE TABLE IF NOT EXISTS paper_runs (
@@ -206,6 +251,41 @@ export class PaperLedger implements DurableRuntimeLedger {
       CREATE INDEX IF NOT EXISTS paper_events_strategy_idx ON paper_events(strategy_id, profile_id, round_id, seq DESC);
     `);
   }
+}
+
+function intentFingerprint(intent: TradeIntent): string {
+  return stringify({
+    profileId: intent.profileId,
+    strategy: intent.strategy,
+    roundId: intent.roundId,
+    tokenId: intent.tokenId,
+    label: intent.label,
+    side: intent.side,
+    orderType: intent.orderType,
+    status: intent.status,
+    rejectionReason: intent.rejectionReason,
+  });
+}
+
+function snapshotFingerprint(snapshot: StateSnapshot): string {
+  return stringify({
+    profileId: snapshot.profileId,
+    roundId: snapshot.round.id,
+    phase: snapshot.round.phase,
+    strikeStatus: snapshot.round.strikeStatus,
+    regime: snapshot.regime,
+    orderbookSources: snapshot.orderbooks.map((quote) => [quote.tokenId, quote.source]),
+    positionReadStatus: snapshot.positionReadStatus,
+    participationStatus: snapshot.participation?.status,
+  });
+}
+
+function strategyCheckFingerprint(check: StrategyCheck): string {
+  return stringify({
+    status: check.status,
+    blockers: check.blockers,
+    conditions: check.conditions.map((condition) => [condition.label, condition.passed]),
+  });
 }
 
 function dimensionsFrom(payload: unknown): { strategyId: string | null; profileId: string | null; roundId: string | null } {

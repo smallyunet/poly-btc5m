@@ -84,13 +84,23 @@ const COOLDOWN_ENV_KEYS = [
   'SINGLE_FILL_LOSS_EXIT_MIN_SECONDS_TO_END',
   'SINGLE_FILL_LOSS_EXIT_MAX_SECONDS_TO_END',
   'CROSS_PROFILE_SINGLE_FILL_RISK_ENABLED',
+  'PAPER_OBSERVATION_SAMPLE_SECONDS',
 ];
 
 test('configuration is always Paper-only and exposes no credentials', () => {
-  const config = loadConfig();
-  assert.equal(config.executionMode, 'paper');
-  assert.equal('ownerPrivateKey' in config, false);
-  assert.equal('depositWallet' in config, false);
+  withEnv(COOLDOWN_ENV_KEYS, {}, () => {
+    const config = loadConfig();
+    assert.equal(config.executionMode, 'paper');
+    assert.equal(config.paperObservationSampleSeconds, 30);
+    assert.equal('ownerPrivateKey' in config, false);
+    assert.equal('depositWallet' in config, false);
+  });
+});
+
+test('Paper observation sampling interval supports an environment override', () => {
+  withEnv(COOLDOWN_ENV_KEYS, { PAPER_OBSERVATION_SAMPLE_SECONDS: '60' }, () => {
+    assert.equal(loadConfig().paperObservationSampleSeconds, 60);
+  });
 });
 
 test('market profile cooldown defaults match the documented global cooldown policy', () => {

@@ -14,9 +14,12 @@ material experiment change.
 ## Retention contract
 
 `PaperLedger` stores runs and append-only events in SQLite WAL mode. Orders,
-fills, settlements, strategy checks, snapshots, and runtime logs are retained
-without the dashboard's record cap. Use cursor pagination on `/api/paper/events`
-instead of loading the complete history into memory.
+fills, settlements, and executed/failed intent lifecycle changes are retained
+immediately without the dashboard's record cap. High-frequency snapshots,
+generated intents, expected duplicate rejections, and strategy checks retain
+every gate-state transition plus an uncapped periodic heartbeat controlled by
+`PAPER_OBSERVATION_SAMPLE_SECONDS` (30 seconds by default). Use cursor pagination
+on `/api/paper/events` instead of loading the complete history into memory.
 
 The JSON runtime file remains a bounded recovery/read model. It is not the
 research system of record.

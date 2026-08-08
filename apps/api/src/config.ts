@@ -27,6 +27,7 @@ export type AppConfig = {
   paperDatabasePath: string;
   paperRunId: string;
   paperFillModelVersion: string;
+  paperObservationSampleSeconds: number;
   paperApiDefaultLimit: number;
   paperApiMaxLimit: number;
   binanceWsUrl: string;
@@ -176,6 +177,7 @@ export function loadConfig(): AppConfig {
     paperDatabasePath: process.env.PAPER_DATABASE_PATH || path.resolve(process.cwd(), 'data/paper.sqlite'),
     paperRunId: process.env.PAPER_RUN_ID?.trim() || 'paper-default',
     paperFillModelVersion: process.env.PAPER_FILL_MODEL_VERSION?.trim() || 'touch-v1',
+    paperObservationSampleSeconds: parsePositiveInteger(process.env.PAPER_OBSERVATION_SAMPLE_SECONDS, 30),
     paperApiDefaultLimit: parsePositiveInteger(process.env.PAPER_API_DEFAULT_LIMIT, 100),
     paperApiMaxLimit: parsePositiveInteger(process.env.PAPER_API_MAX_LIMIT, 500),
     binanceWsUrl: binanceWsUrl(process.env.BINANCE_WS_URL || process.env.BINANCE_BTC_WS_URL, marketProfiles),

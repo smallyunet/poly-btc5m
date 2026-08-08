@@ -6,6 +6,7 @@ import { PaperLedger } from './paper/PaperLedger';
 import { ParticipationService } from './participation';
 import { RecurringCryptoRoundDiscovery } from './roundDiscovery';
 import { runAllProfilesTick } from './runtime';
+import { tickLogLevel } from './runtimeLogPolicy';
 import { createServer } from './server';
 import { InMemoryStore } from './store';
 import { TelegramNotifier } from './telegramNotifier';
@@ -19,6 +20,7 @@ async function main() {
     codeSha: process.env.GIT_SHA || process.env.BUILD_SHA,
     configHash: createHash('sha256').update(JSON.stringify(paperConfig)).digest('hex'),
     fillModelVersion: config.paperFillModelVersion,
+    observationSampleIntervalMs: config.paperObservationSampleSeconds * 1_000,
     config: paperConfig,
   });
   const store = new InMemoryStore(config.tickIntervalMs, {
@@ -51,7 +53,7 @@ async function main() {
       const snapshot = snapshots[0];
       store.markRunningIfDegraded();
       store.recordRuntimeLog({
-        level: snapshot.diagnostics.some((item) => /failed|stale|blocked|error/i.test(item)) ? 'warn' : 'info',
+        level: tickLogLevel(snapshot.diagnostics),
         source: 'worker',
         message: `${source} tick completed.`,
         details: {
