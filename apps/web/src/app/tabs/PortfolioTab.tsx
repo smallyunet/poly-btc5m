@@ -77,7 +77,7 @@ export function PortfolioTab({
                   <span className="decisionKicker">Configured Account</span>
                   <strong title={portfolioProfileName || portfolio.accountAddress || ''}>{portfolioProfileName || (portfolio.accountAddress ? shortenTokenId(portfolio.accountAddress) : 'not configured')}</strong>
                   {portfolioProfileHandle && <em>{portfolioProfileHandle}</em>}
-                  <p title={portfolio.accountAddress || ''}>{portfolio.accountAddress ? shortenTokenId(portfolio.accountAddress) : 'not configured'} · {portfolio.hasOwnerPrivateKey ? 'CLOB balance reads enabled' : 'OWNER_PRIVATE_KEY missing; positions only'}</p>
+                  <p>Paper-only runtime; real account reads are disabled.</p>
                 </div>
               </div>
               <Badge tone={portfolioStatusTone(portfolio.status)}>{portfolioStatusLabel(portfolio.status)}</Badge>
@@ -149,7 +149,7 @@ export function PortfolioTab({
         ) : (
           <div className="empty" style={{ minHeight: '140px' }}>
             <PieChart size={22} style={{ color: 'var(--text-muted)' }} />
-            <p className="emptyText">{portfolio?.status === 'disabled' ? 'Configure POLYMARKET_DEPOSIT_WALLET to load account positions' : 'No active positions found for this account'}</p>
+            <p className="emptyText">{portfolio?.status === 'disabled' ? 'Real account positions are intentionally disabled in the Paper-only runtime.' : 'No simulated positions found.'}</p>
           </div>
         )}
       </section>

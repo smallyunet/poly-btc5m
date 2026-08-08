@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { STRATEGY_RULES } from '../../../../packages/strategy/src';
-import type { BotRuntimeStatus, DashboardState, DataFeedStatus, DynamicEntryPriceSelection, EntryRuntimeConfig, ExecutionMode, FillRecord, MarketProfile, MarketProfileId, OrderRecord, RuntimeLogRecord, SettlementRecord, StateSnapshot, StrategyCheck, StrategyId, StrategyProfile, TradeIntent } from '../../../../packages/shared/src';
+import type { BotRuntimeStatus, DashboardState, DataFeedStatus, DynamicEntryPriceSelection, EntryRuntimeConfig, FillRecord, MarketProfile, MarketProfileId, OrderRecord, RuntimeLogRecord, SettlementRecord, StateSnapshot, StrategyCheck, StrategyId, StrategyProfile, TradeIntent } from '../../../../packages/shared/src';
 import { CLASSIC_ENTRY_STRATEGY, EXPERIMENT_STRATEGY, FINAL_SINGLE_FILL_GRACE_MS } from './constants';
 import { cooldownCategory, entrySignalScope, fillStrategy, finalSingleFillReviewMs, isExperimentStopLike, isFillRecordLike, isMarketProfileId, isOrderRecordLike, isRoundEnded, isSameCooldownEvent, isSingleFillCooldownEventLike, isSingleFillCooldownLike, isSingleFillHedgeOutcomeLike, isTelegramNotificationStateLike, isTradeIntentLike, matchingOrderFills, maxCooldown, netShares, normalizeCooldownPolicy, optionalEnv, orderStrategy, parseProfileRoundKey, profileAsset, profileDurationMs, profileDurationSeconds, profileIntervals, profileRoundKey, roundMoney, roundStartMs, runtimeVersion, strategyProfileForStrategy, sum, toTime } from './helpers';
 import type { DurableRuntimeLedger, ExperimentStopRecord, OpenOrderLike, PendingSingleFillRiskRecord, PersistedRuntimeState, SingleFillCooldownEvent, SingleFillCooldownPolicy, SingleFillCooldownRecord, SingleFillHedgeCandidate, SingleFillHedgeOutcome, SingleFillProfitExitCandidate, StoreOptions, TailCooldownEvent, TailCooldownRecord, TelegramNotificationState } from './types';
@@ -35,7 +35,7 @@ export class InMemoryStore {
   private readonly maxRecords: number;
   private readonly ledger?: DurableRuntimeLedger;
 
-  constructor(mode: ExecutionMode, private readonly tickIntervalMs: number, options: StoreOptions = {}, activeStrategyProfile: StrategyProfile = 'classic', entryConfig?: EntryRuntimeConfig, profiles: MarketProfile[] = []) {
+  constructor(private readonly tickIntervalMs: number, options: StoreOptions = {}, activeStrategyProfile: StrategyProfile = 'classic', entryConfig?: EntryRuntimeConfig, profiles: MarketProfile[] = []) {
     this.profiles = profiles;
     this.persistencePath = options.persistencePath === false ? undefined : options.persistencePath;
     this.maxRecords = options.maxRecords ?? 10_000;
@@ -43,7 +43,7 @@ export class InMemoryStore {
     const startedAt = new Date();
     this.runtime = {
       status: 'running',
-      executionMode: mode,
+      executionMode: 'paper',
       startedAt: startedAt.toISOString(),
       nextTickAt: new Date(startedAt.getTime() + tickIntervalMs).toISOString(),
       tickIntervalMs,
@@ -404,12 +404,12 @@ export class InMemoryStore {
     return updated;
   }
 
-  markOrdersCancelled(clobOrderIds: string[], nowIso = new Date().toISOString()): number {
-    const ids = new Set(clobOrderIds.filter(Boolean));
+  markOrdersCancelled(orderIds: string[], nowIso = new Date().toISOString()): number {
+    const ids = new Set(orderIds.filter(Boolean));
     if (!ids.size) return 0;
     let updated = 0;
     this.orders = this.orders.map((order) => {
-      if (!order.clobOrderId || !ids.has(order.clobOrderId)) return order;
+      if (!ids.has(order.id) && (!order.clobOrderId || !ids.has(order.clobOrderId))) return order;
       if (order.status !== 'posted' && order.status !== 'partially_filled') return order;
       updated += 1;
       return { ...order, status: 'cancelled', updatedAt: nowIso };
@@ -425,7 +425,6 @@ export class InMemoryStore {
       if (order.profileId !== profileId || order.side !== 'BUY') return false;
       if (orderStrategy(order) !== CLASSIC_ENTRY_STRATEGY) return false;
       if (order.status !== 'posted' && order.status !== 'partially_filled') return false;
-      if (!order.clobOrderId) return false;
       const orderStartMs = roundStartMs(order.roundId);
       return orderStartMs != null && orderStartMs > sourceStartMs;
     });

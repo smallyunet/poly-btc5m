@@ -48,7 +48,7 @@ export function isSingleFillHedgeOutcomeLike(value: unknown): value is SingleFil
   return typeof item.roundId === 'string'
     && typeof item.recordedAt === 'string'
     && typeof item.reason === 'string'
-    && (item.status === 'posted' || item.status === 'blocked' || item.status === 'failed' || item.status === 'monitor');
+    && (item.status === 'posted' || item.status === 'blocked' || item.status === 'failed');
 }
 
 export function isSingleFillCooldownEventLike(value: unknown): value is SingleFillCooldownEvent {
@@ -106,7 +106,7 @@ export function normalizeCooldownPolicy(value: number | SingleFillCooldownPolicy
 
 export function cooldownCategory(outcome: SingleFillHedgeOutcome | undefined): string {
   if (!outcome) return 'unhedged';
-  if (outcome.status === 'posted' || outcome.status === 'monitor') return 'hedge-unfilled';
+  if (outcome.status === 'posted') return 'hedge-unfilled';
   if (PRICE_CAP_HEDGE_REASONS.has(outcome.reason)) return 'price-cap';
   if (BENIGN_HEDGE_REASONS.has(outcome.reason)) return 'unhedged';
   return 'execution';

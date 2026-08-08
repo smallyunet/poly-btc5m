@@ -4,15 +4,14 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import type { PolymarketAdapter } from '../../../packages/polymarket/src';
 import type { OrderBookQuote, StateSnapshot, TradeIntent } from '../../../packages/shared/src';
 import { loadConfig } from './config';
 import { InMemoryStore } from './store';
-import { evaluateTailEntry, executeTailEntry, revalidateTailEntry } from './tailEntry';
+import { evaluateTailEntry } from './tailEntry';
 
 test('evaluates BTC 5m tail entry from simulator row and live VWAP', () => {
   const config = tailConfig();
-  const store = new InMemoryStore('monitor', 2_000, { persistencePath: false });
+  const store = new InMemoryStore(2_000, { persistencePath: false });
   const evaluation = evaluateTailEntry(snapshot(), config, store);
 
   assert.equal(evaluation.ok, true, evaluation.check.reason);
@@ -41,7 +40,7 @@ test('evaluates BTC 15m tail entry from the interval-specific simulator summary'
     },
   };
 
-  const evaluation = evaluateTailEntry(fifteenMinute, config, new InMemoryStore('monitor', 2_000, { persistencePath: false }));
+  const evaluation = evaluateTailEntry(fifteenMinute, config, new InMemoryStore(2_000, { persistencePath: false }));
 
   assert.equal(evaluation.ok, true);
   if (evaluation.ok) {
@@ -51,162 +50,9 @@ test('evaluates BTC 15m tail entry from the interval-specific simulator summary'
   }
 });
 
-test('executes BTC 15m live tail entries when the profile matches its interval', async () => {
-  const config = tailConfig();
-  config.pm15mTailEntrySummaryPath = config.pm5mTailEntrySummaryPath;
-  config.ownerPrivateKey = '0xabc';
-  config.depositWallet = '0xwallet';
-  const store = new InMemoryStore('live', 2_000, { persistencePath: false });
-  const current = snapshot();
-  const fifteenMinute = {
-    ...current,
-    profileId: 'btc-15m' as const,
-    interval: '15m' as const,
-    round: {
-      ...current.round,
-      id: 'btc-updown-15m-test',
-      eventSlug: 'btc-updown-15m-test',
-      title: 'BTC 15m test',
-    },
-  };
-  const evaluation = evaluateTailEntry(fifteenMinute, config, store);
-  assert.equal(evaluation.ok, true, evaluation.check.reason);
-  if (!evaluation.ok) return;
 
-  let posted = false;
-  const adapter = {
-    async getCollateralBalanceAllowance() { return { balance: 100, allowance: 100 }; },
-    async getOpenOrders() { return []; },
-    async executeLimitIntent() {
-      posted = true;
-      return { ok: true, orderId: 'tail-15m-order', price: 0.611, size: 5 };
-    },
-  } as unknown as PolymarketAdapter;
 
-  const diagnostics = await executeTailEntry({ appConfig: config, adapter, store, snapshot: fifteenMinute, evaluation });
 
-  assert.deepEqual(diagnostics, []);
-  assert.equal(posted, true);
-  assert.equal(store.roundOrders('btc-15m', fifteenMinute.round.id, 'UPDOWN_TAIL_ENTRY')[0]?.status, 'posted');
-});
-
-test('executes non-BTC live tail entries as FAK orders', async () => {
-  const config = tailConfig({
-    assetRows: [
-      { asset: 'eth', checkpointSeconds: 60, rows: 25, fillable: 13, fillRate: 0.52, avgPnlPerShare: 0.13, totalPnl: 16.25, avgVwap: 0.66 },
-    ],
-    assetBandRows: [
-      { asset: 'eth', checkpointSeconds: 60, askBand: '55-65c', rows: 4, fillable: 4, fillRate: 1, avgPnlPerShare: 0.13, totalPnl: 16.25, avgVwap: 0.61 },
-    ],
-  });
-  config.ownerPrivateKey = '0xabc';
-  config.depositWallet = '0xwallet';
-  const store = new InMemoryStore('live', 2_000, { persistencePath: false });
-  const currentSnapshot = snapshot({ asset: 'eth' });
-  const evaluation = evaluateTailEntry(currentSnapshot, config, store);
-  assert.equal(evaluation.ok, true, evaluation.check.reason);
-
-  let postedOptions: { execute: boolean; orderType?: string } | undefined;
-  const adapter = {
-    async getCollateralBalanceAllowance() {
-      return { balance: 100, allowance: 100 };
-    },
-    async getOpenOrders() {
-      return [];
-    },
-    async executeLimitIntent(_intent: TradeIntent, options: { execute: boolean; orderType?: string }) {
-      postedOptions = options;
-      return { ok: true, orderId: 'tail-order', price: 0.611, size: 5 };
-    },
-  } as unknown as PolymarketAdapter;
-
-  const diagnostics = await executeTailEntry({ appConfig: config, adapter, store, snapshot: currentSnapshot, evaluation });
-
-  assert.deepEqual(diagnostics, []);
-  assert.equal(postedOptions?.orderType, 'FAK');
-  assert.equal(postedOptions?.execute, true);
-  assert.equal(store.roundOrders('eth-5m', currentSnapshot.round.id, 'UPDOWN_TAIL_ENTRY')[0]?.profileId, 'eth-5m');
-});
-
-test('retries tail entry FAK no-match errors before recording the outcome', async () => {
-  const config = tailConfig();
-  config.ownerPrivateKey = '0xabc';
-  config.depositWallet = '0xwallet';
-  const store = new InMemoryStore('live', 2_000, { persistencePath: false });
-  const currentSnapshot = snapshot();
-  const evaluation = evaluateTailEntry(currentSnapshot, config, store);
-  assert.equal(evaluation.ok, true, evaluation.check.reason);
-
-  let attempts = 0;
-  const noMatch = 'no orders found to match with FAK order. FAK orders are partially filled or killed if no match is found.';
-  const adapter = {
-    async getCollateralBalanceAllowance() {
-      return { balance: 100, allowance: 100 };
-    },
-    async getOpenOrders() {
-      return [];
-    },
-    async executeLimitIntent(_intent: TradeIntent, options: { execute: boolean; orderType?: string }) {
-      attempts += 1;
-      assert.equal(options.orderType, 'FAK');
-      if (attempts < 3) {
-        return { ok: false, price: 0.611, size: 5, error: noMatch, raw: { error: noMatch } };
-      }
-      return { ok: true, orderId: 'tail-order-after-retry', price: 0.611, size: 5, raw: { orderID: 'tail-order-after-retry' } };
-    },
-  } as unknown as PolymarketAdapter;
-
-  const diagnostics = await executeTailEntry({ appConfig: config, adapter, store, snapshot: currentSnapshot, evaluation });
-
-  assert.deepEqual(diagnostics, []);
-  assert.equal(attempts, 3);
-  const orders = store.roundOrders(currentSnapshot.profileId, currentSnapshot.round.id, 'UPDOWN_TAIL_ENTRY');
-  assert.equal(orders.length, 1);
-  assert.equal(orders[0]?.status, 'posted');
-  assert.equal(orders[0]?.clobOrderId, 'tail-order-after-retry');
-});
-
-test('refreshes the tail plan before retrying a FAK no-match order', async () => {
-  const config = tailConfig();
-  config.ownerPrivateKey = '0xabc';
-  config.depositWallet = '0xwallet';
-  config.pm5mTailEntryQuoteMaxAgeMs = 500;
-  const store = new InMemoryStore('live', 2_000, { persistencePath: false });
-  const currentSnapshot = snapshot();
-  const evaluation = evaluateTailEntry(currentSnapshot, config, store);
-  assert.equal(evaluation.ok, true, evaluation.check.reason);
-  if (!evaluation.ok) return;
-
-  let attempts = 0;
-  let revalidations = 0;
-  const noMatch = 'no orders found to match with FAK order. FAK orders are partially filled or killed if no match is found.';
-  const adapter = {
-    async getCollateralBalanceAllowance() { return { balance: 100, allowance: 100 }; },
-    async getOpenOrders() { return []; },
-    async executeLimitIntent() {
-      attempts += 1;
-      return attempts === 1
-        ? { ok: false, price: 0.611, size: 5, error: noMatch }
-        : { ok: true, orderId: 'tail-order-after-refresh', price: 0.611, size: 5 };
-    },
-  } as unknown as PolymarketAdapter;
-
-  const diagnostics = await executeTailEntry({
-    appConfig: config,
-    adapter,
-    store,
-    snapshot: currentSnapshot,
-    evaluation,
-    revalidate: () => {
-      revalidations += 1;
-      return revalidateTailEntry(snapshot(), config, store);
-    },
-  });
-
-  assert.deepEqual(diagnostics, []);
-  assert.equal(attempts, 2);
-  assert.equal(revalidations, 2);
-});
 
 test('selects the best executable simulator checkpoint and ask-band pair by per-share edge', () => {
   const config = tailConfig({
@@ -216,7 +62,7 @@ test('selects the best executable simulator checkpoint and ask-band pair by per-
     ],
     checkpoints: [60, 45, 30],
   });
-  const store = new InMemoryStore('monitor', 2_000, { persistencePath: false });
+  const store = new InMemoryStore(2_000, { persistencePath: false });
   const currentSnapshot = snapshot({ secondsToEnd: 44, yesAskSize: 10 });
   const evaluation = evaluateTailEntry(currentSnapshot, config, store);
 
@@ -236,7 +82,7 @@ test('auto-select mode ignores a fixed checkpoint allowlist and follows the best
     checkpoints: [15],
   });
   config.pm5mTailEntryAutoSelectCheckpoint = true;
-  const evaluation = evaluateTailEntry(snapshot({ secondsToEnd: 19 }), config, new InMemoryStore('monitor', 2_000, { persistencePath: false }));
+  const evaluation = evaluateTailEntry(snapshot({ secondsToEnd: 19 }), config, new InMemoryStore(2_000, { persistencePath: false }));
 
   assert.equal(evaluation.ok, true, evaluation.check.reason);
   if (!evaluation.ok) return;
@@ -263,7 +109,7 @@ test('auto-selects a profitable checkpoint and band pair when the highest checkp
   const evaluation = evaluateTailEntry(
     snapshot({ secondsToEnd: 44, yesBid: 0.87, yesAsk: 0.88, noAsk: 0.14 }),
     config,
-    new InMemoryStore('monitor', 2_000, { persistencePath: false }),
+    new InMemoryStore(2_000, { persistencePath: false }),
   );
 
   assert.equal(evaluation.ok, true, evaluation.check.reason);
@@ -278,7 +124,7 @@ test('blocks a live ask band that differs from the best simulation pair', () => 
     ],
   });
 
-  const evaluation = evaluateTailEntry(snapshot(), config, new InMemoryStore('monitor', 2_000, { persistencePath: false }));
+  const evaluation = evaluateTailEntry(snapshot(), config, new InMemoryStore(2_000, { persistencePath: false }));
 
   assert.equal(evaluation.ok, false);
   assert.equal(evaluation.check.blockers.includes('TAIL_ASK_BAND_NOT_SELECTED'), true, evaluation.check.reason);
@@ -294,7 +140,7 @@ test('manual checkpoint mode keeps the configured checkpoint allowlist', () => {
     checkpoints: [15],
   });
   config.pm5mTailEntryAutoSelectCheckpoint = false;
-  const evaluation = evaluateTailEntry(snapshot({ secondsToEnd: 14 }), config, new InMemoryStore('monitor', 2_000, { persistencePath: false }));
+  const evaluation = evaluateTailEntry(snapshot({ secondsToEnd: 14 }), config, new InMemoryStore(2_000, { persistencePath: false }));
 
   assert.equal(evaluation.ok, true, evaluation.check.reason);
   if (!evaluation.ok) return;
@@ -311,7 +157,7 @@ test('uses configured tail entry size for live order size', () => {
     checkpoints: [45],
   });
   config.pm5mTailEntrySize = 2;
-  const store = new InMemoryStore('monitor', 2_000, { persistencePath: false });
+  const store = new InMemoryStore(2_000, { persistencePath: false });
   const currentSnapshot = snapshot({ secondsToEnd: 44, yesAskSize: 10 });
   const evaluation = evaluateTailEntry(currentSnapshot, config, store);
 
@@ -329,7 +175,7 @@ test('does not require simulator fill rate when simulation-window PnL is positiv
     ],
     checkpoints: [20],
   });
-  const store = new InMemoryStore('monitor', 2_000, { persistencePath: false });
+  const store = new InMemoryStore(2_000, { persistencePath: false });
   const currentSnapshot = snapshot({ secondsToEnd: 19, yesAskSize: 25 });
   const evaluation = evaluateTailEntry(currentSnapshot, config, store);
 
@@ -351,7 +197,7 @@ test('caps tail entry limit price at the CLOB maximum', () => {
   });
   config.pm5mTailEntryMaxVwap = 0.99;
   config.pm5mTailEntryMinEvPerShare = 0.02;
-  const store = new InMemoryStore('monitor', 2_000, { persistencePath: false });
+  const store = new InMemoryStore(2_000, { persistencePath: false });
   const evaluation = evaluateTailEntry(snapshot({ yesBid: 0.98, yesAsk: 0.99, noAsk: 0.02 }), config, store);
 
   assert.equal(evaluation.ok, true, evaluation.check.reason);
@@ -372,7 +218,7 @@ test('blocks tail entry when every simulation checkpoint and ask-band pair is lo
     ],
     checkpoints: [60, 45],
   });
-  const store = new InMemoryStore('monitor', 2_000, { persistencePath: false });
+  const store = new InMemoryStore(2_000, { persistencePath: false });
   const evaluation = evaluateTailEntry(snapshot({ secondsToEnd: 59 }), config, store);
 
   assert.equal(evaluation.ok, false);
@@ -395,7 +241,7 @@ test('uses each profile asset\'s own tail rows when the recorder contains multip
     ],
     checkpoints: [60],
   });
-  const store = new InMemoryStore('monitor', 2_000, { persistencePath: false });
+  const store = new InMemoryStore(2_000, { persistencePath: false });
   const evaluation = evaluateTailEntry(snapshot({ secondsToEnd: 59 }), config, store);
 
   assert.equal(evaluation.ok, false);
@@ -411,7 +257,7 @@ test('uses each profile asset\'s own tail rows when the recorder contains multip
 
 test('blocks non-BTC tail entry when only a legacy combined summary is available', () => {
   const config = tailConfig();
-  const store = new InMemoryStore('monitor', 2_000, { persistencePath: false });
+  const store = new InMemoryStore(2_000, { persistencePath: false });
   const evaluation = evaluateTailEntry(snapshot({ asset: 'sol', secondsToEnd: 59 }), config, store);
 
   assert.equal(evaluation.ok, false);
@@ -428,7 +274,7 @@ test('blocks tail entry when live VWAP is below the simulator strength floor', (
     ],
     checkpoints: [60],
   });
-  const store = new InMemoryStore('monitor', 2_000, { persistencePath: false });
+  const store = new InMemoryStore(2_000, { persistencePath: false });
   const evaluation = evaluateTailEntry(snapshot({ yesAsk: 0.61 }), config, store);
 
   assert.equal(evaluation.ok, false);
@@ -438,7 +284,7 @@ test('blocks tail entry when live VWAP is below the simulator strength floor', (
 
 test('blocks tail entry when live VWAP exceeds the configured ceiling', () => {
   const config = tailConfig();
-  const store = new InMemoryStore('monitor', 2_000, { persistencePath: false });
+  const store = new InMemoryStore(2_000, { persistencePath: false });
   const evaluation = evaluateTailEntry(snapshot({ yesBid: 0.87, yesAsk: 0.88, noAsk: 0.14 }), config, store);
 
   assert.equal(evaluation.ok, false);
@@ -450,7 +296,7 @@ test('caps tail limit offset at the configured VWAP ceiling', () => {
   const config = tailConfig({
     askBandRows: [{ checkpointSeconds: 60, askBand: '85c+', rows: 100, fillable: 100, fillRate: 1, avgPnlPerShare: 0.13, totalPnl: 65, avgVwap: 0.85 }],
   });
-  const store = new InMemoryStore('monitor', 2_000, { persistencePath: false });
+  const store = new InMemoryStore(2_000, { persistencePath: false });
   const evaluation = evaluateTailEntry(snapshot({ yesBid: 0.84, yesAsk: 0.85, noAsk: 0.17 }), config, store);
 
   assert.equal(evaluation.ok, true, evaluation.check.reason);
@@ -458,34 +304,6 @@ test('caps tail limit offset at the configured VWAP ceiling', () => {
   assert.equal(evaluation.intent.limitPrice, 0.85);
 });
 
-test('execution gate rejects a stale tail intent above the configured ceiling', async () => {
-  const config = tailConfig();
-  config.ownerPrivateKey = '0xabc';
-  config.depositWallet = '0xwallet';
-  const store = new InMemoryStore('live', 2_000, { persistencePath: false });
-  const currentSnapshot = snapshot();
-  const evaluation = evaluateTailEntry(currentSnapshot, config, store);
-  assert.equal(evaluation.ok, true, evaluation.check.reason);
-  if (!evaluation.ok) return;
-  let posted = false;
-  const adapter = {
-    async executeLimitIntent() {
-      posted = true;
-      return { ok: true, orderId: 'unexpected', price: 0.86, size: 5 };
-    },
-  } as unknown as PolymarketAdapter;
-
-  const diagnostics = await executeTailEntry({
-    appConfig: config,
-    adapter,
-    store,
-    snapshot: currentSnapshot,
-    evaluation: { ...evaluation, intent: { ...evaluation.intent, limitPrice: 0.86 } },
-  });
-
-  assert.equal(posted, false);
-  assert.match(diagnostics[0] || '', /TAIL_LIMIT_PRICE_ABOVE_MAX/);
-});
 
 test('blocks the live ask band when its conservative win probability does not clear price plus margin', () => {
   const config = tailConfig({
@@ -493,7 +311,7 @@ test('blocks the live ask band when its conservative win probability does not cl
   });
   config.pm5mTailEntryWinProbabilityMargin = 0.01;
   config.pm5mTailEntryRequireWinProbabilityMargin = true;
-  const evaluation = evaluateTailEntry(snapshot(), config, new InMemoryStore('monitor', 2_000, { persistencePath: false }));
+  const evaluation = evaluateTailEntry(snapshot(), config, new InMemoryStore(2_000, { persistencePath: false }));
 
   assert.equal(evaluation.ok, false);
   assert.equal(evaluation.check.blockers.includes('TAIL_WIN_PROBABILITY_MARGIN_TOO_LOW'), true, evaluation.check.reason);
@@ -505,7 +323,7 @@ test('keeps conservative win probability as reference-only when its hard gate is
   });
   config.pm5mTailEntryRequireWinProbabilityMargin = false;
   config.pm5mTailEntryWinProbabilityMargin = 0.01;
-  const evaluation = evaluateTailEntry(snapshot(), config, new InMemoryStore('monitor', 2_000, { persistencePath: false }));
+  const evaluation = evaluateTailEntry(snapshot(), config, new InMemoryStore(2_000, { persistencePath: false }));
 
   assert.equal(evaluation.ok, true, evaluation.check.reason);
   assert.equal(evaluation.check.blockers.includes('TAIL_WIN_PROBABILITY_MARGIN_TOO_LOW'), false);
@@ -517,7 +335,7 @@ test('requires fillable ask-band samples instead of observed rows', () => {
     askBandRows: [{ checkpointSeconds: 60, askBand: '55-65c', rows: 100, fillable: 5, fillRate: 0.05, wins: 5, winRate: 1, avgPnlPerShare: 0.09, totalPnl: 2.25, avgVwap: 0.61 }],
   });
   config.pm5mTailEntryMinBandFills = 20;
-  const evaluation = evaluateTailEntry(snapshot(), config, new InMemoryStore('monitor', 2_000, { persistencePath: false }));
+  const evaluation = evaluateTailEntry(snapshot(), config, new InMemoryStore(2_000, { persistencePath: false }));
 
   assert.equal(evaluation.ok, false);
   assert.equal(evaluation.check.blockers.includes('TAIL_SIMULATION_PAIR_MISSING'), true, evaluation.check.reason);
@@ -525,7 +343,7 @@ test('requires fillable ask-band samples instead of observed rows', () => {
 
 test('blocks Tail when Dual already allocated the same round', () => {
   const config = tailConfig();
-  const store = new InMemoryStore('monitor', 2_000, { persistencePath: false });
+  const store = new InMemoryStore(2_000, { persistencePath: false });
   const current = snapshot();
   store.recordOrder({
     id: 'dual-order', profileId: 'btc-5m', asset: 'btc', interval: '5m', intentId: 'dual-intent', strategy: 'UPDOWN_DUAL_ENTRY', strategyProfile: 'classic', executionKey: 'dual-key', roundId: current.round.id, eventSlug: current.round.eventSlug, tokenId: current.round.yesTokenId, label: 'YES', side: 'BUY', price: 0.31, size: 5, status: 'cancelled', createdAt: current.capturedAt,
@@ -538,7 +356,7 @@ test('blocks Tail when Dual already allocated the same round', () => {
 
 test('blocks Tail while its loss cooldown is active', () => {
   const config = tailConfig();
-  const store = new InMemoryStore('monitor', 2_000, { persistencePath: false });
+  const store = new InMemoryStore(2_000, { persistencePath: false });
   const current = snapshot();
   store.recordTailLoss('btc-5m', 'previous-tail-round', -2, { baseMs: 900_000, repeatWindowMs: 3_600_000, secondMs: 3_600_000, thirdMs: 14_400_000 });
   const evaluation = evaluateTailEntry(current, config, store);
@@ -547,65 +365,7 @@ test('blocks Tail while its loss cooldown is active', () => {
   assert.equal(evaluation.check.blockers.includes('TAIL_COOLDOWN'), true, evaluation.check.reason);
 });
 
-test('revalidates Tail immediately before live submit', async () => {
-  const config = tailConfig();
-  config.ownerPrivateKey = '0xabc';
-  config.depositWallet = '0xwallet';
-  const store = new InMemoryStore('live', 2_000, { persistencePath: false });
-  const current = snapshot();
-  const evaluation = evaluateTailEntry(current, config, store);
-  assert.equal(evaluation.ok, true, evaluation.check.reason);
-  if (!evaluation.ok) return;
-  let posted = false;
-  const adapter = {
-    async getCollateralBalanceAllowance() { return { balance: 100, allowance: 100 }; },
-    async getOpenOrders() { return []; },
-    async executeLimitIntent() { posted = true; return { ok: true, price: 0.61, size: 5 }; },
-  } as unknown as PolymarketAdapter;
-  const diagnostics = await executeTailEntry({ appConfig: config, adapter, store, snapshot: current, evaluation, revalidate: () => ({ ok: false, check: { ...evaluation.check, status: 'blocked', reason: 'TAIL_SIDE_NOT_SELECTABLE', blockers: ['TAIL_SIDE_NOT_SELECTABLE'] } }) });
 
-  assert.equal(posted, false);
-  assert.match(diagnostics[0] || '', /TAIL_REVALIDATION_BLOCKED/);
-});
-
-test('keeps an initially eligible Tail signal valid during the bounded execution grace window', async () => {
-  const config = tailConfig();
-  config.ownerPrivateKey = '0xabc';
-  config.depositWallet = '0xwallet';
-  const store = new InMemoryStore('live', 2_000, { persistencePath: false });
-  const current = snapshot({ secondsToEnd: 59 });
-  const evaluation = evaluateTailEntry(current, config, store);
-  assert.equal(evaluation.ok, true, evaluation.check.reason);
-  if (!evaluation.ok) return;
-
-  const delayed = snapshot({ secondsToEnd: 55 });
-  const strict = evaluateTailEntry(delayed, config, store);
-  assert.equal(strict.ok, false);
-  assert.equal(strict.check.blockers.includes('NOT_IN_TAIL_CHECKPOINT_WINDOW'), true);
-  const executionRevalidation = revalidateTailEntry(delayed, config, store);
-  assert.equal(executionRevalidation.ok, true, executionRevalidation.check.reason);
-
-  let posted = false;
-  const adapter = {
-    async getCollateralBalanceAllowance() { return { balance: 100, allowance: 100 }; },
-    async getOpenOrders() { return []; },
-    async executeLimitIntent() {
-      posted = true;
-      return { ok: true, orderId: 'tail-order-after-gate', price: 0.611, size: 5 };
-    },
-  } as unknown as PolymarketAdapter;
-  const diagnostics = await executeTailEntry({
-    appConfig: config,
-    adapter,
-    store,
-    snapshot: current,
-    evaluation,
-    revalidate: () => executionRevalidation,
-  });
-
-  assert.deepEqual(diagnostics, []);
-  assert.equal(posted, true);
-});
 
 function tailConfig(options: {
   rows?: Array<{

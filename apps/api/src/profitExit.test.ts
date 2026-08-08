@@ -2,10 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import type { AppConfig } from './config';
-import { executeSingleFillProfitExits, planSingleFillProfitExit } from './profitExit';
+import { planSingleFillProfitExit } from './profitExit';
 import { InMemoryStore } from './store';
 import type { OrderBookQuote, OrderRecord, TradeIntent } from '../../../packages/shared/src';
-import type { PolymarketAdapter } from '../../../packages/polymarket/src';
 import type { SingleFillProfitExitCandidate } from './store';
 
 const nowMs = new Date('2026-06-26T00:02:00.000Z').getTime();
@@ -86,184 +85,9 @@ test('blocks profit exit after the filled side has already been sold', () => {
   assert.deepEqual(plan, { ok: false, reason: 'NO_SINGLE_PROFIT_EXIT_EXPOSURE' });
 });
 
-test('retries a profit-exit FAK when the book has no matching orders', async () => {
-  const now = Date.now();
-  const activeCandidate = {
-    ...candidate(),
-    startAt: new Date(now - 3 * 60_000).toISOString(),
-    endAt: new Date(now + 90_000).toISOString(),
-    secondsToEnd: 90,
-  };
-  const store = new InMemoryStore('live', 2_000, { persistencePath: false });
-  store.recordOrder(order('YES', 'BUY', { filledSize: 10, avgFillPrice: 0.45, status: 'filled' }));
-  store.recordOrder(order('NO', 'BUY', { filledSize: 0, status: 'posted', clobOrderId: 'no-open' }));
-  let attempts = 0;
-  const adapter = {
-    async getRecentFillsForTargets() {
-      return [];
-    },
-    async cancelOrders() {
-      return {};
-    },
-    async getAvailableShares() {
-      return 10;
-    },
-    async executeLimitIntent(_intent: TradeIntent, options: { execute: boolean; orderType?: string }) {
-      attempts += 1;
-      assert.equal(options.orderType, 'FAK');
-      if (attempts === 1) {
-        return {
-          ok: false,
-          price: 0.5,
-          size: 10,
-          error: 'no orders found to match with FAK order. FAK orders are partially filled or killed if no match is found.',
-        };
-      }
-      return { ok: true, orderId: 'profit-exit-order', price: 0.5, size: 10 };
-    },
-  } as unknown as PolymarketAdapter;
 
-  const diagnostics = await executeSingleFillProfitExits({
-    appConfig: { ...config(), executionMode: 'live', ownerPrivateKey: '0xabc', depositWallet: '0xwallet' },
-    adapter,
-    store,
-    candidates: [activeCandidate],
-    orderbooks: [{ ...quote('yes-token', 0.5), updatedAt: new Date().toISOString() }],
-  });
 
-  assert.deepEqual(diagnostics, []);
-  assert.equal(attempts, 2);
-});
 
-test('does not execute another profit exit after a prior exit sell fill', async () => {
-  const now = Date.now();
-  const activeCandidate = {
-    ...candidate(),
-    startAt: new Date(now - 3 * 60_000).toISOString(),
-    endAt: new Date(now + 90_000).toISOString(),
-    secondsToEnd: 90,
-  };
-  const store = new InMemoryStore('live', 2_000, { persistencePath: false });
-  store.recordOrder(order('YES', 'BUY', { filledSize: 10, avgFillPrice: 0.45, status: 'filled' }));
-  store.recordOrder(order('YES', 'SELL', { filledSize: 10, avgFillPrice: 0.51, status: 'filled', strategy: 'UPDOWN_SINGLE_FILL_PROFIT_EXIT' }));
-  store.recordOrder(order('NO', 'BUY', { filledSize: 0, status: 'posted', clobOrderId: 'no-open' }));
-  let balanceReads = 0;
-  const adapter = {
-    async getRecentFillsForTargets() {
-      return [];
-    },
-    async getAvailableShares() {
-      balanceReads += 1;
-      return 0;
-    },
-    async executeLimitIntent() {
-      throw new Error('should not post duplicate profit exit');
-    },
-  } as unknown as PolymarketAdapter;
-
-  const diagnostics = await executeSingleFillProfitExits({
-    appConfig: { ...config(), executionMode: 'live', ownerPrivateKey: '0xabc', depositWallet: '0xwallet' },
-    adapter,
-    store,
-    candidates: [activeCandidate],
-    orderbooks: [{ ...quote('yes-token', 0.6), updatedAt: new Date().toISOString() }],
-  });
-
-  assert.deepEqual(diagnostics, []);
-  assert.equal(balanceReads, 0);
-});
-
-test('does not execute another profit exit while a prior exit order is still non-failed', async () => {
-  const now = Date.now();
-  const activeCandidate = {
-    ...candidate(),
-    startAt: new Date(now - 3 * 60_000).toISOString(),
-    endAt: new Date(now + 90_000).toISOString(),
-    secondsToEnd: 90,
-  };
-  const store = new InMemoryStore('live', 2_000, { persistencePath: false });
-  store.recordOrder(order('YES', 'BUY', { filledSize: 10, avgFillPrice: 0.45, status: 'filled' }));
-  store.recordOrder(order('YES', 'SELL', {
-    filledSize: 0,
-    status: 'posted',
-    strategy: 'UPDOWN_SINGLE_FILL_PROFIT_EXIT',
-    createdAt: new Date(now - 30_000).toISOString(),
-  }));
-  store.recordOrder(order('NO', 'BUY', { filledSize: 0, status: 'posted', clobOrderId: 'no-open' }));
-  let postAttempts = 0;
-  const adapter = {
-    async getRecentFillsForTargets() {
-      return [];
-    },
-    async cancelOrders() {
-      return {};
-    },
-    async getAvailableShares() {
-      return 10;
-    },
-    async executeLimitIntent() {
-      postAttempts += 1;
-      throw new Error('should not post duplicate profit exit');
-    },
-  } as unknown as PolymarketAdapter;
-
-  const diagnostics = await executeSingleFillProfitExits({
-    appConfig: { ...config(), executionMode: 'live', ownerPrivateKey: '0xabc', depositWallet: '0xwallet' },
-    adapter,
-    store,
-    candidates: [activeCandidate],
-    orderbooks: [{ ...quote('yes-token', 0.6), updatedAt: new Date().toISOString() }],
-  });
-
-  assert.deepEqual(diagnostics, []);
-  assert.equal(postAttempts, 0);
-});
-
-test('does not execute profit exit while a hedge buy order is still non-failed', async () => {
-  const now = Date.now();
-  const activeCandidate = {
-    ...candidate(),
-    startAt: new Date(now - 3 * 60_000).toISOString(),
-    endAt: new Date(now + 90_000).toISOString(),
-    secondsToEnd: 90,
-  };
-  const store = new InMemoryStore('live', 2_000, { persistencePath: false });
-  store.recordOrder(order('YES', 'BUY', { filledSize: 10, avgFillPrice: 0.45, status: 'filled' }));
-  store.recordOrder(order('NO', 'BUY', { filledSize: 0, status: 'posted', clobOrderId: 'no-open' }));
-  store.recordOrder(order('NO', 'BUY', {
-    filledSize: 0,
-    status: 'posted',
-    strategy: 'UPDOWN_SINGLE_FILL_HEDGE',
-    createdAt: new Date(now - 30_000).toISOString(),
-  }));
-  let postAttempts = 0;
-  const adapter = {
-    async getRecentFillsForTargets() {
-      return [];
-    },
-    async cancelOrders() {
-      return {};
-    },
-    async getAvailableShares() {
-      return 10;
-    },
-    async executeLimitIntent() {
-      postAttempts += 1;
-      throw new Error('should not sell while hedge is pending');
-    },
-  } as unknown as PolymarketAdapter;
-
-  const diagnostics = await executeSingleFillProfitExits({
-    appConfig: { ...config(), executionMode: 'live', ownerPrivateKey: '0xabc', depositWallet: '0xwallet' },
-    adapter,
-    store,
-    candidates: [activeCandidate],
-    orderbooks: [{ ...quote('yes-token', 0.6), updatedAt: new Date().toISOString() }],
-  });
-
-  assert.deepEqual(diagnostics, []);
-  assert.equal(postAttempts, 0);
-});
 
 function config(): AppConfig {
   return {

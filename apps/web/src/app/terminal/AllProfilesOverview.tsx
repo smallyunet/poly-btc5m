@@ -47,10 +47,10 @@ export function AllProfilesOverview({
             <span className="sectionKicker">All Profiles</span>
             <h2>Runtime Overview</h2>
           </div>
-          <Badge tone={state.runtime.executionMode === 'live' ? 'warn' : 'neutral'}>{executionLabel}</Badge>
+          <Badge tone="neutral">{executionLabel}</Badge>
         </div>
         <div className="scopeMetricGrid">
-          <DecisionMetric label="Enabled" value={`${enabledProfileCount}/${state.profiles.length}`} detail={`${liveProfileCount} live profiles`} tone={liveProfileCount > 0 ? 'warn' : 'neutral'} />
+          <DecisionMetric label="Enabled" value={`${enabledProfileCount}/${state.profiles.length}`} detail={`${liveProfileCount} Paper profiles`} tone="neutral" />
           <DecisionMetric label="Orders" value={String(orderCount)} detail={`${fillCount} fills / ${settlementCount} settlements`} tone={orderCount > 0 ? 'good' : 'neutral'} />
           <DecisionMetric label="Open Positions" value={String(displayedPositionCount)} detail="latest profile snapshots" tone={displayedPositionCount > 0 ? 'warn' : 'neutral'} />
           <DecisionMetric label="Settled PnL" value={formatSignedMoney(portfolioPnl)} detail="filtered settlements" tone={portfolioPnl > 0 ? 'good' : portfolioPnl < 0 ? 'bad' : 'neutral'} />
@@ -65,7 +65,7 @@ export function AllProfilesOverview({
                 <strong><AssetLabel profileId={item.profile.id} label={item.profile.label} size="sm" /></strong>
                 <span>{item.profile.status} · {item.latestSnapshot?.round.phase || 'pending'}</span>
               </div>
-              <Badge tone={item.profile.status === 'live' ? 'warn' : item.profile.status === 'monitor' ? 'neutral' : 'bad'}>{item.profile.status}</Badge>
+              <Badge tone={item.profile.status === 'enabled' ? 'neutral' : 'bad'}>{item.profile.status}</Badge>
             </div>
             <div className="profileRuntimeStats">
               <div><span>Entry</span><strong>{strategyCheckLabel(entryCheck)}</strong></div>

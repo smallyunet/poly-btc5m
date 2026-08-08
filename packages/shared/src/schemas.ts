@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-export const executionModeSchema = z.enum(['monitor', 'paper', 'live']);
+export const executionModeSchema = z.literal('paper');
 
 export const btcRoundConfigSchema = z.object({
   eventSlug: z.string().min(1),

@@ -76,7 +76,7 @@ export function DashboardNav({
       </nav>
 
       <div className="navRuntime">
-        <Badge tone={executionMode === 'live' ? 'warn' : 'neutral'}>{executionMode}</Badge>
+        <Badge tone="neutral">{executionMode}</Badge>
         <Badge tone={runtimeStatus === 'running' ? 'good' : 'bad'}>{runtimeStatus}</Badge>
         <button
           type="button"

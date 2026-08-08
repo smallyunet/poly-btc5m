@@ -2,15 +2,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import type { OrderBookLevel, OrderBookQuote, OrderRecord, StateSnapshot, StrategyCheck, StrategyCondition, StrategyId, TradeIntent } from '../../../packages/shared/src';
-import type { PolymarketAdapter } from '../../../packages/polymarket/src';
 import type { AppConfig } from './config';
 import type { InMemoryStore } from './store';
 
 const TAIL_ENTRY_STRATEGY: StrategyId = 'UPDOWN_TAIL_ENTRY';
 const MIN_MARKETABLE_BUY_NOTIONAL_USD = 1;
 const FAILED_ORDER_COOLDOWN_MS = 5 * 60_000;
-const FAK_NO_MATCH_RETRY_LIMIT = 2;
-const FAK_NO_MATCH_RETRY_DELAY_MS = 750;
 const TAIL_EXECUTION_CHECKPOINT_GRACE_SECONDS = 5;
 const EPSILON = 0.000001;
 const CLOB_MIN_LIMIT_PRICE = 0.01;
@@ -212,19 +209,16 @@ export function revalidateTailEntry(snapshot: StateSnapshot, appConfig: AppConfi
 
 export async function executeTailEntry(params: {
   appConfig: AppConfig;
-  adapter: PolymarketAdapter;
   store: InMemoryStore;
   snapshot: StateSnapshot;
   evaluation: TailEntryEvaluation;
-  revalidate?: () => TailEntryEvaluation;
 }): Promise<string[]> {
   if (!params.evaluation.ok) return [];
   const evaluation = params.evaluation;
   const intent = evaluation.intent;
   params.store.recordIntents([intent]);
-  const runtime = params.store.getRuntime();
   const executionKey = executionKeyFor(intent);
-  const gate = await tailExecutionGate(params, executionKey, intent);
+  const gate = tailExecutionGate(params, executionKey, intent);
   if (!gate.ok) {
     params.store.updateIntent(intent.id, { status: gate.recordFailure ? 'failed' : 'rejected', rejectionReason: gate.reason });
     if (gate.recordFailure) params.store.recordOrder(failedOrder(params.snapshot, intent, executionKey, gate.reason));
@@ -232,182 +226,64 @@ export async function executeTailEntry(params: {
     return [`Tail entry blocked for ${intent.label}: ${gate.reason}.`];
   }
 
-  if (runtime.executionMode === 'paper') {
-    const order = {
-      ...localOrder(params.snapshot, intent, executionKey, 'posted'),
-      price: evaluation.vwap,
-      rawResponse: {
-        paper: true,
-        fillModel: 'fak-vwap-immediate-full-fill-v1',
-        checkpointSeconds: evaluation.checkpointSeconds,
-        bestAsk: evaluation.bestAsk,
-        askBand: evaluation.askBand,
-      },
-    };
-    params.store.recordOrder(order);
-    const fill = {
-      id: `paper-fill-${order.id}`,
-      profileId: intent.profileId,
-      asset: intent.asset,
-      interval: intent.interval,
-      strategy: intent.strategy,
-      strategyProfile: 'classic',
-      roundId: intent.roundId,
-      eventSlug: params.snapshot.round.eventSlug,
-      marketTitle: params.snapshot.round.title,
-      imageUrl: params.snapshot.round.imageUrl,
-      tokenId: intent.tokenId,
-      label: intent.label,
-      side: intent.side,
-      price: evaluation.vwap,
-      size: roundDownShares(intent.shares),
-      matchedAt: new Date().toISOString(),
-      raw: { paper: true, fillModel: 'fak-vwap-immediate-full-fill-v1' },
-    } as const;
-    params.store.recordFills([fill]);
-    params.store.recordOrder({
-      ...order,
-      status: 'filled',
-      filledSize: fill.size,
-      avgFillPrice: fill.price,
-      updatedAt: fill.matchedAt,
-    });
-    params.store.updateIntent(intent.id, { status: 'executed' });
-    return [`Paper mode filled tail entry for ${intent.label} @ ${evaluation.vwap.toFixed(3)}.`];
-  }
-
-  if (runtime.executionMode === 'monitor') {
-    params.store.recordOrder(localOrder(params.snapshot, intent, executionKey, 'local'));
-    params.store.updateIntent(intent.id, { status: 'executed' });
-    return [`Monitor mode recorded tail entry for ${intent.label} @ ${intent.limitPrice.toFixed(3)}.`];
-  }
-
-  const revalidated = params.revalidate?.();
-  if (revalidated) {
-    const reason = tailRevalidationFailure(evaluation, revalidated, params.appConfig.pm5mTailEntryMaxSlippage);
-    if (reason) {
-      params.store.updateIntent(intent.id, { status: 'rejected', rejectionReason: reason });
-      params.store.recordRuntimeLog({ level: 'warn', source: 'execution', message: `Tail entry blocked before submit: ${reason}.`, details: { intentId: intent.id, roundId: intent.roundId } });
-      return [`Tail entry blocked before submit: ${reason}.`];
-    }
-  }
-
-  try {
-    const { posted, intent: postedIntent, attempts, retryReasons } = await postTailEntryWithFakNoMatchRetry({ ...params, evaluation }, intent);
-    params.store.recordOrder({
-      ...localOrder(params.snapshot, postedIntent, executionKey, posted.ok ? 'posted' : 'failed'),
-      clobOrderId: posted.orderId,
-      price: posted.price,
-      size: posted.size,
-      error: posted.error,
-      rawResponse: retryReasons.length ? { response: posted.raw, retryReasons, attempts } : posted.raw,
-    });
-    params.store.updateIntent(postedIntent.id, { status: posted.ok ? 'executed' : 'failed', rejectionReason: posted.ok ? undefined : posted.error || 'CLOB_POST_FAILED' });
-    params.store.recordRuntimeLog({
-      level: posted.ok ? 'warn' : 'error',
-      source: 'execution',
-      message: posted.ok ? `Tail entry posted for ${postedIntent.label} at ${posted.price.toFixed(3)}${attempts > 1 ? ` after ${attempts} FAK attempts` : ''}.` : `Tail entry failed for ${postedIntent.label}: ${posted.error || 'CLOB_POST_FAILED'}.`,
-      details: { intentId: postedIntent.id, roundId: postedIntent.roundId, tokenId: postedIntent.tokenId, price: posted.price, size: posted.size, attempts, retryReasons },
-    });
-    return posted.ok ? [] : [`Tail entry failed for ${postedIntent.label}: ${posted.error || 'CLOB_POST_FAILED'}.`];
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    params.store.recordOrder(failedOrder(params.snapshot, intent, executionKey, message));
-    params.store.updateIntent(intent.id, { status: 'failed', rejectionReason: message });
-    params.store.recordRuntimeLog({ level: 'error', source: 'execution', message: `Tail entry failed for ${intent.label}: ${message}.` });
-    return [`Tail entry failed for ${intent.label}: ${message}.`];
-  }
+  const order = {
+    ...localOrder(params.snapshot, intent, executionKey, 'posted'),
+    price: evaluation.vwap,
+    rawResponse: {
+      paper: true,
+      fillModel: 'fak-vwap-immediate-full-fill-v1',
+      checkpointSeconds: evaluation.checkpointSeconds,
+      bestAsk: evaluation.bestAsk,
+      askBand: evaluation.askBand,
+    },
+  };
+  params.store.recordOrder(order);
+  const fill = {
+    id: `paper-fill-${order.id}`,
+    profileId: intent.profileId,
+    asset: intent.asset,
+    interval: intent.interval,
+    strategy: intent.strategy,
+    strategyProfile: 'classic',
+    roundId: intent.roundId,
+    eventSlug: params.snapshot.round.eventSlug,
+    marketTitle: params.snapshot.round.title,
+    imageUrl: params.snapshot.round.imageUrl,
+    tokenId: intent.tokenId,
+    label: intent.label,
+    side: intent.side,
+    price: evaluation.vwap,
+    size: roundDownShares(intent.shares),
+    matchedAt: new Date().toISOString(),
+    raw: { paper: true, fillModel: 'fak-vwap-immediate-full-fill-v1' },
+  } as const;
+  params.store.recordFills([fill]);
+  params.store.recordOrder({ ...order, status: 'filled', filledSize: fill.size, avgFillPrice: fill.price, updatedAt: fill.matchedAt });
+  params.store.updateIntent(intent.id, { status: 'executed' });
+  return [`Paper simulation filled tail entry for ${intent.label} @ ${evaluation.vwap.toFixed(3)}.`];
 }
 
-async function tailExecutionGate(params: { appConfig: AppConfig; adapter: PolymarketAdapter; store: InMemoryStore; snapshot: StateSnapshot }, executionKey: string, intent: TradeIntent): Promise<{ ok: true } | { ok: false; reason: string; recordFailure: boolean }> {
+function tailExecutionGate(params: { appConfig: AppConfig; store: InMemoryStore; snapshot: StateSnapshot }, executionKey: string, intent: TradeIntent): { ok: true } | { ok: false; reason: string; recordFailure: boolean } {
   const reject = (reason: string, recordFailure = false) => ({ ok: false as const, reason, recordFailure });
   if (params.snapshot.profileId !== `${params.snapshot.asset}-${params.snapshot.interval}`) return reject('TAIL_ENTRY_PROFILE_NOT_ALLOWED');
   if (params.snapshot.round.secondsToStart > 0) return reject('ROUND_NOT_STARTED');
   if (params.snapshot.round.secondsToEnd <= 0) return reject('ROUND_EXPIRED');
   if (intent.limitPrice > params.appConfig.pm5mTailEntryMaxVwap + EPSILON) return reject('TAIL_LIMIT_PRICE_ABOVE_MAX');
-  if (!params.appConfig.ownerPrivateKey?.trim() && params.store.getRuntime().executionMode === 'live') return reject('OWNER_PRIVATE_KEY_MISSING', true);
-  if (!params.appConfig.depositWallet?.trim() && params.store.getRuntime().executionMode === 'live') return reject('POLYMARKET_DEPOSIT_WALLET_MISSING', true);
   if (params.store.hasNonFailedOrder(executionKey)) return reject('LOCAL_TAIL_ORDER_EXISTS');
   if (hasRecentBlockingFailedTailOrder(params.store, intent, executionKey)) return reject('LOCAL_RECENT_FAILED_ORDER');
   const notional = roundDownShares(intent.shares) * intent.limitPrice;
   if (notional < MIN_MARKETABLE_BUY_NOTIONAL_USD) return reject('ORDER_NOTIONAL_BELOW_MIN');
 
-  if (params.store.getRuntime().executionMode !== 'live') return { ok: true };
-
-  try {
-    const [{ balance, allowance }, openOrders] = await Promise.all([
-      params.adapter.getCollateralBalanceAllowance(),
-      params.adapter.getOpenOrders({ tokenId: intent.tokenId }),
-    ]);
-    if (openOrders.some((order) => order.tokenId === intent.tokenId)) return reject('PM_OPEN_ORDER_EXISTS');
-    const collateralLimit = allowance == null ? balance : Math.min(balance, allowance);
-    if (collateralLimit + 0.000001 < notional) return reject('INSUFFICIENT_AVAILABLE_COLLATERAL');
-    return { ok: true };
-  } catch (error) {
-    return reject(`TAIL_ENTRY_GATE_FAILED: ${error instanceof Error ? error.message : String(error)}`, true);
-  }
-}
-
-async function postTailEntryWithFakNoMatchRetry(
-  params: {
-    appConfig: AppConfig;
-    adapter: PolymarketAdapter;
-    store: InMemoryStore;
-    snapshot: StateSnapshot;
-    evaluation: Extract<TailEntryEvaluation, { ok: true }>;
-    revalidate?: () => TailEntryEvaluation;
-  },
-  initialIntent: TradeIntent,
-): Promise<{ posted: Awaited<ReturnType<PolymarketAdapter['executeLimitIntent']>>; intent: TradeIntent; attempts: number; retryReasons: string[] }> {
-  let intent = initialIntent;
-  const retryReasons: string[] = [];
-  for (let attempt = 1; attempt <= FAK_NO_MATCH_RETRY_LIMIT + 1; attempt += 1) {
-    const posted = await params.adapter.executeLimitIntent(intent, { execute: true, orderType: 'FAK' });
-    if (posted.ok || !isFakNoMatchError(posted.error) || attempt > FAK_NO_MATCH_RETRY_LIMIT) {
-      return { posted, intent, attempts: attempt, retryReasons };
-    }
-
-    retryReasons.push(posted.error || 'FAK_NO_MATCH');
-    await delay(FAK_NO_MATCH_RETRY_DELAY_MS);
-    const nextEvaluation = params.revalidate?.() ?? evaluateTailEntry(params.snapshot, params.appConfig, params.store);
-    const replanFailure = tailRevalidationFailure(params.evaluation, nextEvaluation, params.appConfig.pm5mTailEntryMaxSlippage);
-    if (replanFailure) {
-      return {
-        posted: {
-          ok: false,
-          price: intent.limitPrice,
-          size: roundDownShares(intent.shares),
-          error: `FAK_RETRY_REPLAN_BLOCKED: ${replanFailure}`,
-          raw: { retryReasons },
-        },
-        intent,
-        attempts: attempt,
-        retryReasons,
-      };
-    }
-    if (!nextEvaluation.ok) throw new Error('Tail revalidation unexpectedly failed without a blocker');
-    intent = { ...nextEvaluation.intent, id: initialIntent.id };
-  }
-  throw new Error('unreachable');
+  return { ok: true };
 }
 
 function hasRecentBlockingFailedTailOrder(store: InMemoryStore, intent: TradeIntent, executionKey: string): boolean {
   const cutoffMs = Date.now() - FAILED_ORDER_COOLDOWN_MS;
   return store.roundOrders(intent.profileId, intent.roundId, TAIL_ENTRY_STRATEGY).some((order) => {
     if (order.executionKey !== executionKey || order.status !== 'failed') return false;
-    if (isFakNoMatchError(order.error)) return false;
     const createdMs = new Date(order.createdAt).getTime();
     return Number.isFinite(createdMs) && createdMs >= cutoffMs;
   });
-}
-
-function tailRevalidationFailure(initial: Extract<TailEntryEvaluation, { ok: true }>, next: TailEntryEvaluation, maxSlippage: number): string | null {
-  if (!next.ok) return `TAIL_REVALIDATION_BLOCKED: ${next.check.reason}`;
-  if (next.intent.roundId !== initial.intent.roundId) return 'TAIL_REVALIDATION_ROUND_CHANGED';
-  if (next.intent.label !== initial.intent.label) return 'TAIL_REVALIDATION_SIDE_CHANGED';
-  if (next.askBand !== initial.askBand) return 'TAIL_REVALIDATION_BAND_CHANGED';
-  if (Math.abs(next.vwap - initial.vwap) > maxSlippage + EPSILON) return 'TAIL_REVALIDATION_VWAP_MOVED';
-  return null;
 }
 
 function matchingCheckpoint(secondsToEnd: number, checkpoint: number, appConfig: AppConfig, graceSeconds = 0): number | null {
@@ -588,7 +464,7 @@ function localOrder(snapshot: StateSnapshot, intent: TradeIntent, executionKey: 
     size: roundDownShares(intent.shares),
     status,
     createdAt: new Date().toISOString(),
-    rawResponse: status === 'local' ? { monitor: true } : undefined,
+    rawResponse: undefined,
   };
 }
 
@@ -622,13 +498,4 @@ function formatMoney(value: number | null | undefined): string {
 
 function formatPerShare(value: number | null | undefined): string {
   return value == null || !Number.isFinite(value) ? 'n/a' : value.toFixed(4);
-}
-
-function isFakNoMatchError(error: string | undefined): boolean {
-  const normalized = (error || '').toLowerCase();
-  return normalized.includes('no orders found to match') && normalized.includes('fak');
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }

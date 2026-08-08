@@ -1,88 +1,40 @@
-# Paper Trading Runtime
+# Paper trading runtime
 
-`EXECUTION_MODE=paper` is a first-class execution mode. It consumes live public
-market data, never submits a CLOB order, and writes every Paper event to an
-uncapped SQLite ledger.
+Paper is the sole execution model on `main`. Public market data drives strategy
+evaluation and deterministic simulated fills; no wallet credential is accepted
+or used.
 
-## Safety boundary
+## Experiment identity
 
-Paper mode clears both `OWNER_PRIVATE_KEY` and `POLYMARKET_DEPOSIT_WALLET` while
-loading configuration. `docker-compose.paper.yml` also overrides both values to
-empty strings. Live fill and open-order reconciliation only runs in `live`.
+Keep `PAPER_RUN_ID` stable only while code, strategy parameters, and fill-model
+assumptions are stable. The ledger rejects reopening an existing run ID with a
+different config hash or fill-model version. Start a new run ID for every
+material experiment change.
 
-The Paper Compose file additionally disables the legacy live hedge, profit-exit,
-loss-exit, and cross-profile risk actions. Those paths do not yet have Paper
-fill models and must not be counted as simulated executions.
+## Retention contract
 
-## Storage
+`PaperLedger` stores runs and append-only events in SQLite WAL mode. Orders,
+fills, settlements, strategy checks, snapshots, and runtime logs are retained
+without the dashboard's record cap. Use cursor pagination on `/api/paper/events`
+instead of loading the complete history into memory.
 
-The default files are:
+The JSON runtime file remains a bounded recovery/read model. It is not the
+research system of record.
 
-```text
-data/paper-runtime-state.json  bounded current read model
-data/paper.sqlite              uncapped append-only event ledger
-data/paper.sqlite-wal          active SQLite WAL when present
-data/paper.sqlite-shm          active SQLite shared memory when present
-```
+## Fill assumptions
 
-`RUNTIME_MAX_RECORDS` applies only to the in-memory/dashboard read model. It
-does not delete or cap `paper_events`.
+- Dual: full fill at `min(limit, bestAsk)` after an eligible websocket ask
+  touches the simulated GTC limit.
+- Tail: immediate full fill at evaluated VWAP after all Tail gates pass.
+- No queue priority, partial fill, latency, rejection, or adverse-selection
+  model is currently applied.
+- Hedge/profit-exit/loss-exit planners remain visible for analysis, but there is
+  no execution path for them in the Paper runtime.
 
-The ledger records:
+These limitations must be considered during edge analysis.
 
-- state snapshots;
-- strategy checks;
-- intent creation and status changes;
-- order lifecycle events;
-- simulated fills;
-- estimated and final settlements.
+## Backup
 
-Every event includes the Paper run id plus strategy, profile, and round
-dimensions when available. `paper_runs` freezes the code SHA, configuration
-hash, and fill-model version. Reusing a run id with changed assumptions fails
-at startup; choose a new `PAPER_RUN_ID` instead.
-
-## Fill models in this phase
-
-### Dual
-
-`best-ask-touch-full-fill-v1` creates a simulated GTC order. It fills the full
-size when a fresh websocket best ask is at or below the limit, using the better
-of the observed ask and limit. Unfilled orders remain open until the round ends.
-
-This is an optimistic screening model. It does not yet model queue-ahead,
-traded volume, partial fills, or latency.
-
-### Tail
-
-`fak-vwap-immediate-full-fill-v1` uses the already validated fixed-size ask-book
-VWAP and records an immediate full fill. Existing Tail depth, freshness,
-slippage, band, and summary gates still run before the Paper fill.
-
-## API
-
-Current dashboard state remains available through `/api/state`. Full Paper
-history is cursor-paginated:
-
-```text
-GET /api/paper/stats
-GET /api/paper/events?entityType=order&limit=100
-GET /api/paper/events?entityType=fill&strategyId=UPDOWN_DUAL_ENTRY&profileId=btc-5m
-GET /api/paper/events?cursor=<nextCursor>&limit=100
-```
-
-Supported entity types are `intent`, `order`, `fill`, `settlement`, `snapshot`,
-and `strategy_check`. API limits affect only response size.
-
-## Local/container validation
-
-```bash
-docker-compose -f docker-compose.paper.yml config
-docker-compose -f docker-compose.paper.yml build api
-docker-compose -f docker-compose.paper.yml up -d
-```
-
-Do not start the long-running server experiment yet. Dual-only, Tail-only, and
-combined virtual ledgers are the next phase; the current Tail rule still blocks
-same-round allocation when a Dual order exists.
-
+For a live service, use SQLite online backup or stop the API before copying
+`paper.sqlite`, `paper.sqlite-wal`, and `paper.sqlite-shm` together. Periodically
+verify that a copied database opens and that event counts match `/api/paper/stats`.

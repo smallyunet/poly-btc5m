@@ -24,9 +24,7 @@
     "apps/api/src/server.ts",
     "apps/api/src/store.ts",
     "packages/shared/src/**/*.ts",
-    "packages/strategy/src/**/*.ts",
-    "packages/polymarket/src/client.ts",
-    "packages/polymarket/src/index.ts"
+    "packages/strategy/src/**/*.ts"
   ],
   "exclude": ["node_modules", "dist", "apps/web"]
 }

@@ -1,461 +1,103 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import type { AppConfig } from './config';
-import { executeLiveIntents, reconcilePaperOrders } from './execution';
+import type { OrderBookQuote, StateSnapshot, TradeIntent } from '../../../packages/shared/src';
+import { executePaperIntents, reconcilePaperOrders } from './execution';
 import { InMemoryStore } from './store';
-import type { PolymarketAdapter } from '../../../packages/polymarket/src';
-import type { StateSnapshot, TradeIntent } from '../../../packages/shared/src';
-import type { StrategyRiskConfig } from '../../../packages/strategy/src';
 
-test('blocks a paired live entry batch when active BUY orders leave insufficient collateral', async () => {
-  const store = new InMemoryStore('live', 2_000, { persistencePath: false });
-  const intents = [intent('YES'), intent('NO')];
-  store.recordIntents(intents);
-  let posted = 0;
-  const adapter = {
-    async getCollateralBalanceAllowance() {
-      return { balance: 6.5, allowance: 20 };
-    },
-    async getOpenOrders() {
-      return [
-        {
-          id: 'existing-buy',
-          tokenId: 'other-token',
-          side: 'BUY',
-          price: 0.44,
-          size: 10,
-          sizeMatched: 0,
-          status: 'live',
-          raw: {},
-        },
-      ];
-    },
-    async executeLimitIntent() {
-      posted += 1;
-      return { ok: true, orderId: 'unexpected', price: 0.44, size: 10 };
-    },
-  } as unknown as PolymarketAdapter;
-
-  const diagnostics = await executeLiveIntents({
-    appConfig: appConfig(),
-    adapter,
-    store,
-    snapshot: snapshot(),
-    intents,
-    risk: risk(),
-  });
-
-  assert.equal(posted, 0);
-  assert.match(diagnostics[0], /INSUFFICIENT_AVAILABLE_COLLATERAL/);
-  const storedIntents = (store as unknown as { intents: TradeIntent[] }).intents;
-  assert.equal(storedIntents.filter((item) => item.status === 'rejected').length, 2);
-  assert.ok(storedIntents.every((item) => item.rejectionReason === 'INSUFFICIENT_AVAILABLE_COLLATERAL'));
-});
-
-test('posts live entry orders as GTC limits', async () => {
-  const store = new InMemoryStore('live', 2_000, { persistencePath: false });
-  const intents = [intent('YES')];
-  store.recordIntents(intents);
-  const startAt = new Date(Date.now() + 20_000).toISOString();
-  let postedOptions: { execute: boolean; orderType?: string; expiration?: number } | undefined;
-  const adapter = {
-    async getCollateralBalanceAllowance() {
-      return { balance: 20, allowance: 20 };
-    },
-    async getOpenOrders() {
-      return [];
-    },
-    async executeLimitIntent(_intent: TradeIntent, options: { execute: boolean; orderType?: string; expiration?: number }) {
-      postedOptions = options;
-      return { ok: true, orderId: 'entry-order', price: 0.44, size: 10 };
-    },
-  } as unknown as PolymarketAdapter;
-
-  const diagnostics = await executeLiveIntents({
-    appConfig: appConfig(),
-    adapter,
-    store,
-    snapshot: snapshot({ startAt }),
-    intents,
-    risk: risk(),
-  });
-
-  assert.deepEqual(diagnostics, []);
-  assert.equal(postedOptions?.orderType, 'GTC');
-  assert.equal(postedOptions?.expiration, undefined);
-});
-
-test('blocks duplicate experimental side after a non-failed order already exists', async () => {
-  const store = new InMemoryStore('live', 2_000, { persistencePath: false }, 'experiment_next_round');
-  const existing = intent('NO', { strategy: 'UPDOWN_NEXT_ROUND_50_49_STOP_ON_SINGLE' });
-  store.recordOrder({
-    id: 'filled-experiment-down',
-    intentId: existing.id,
-    strategy: existing.strategy,
-    strategyProfile: 'experiment_next_round',
-    executionKey: [existing.roundId, existing.strategy, existing.tokenId, existing.side].join(':'),
-    roundId: existing.roundId,
-    eventSlug: existing.roundId,
-    tokenId: existing.tokenId,
-    label: existing.label,
-    side: existing.side,
-    price: existing.limitPrice,
-    size: existing.shares,
-    status: 'filled',
-    createdAt: new Date().toISOString(),
-  });
-  let posted = 0;
-  const adapter = adapterStub(() => {
-    posted += 1;
-    return { ok: true, orderId: 'unexpected', price: 0.49, size: 5 };
-  });
-
-  const diagnostics = await executeLiveIntents({
-    appConfig: appConfig(),
-    adapter,
-    store,
-    snapshot: snapshot({ startAt: new Date(Date.now() + 20_000).toISOString() }),
-    intents: [existing],
-    risk: risk(),
-  });
-
-  assert.equal(posted, 0);
-  assert.match(diagnostics[0], /LOCAL_STRATEGY_ORDER_EXISTS/);
-});
-
-test('allows experimental side again when prior order is before current run start', async () => {
-  const store = new InMemoryStore('live', 2_000, { persistencePath: false }, 'experiment_next_round');
-  const existing = intent('NO', { strategy: 'UPDOWN_NEXT_ROUND_50_49_STOP_ON_SINGLE' });
-  store.recordOrder({
-    id: 'old-filled-experiment-down',
-    intentId: existing.id,
-    strategy: existing.strategy,
-    strategyProfile: 'experiment_next_round',
-    executionKey: [existing.roundId, existing.strategy, existing.tokenId, existing.side].join(':'),
-    roundId: existing.roundId,
-    eventSlug: existing.roundId,
-    tokenId: existing.tokenId,
-    label: existing.label,
-    side: existing.side,
-    price: existing.limitPrice,
-    size: existing.shares,
-    status: 'filled',
-    createdAt: new Date(Date.now() - 60_000).toISOString(),
-  });
-  let posted = 0;
-  const adapter = adapterStub(() => {
-    posted += 1;
-    return { ok: true, orderId: 'new-experiment-down', price: 0.49, size: 5 };
-  });
-
-  const diagnostics = await executeLiveIntents({
-    appConfig: appConfig(),
-    adapter,
-    store,
-    snapshot: snapshot({ startAt: new Date(Date.now() + 20_000).toISOString() }),
-    intents: [existing],
-    risk: risk(),
-    experimentRunStartedAt: new Date().toISOString(),
-  });
-
-  assert.deepEqual(diagnostics, []);
-  assert.equal(posted, 1);
-});
-
-test('blocks duplicate classic side after a filled entry order already exists', async () => {
-  const store = new InMemoryStore('live', 2_000, { persistencePath: false });
-  const existing = intent('YES');
-  store.recordOrder({
-    id: 'filled-classic-up',
-    intentId: existing.id,
-    strategy: existing.strategy,
-    strategyProfile: 'classic',
-    executionKey: [existing.roundId, existing.strategy, existing.tokenId, existing.side].join(':'),
-    roundId: existing.roundId,
-    eventSlug: existing.roundId,
-    tokenId: existing.tokenId,
-    label: existing.label,
-    side: existing.side,
-    price: existing.limitPrice,
-    size: existing.shares,
-    status: 'filled',
-    createdAt: new Date().toISOString(),
-  });
-  let posted = 0;
-  const adapter = adapterStub(() => {
-    posted += 1;
-    return { ok: true, orderId: 'unexpected', price: 0.44, size: 10 };
-  });
-
-  const diagnostics = await executeLiveIntents({
-    appConfig: appConfig(),
-    adapter,
-    store,
-    snapshot: snapshot({ startAt: new Date(Date.now() + 20_000).toISOString() }),
-    intents: [existing],
-    risk: risk(),
-  });
-
-  assert.equal(posted, 0);
-  assert.match(diagnostics[0], /LOCAL_STRATEGY_ORDER_EXISTS/);
-});
-
-test('blocks entry posting when round start is too close', async () => {
-  const store = new InMemoryStore('live', 2_000, { persistencePath: false });
-  const nearStart = new Date(Date.now() + 1_000).toISOString();
-  let posted = 0;
-  const adapter = adapterStub(() => {
-    posted += 1;
-    return { ok: true, orderId: 'unexpected', price: 0.44, size: 10 };
-  });
-
-  const diagnostics = await executeLiveIntents({
-    appConfig: appConfig(),
-    adapter,
-    store,
-    snapshot: snapshot({ startAt: nearStart, secondsToStart: 1 }),
-    intents: [intent('YES')],
-    risk: risk(),
-  });
-
-  assert.equal(posted, 0);
-  assert.match(diagnostics[0], /ROUND_START_TOO_CLOSE_FOR_ENTRY/);
-});
-
-test('bypasses entry orderbook execution gate when entry bypass is enabled', async () => {
-  const store = new InMemoryStore('live', 2_000, { persistencePath: false });
-  const intents = [intent('YES')];
-  store.recordIntents(intents);
-  let posted = 0;
-  const adapter = adapterStub(() => {
-    posted += 1;
-    return { ok: true, orderId: 'entry-order', price: 0.44, size: 10 };
-  });
-  const snap = snapshot({ startAt: new Date(Date.now() + 20_000).toISOString() });
-  snap.orderbooks = [];
-
-  const diagnostics = await executeLiveIntents({
-    appConfig: appConfig(),
-    adapter,
-    store,
-    snapshot: snap,
-    intents,
-    risk: risk({ bypassEntryScoreGating: true }),
-  });
-
-  assert.deepEqual(diagnostics, []);
-  assert.equal(posted, 1);
-});
-
-test('paper mode never calls the CLOB adapter and records a touch fill', async () => {
-  const store = new InMemoryStore('paper', 2_000, { persistencePath: false });
-  const paperIntent = intent('YES', {
-    profileId: 'btc-5m',
-    asset: 'btc',
-    interval: '5m',
-    limitPrice: 0.46,
-  });
-  store.recordIntents([paperIntent]);
-  let adapterCalls = 0;
-  const adapter = {
-    async getCollateralBalanceAllowance() {
-      adapterCalls += 1;
-      throw new Error('paper mode must not read signed collateral');
-    },
-    async getOpenOrders() {
-      adapterCalls += 1;
-      throw new Error('paper mode must not read live open orders');
-    },
-    async executeLimitIntent() {
-      adapterCalls += 1;
-      throw new Error('paper mode must not submit live orders');
-    },
-  } as unknown as PolymarketAdapter;
-  const paperSnapshot = snapshot();
-  paperSnapshot.profileId = 'btc-5m';
-  paperSnapshot.asset = 'btc';
-  paperSnapshot.interval = '5m';
-
-  const diagnostics = await executeLiveIntents({
-    appConfig: appConfig(),
-    adapter,
-    store,
-    snapshot: paperSnapshot,
-    intents: [paperIntent],
-    risk: risk(),
-  });
-
+test('Paper Dual fills immediately when the live ask touches the limit', () => {
+  const store = new InMemoryStore(2_000, { persistencePath: false });
+  const trade = intent(0.45);
+  store.recordIntents([trade]);
+  const diagnostics = executePaperIntents({ store, snapshot: snapshot(quote(0.45)), intents: [trade] });
   const state = store.dashboardState();
-  assert.equal(adapterCalls, 0);
-  assert.match(diagnostics[0], /Paper mode recorded/);
-  assert.equal(state.orders.length, 1);
+  assert.match(diagnostics[0], /Paper simulation/);
   assert.equal(state.orders[0].status, 'filled');
-  assert.equal(state.orders[0].avgFillPrice, 0.45);
-  assert.equal(state.fills.length, 1);
   assert.equal(state.fills[0].price, 0.45);
-  assert.equal(state.fills[0].raw && (state.fills[0].raw as { paper?: boolean }).paper, true);
 });
 
-test('paper mode leaves an untouched GTC order open for later reconciliation', async () => {
-  const store = new InMemoryStore('paper', 2_000, { persistencePath: false });
-  const paperIntent = intent('YES', {
-    profileId: 'btc-5m',
-    asset: 'btc',
-    interval: '5m',
-    limitPrice: 0.44,
-  });
-  store.recordIntents([paperIntent]);
-  const paperSnapshot = snapshot();
-  paperSnapshot.profileId = 'btc-5m';
-  paperSnapshot.asset = 'btc';
-  paperSnapshot.interval = '5m';
-
-  await executeLiveIntents({
-    appConfig: appConfig(),
-    adapter: {} as PolymarketAdapter,
-    store,
-    snapshot: paperSnapshot,
-    intents: [paperIntent],
-    risk: risk(),
-  });
-
+test('Paper Dual rests until a later ask touches the limit', () => {
+  const store = new InMemoryStore(2_000, { persistencePath: false });
+  const trade = intent(0.44);
+  store.recordIntents([trade]);
+  executePaperIntents({ store, snapshot: snapshot(quote(0.45)), intents: [trade] });
   assert.equal(store.dashboardState().orders[0].status, 'posted');
   assert.equal(store.dashboardState().fills.length, 0);
-});
 
-test('paper reconciliation fills a resting Dual order on a later best-ask touch', async () => {
-  const store = new InMemoryStore('paper', 2_000, { persistencePath: false });
-  const startSeconds = Math.floor(Date.now() / 1_000) + 300;
-  const roundId = `btc-updown-5m-${startSeconds}`;
-  const paperIntent = intent('YES', {
-    profileId: 'btc-5m',
-    asset: 'btc',
-    interval: '5m',
-    roundId,
-    limitPrice: 0.44,
-  });
-  store.recordIntents([paperIntent]);
-  const paperSnapshot = snapshot({
-    id: roundId,
-    eventSlug: roundId,
-    startAt: new Date(startSeconds * 1_000).toISOString(),
-    endAt: new Date((startSeconds + 300) * 1_000).toISOString(),
-  });
-  paperSnapshot.profileId = 'btc-5m';
-  paperSnapshot.asset = 'btc';
-  paperSnapshot.interval = '5m';
-
-  await executeLiveIntents({
-    appConfig: appConfig(),
-    adapter: {} as PolymarketAdapter,
-    store,
-    snapshot: paperSnapshot,
-    intents: [paperIntent],
-    risk: risk(),
-  });
-  const touchedQuote = quote('yes-token');
-  touchedQuote.bestAsk = 0.43;
-  const fills = reconcilePaperOrders({ store, profileId: 'btc-5m', quotes: [touchedQuote] });
-
+  const fills = reconcilePaperOrders({ store, profileId: 'btc-5m', quotes: [quote(0.43)] });
   assert.equal(fills.length, 1);
   assert.equal(fills[0].price, 0.43);
   assert.equal(store.dashboardState().orders[0].status, 'filled');
 });
 
-function intent(label: 'YES' | 'NO', patch: Partial<TradeIntent> = {}): TradeIntent {
+function intent(limitPrice: number): TradeIntent {
+  const startSeconds = Math.floor(Date.now() / 1_000) + 300;
   return {
-    id: `intent-${label}`,
+    id: 'paper-intent',
+    profileId: 'btc-5m',
+    asset: 'btc',
+    interval: '5m',
     strategy: 'UPDOWN_DUAL_ENTRY',
-    roundId: 'btc-updown-5m-1782432000',
-    tokenId: `${label.toLowerCase()}-token`,
-    label,
+    roundId: `btc-updown-5m-${startSeconds}`,
+    tokenId: 'yes-token',
+    label: 'YES',
     side: 'BUY',
     orderType: 'LIMIT',
-    limitPrice: 0.44,
-    shares: 10,
-    reason: 'test paired entry',
+    limitPrice,
+    shares: 5,
+    reason: 'test',
     status: 'generated',
     ttlSeconds: 30,
     createdAt: new Date().toISOString(),
-    ...patch,
   };
 }
 
-function adapterStub(executeLimitIntent: () => { ok: boolean; orderId: string; price: number; size: number }): PolymarketAdapter {
-  return {
-    async getCollateralBalanceAllowance() {
-      return { balance: 20, allowance: 20 };
-    },
-    async getOpenOrders() {
-      return [];
-    },
-    async executeLimitIntent() {
-      return executeLimitIntent();
-    },
-  } as unknown as PolymarketAdapter;
-}
-
-function appConfig(): AppConfig {
-  return {
-    ownerPrivateKey: '0xabc',
-    depositWallet: '0xwallet',
-    marketConfig: {
-      avoidExpirySeconds: 30,
-    },
-    entryMinSecondsToStart: 15,
-  } as AppConfig;
-}
-
-function risk(patch: Partial<StrategyRiskConfig> = {}): StrategyRiskConfig {
-  return {
-    maxOrderbookAgeSeconds: 5,
-    ...patch,
-  } as StrategyRiskConfig;
-}
-
-function snapshot(patch: Partial<StateSnapshot['round']> = {}): StateSnapshot {
+function snapshot(book: OrderBookQuote): StateSnapshot {
   const now = Date.now();
+  const startSeconds = Math.floor(now / 1_000) + 300;
+  const roundId = `btc-updown-5m-${startSeconds}`;
   return {
-    id: 'snapshot-test',
+    id: 'snapshot',
+    profileId: 'btc-5m',
+    asset: 'btc',
+    interval: '5m',
     capturedAt: new Date(now).toISOString(),
     round: {
-      id: 'btc-updown-5m-1782432000',
+      id: roundId,
+      eventSlug: roundId,
+      title: 'BTC Up or Down',
       phase: 'decision',
-      eventSlug: 'btc-updown-5m-1782432000',
-      startAt: new Date(now + 20_000).toISOString(),
-      endAt: new Date(now + 320_000).toISOString(),
-      secondsToStart: 20,
-      secondsToEnd: 320,
+      startAt: new Date(startSeconds * 1_000).toISOString(),
+      endAt: new Date((startSeconds + 300) * 1_000).toISOString(),
+      secondsToStart: 300,
+      secondsToEnd: 600,
       strike: 60_000,
-      strikeStatus: 'estimated',
+      strikeStatus: 'locked',
       yesTokenId: 'yes-token',
       noTokenId: 'no-token',
-      ...patch,
     },
-    features: {} as StateSnapshot['features'],
+    features: { price: 60_000 } as StateSnapshot['features'],
     regime: 'CHOP',
-    orderbooks: [
-      quote('yes-token'),
-      quote('no-token'),
-    ],
+    orderbooks: [book],
     positions: [],
     positionReadStatus: 'disabled',
     diagnostics: [],
   };
 }
 
-function quote(tokenId: string): StateSnapshot['orderbooks'][number] {
+function quote(bestAsk: number): OrderBookQuote {
   return {
-    tokenId,
-    bestBid: 0.43,
-    bestAsk: 0.45,
-    midpoint: 0.44,
-    spread: 0.02,
-    bidDepth: 100,
-    askDepth: 100,
+    tokenId: 'yes-token',
+    bestBid: bestAsk - 0.01,
+    bestAsk,
+    midpoint: bestAsk - 0.005,
+    spread: 0.01,
+    bidDepth: 10,
+    askDepth: 10,
     imbalance: 0,
     updatedAt: new Date().toISOString(),
     source: 'ws',
+    bids: [{ price: bestAsk - 0.01, size: 10 }],
+    asks: [{ price: bestAsk, size: 10 }],
   };
 }

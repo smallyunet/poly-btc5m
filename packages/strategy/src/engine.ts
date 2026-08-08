@@ -21,7 +21,7 @@ export type StrategyRiskConfig = {
   maxDriftRatio120s: number;
   maxMomentumRatio30s: number;
   maxEntryQueueImbalance: number;
-  minLiveChopScore: number;
+  minPaperChopScore: number;
   bypassEntryScoreGating: boolean;
   bypassSingleFillCooldown: boolean;
   entryMinSecondsToStart: number;
@@ -102,7 +102,7 @@ export function evaluateEntry(snapshot: StateSnapshot, config: StrategyRiskConfi
   const twoSidedThresholdPassed = entryBypass || centerMinBiExcursion >= config.minBiExcursionBps120s;
   const driftThresholdPassed = entryBypass || snapshot.features.driftRatio120s <= config.maxDriftRatio120s;
   const momentumThresholdPassed = entryBypass || snapshot.features.momentumRatio30s <= config.maxMomentumRatio30s;
-  const liveScoreFloorPassed = entryBypass || config.dryRun || snapshot.features.chopScore >= config.minLiveChopScore;
+  const paperScoreFloorPassed = entryBypass || config.dryRun || snapshot.features.chopScore >= config.minPaperChopScore;
   const booksTradablePassed = entryBypass || booksTradable;
   const sharesPassed = entryBypass || shares >= config.minOrderShares;
   const limitPricePassed = entryBypass || (limitPrice > 0 && limitPrice < 1);
@@ -120,7 +120,7 @@ export function evaluateEntry(snapshot: StateSnapshot, config: StrategyRiskConfi
   if (!limitPricePassed) reasons.push('INVALID_DUAL_LIMIT_PRICE');
   if (!pairCostPassed) reasons.push('PAIR_COST_TOO_HIGH');
   if (!queuePassed) reasons.push('ENTRY_QUEUE_IMBALANCE');
-  if (!liveScoreFloorPassed) reasons.push('ENTRY_SCORE_TOO_LOW_FOR_LIVE');
+  if (!paperScoreFloorPassed) reasons.push('ENTRY_SCORE_TOO_LOW_FOR_PAPER');
   if (!participationPassed) reasons.push('PARTICIPATION_WEAK');
 
   const base = [
@@ -158,7 +158,7 @@ export function evaluateEntry(snapshot: StateSnapshot, config: StrategyRiskConfi
       condition('center two-sided excursion', twoSidedThresholdPassed, entryBypass ? `${centerMinBiExcursion.toFixed(2)}bps / ${config.minBiExcursionBps120s} (bypassed)` : `${centerMinBiExcursion.toFixed(2)}bps / ${config.minBiExcursionBps120s}`),
       condition('drift ratio capped', driftThresholdPassed, entryBypass ? `${snapshot.features.driftRatio120s.toFixed(2)} / ${config.maxDriftRatio120s} (bypassed)` : `${snapshot.features.driftRatio120s.toFixed(2)} / ${config.maxDriftRatio120s}`),
       condition('momentum ratio capped', momentumThresholdPassed, entryBypass ? `${snapshot.features.momentumRatio30s.toFixed(2)} / ${config.maxMomentumRatio30s} (bypassed)` : `${snapshot.features.momentumRatio30s.toFixed(2)} / ${config.maxMomentumRatio30s}`),
-      condition('Live score floor', liveScoreFloorPassed, entryBypass ? `${snapshot.features.chopScore.toFixed(1)} / ${config.minLiveChopScore} (bypassed)` : config.dryRun ? 'monitor mode' : `${snapshot.features.chopScore.toFixed(1)} / ${config.minLiveChopScore}`),
+      condition('Paper score floor', paperScoreFloorPassed, entryBypass ? `${snapshot.features.chopScore.toFixed(1)} / ${config.minPaperChopScore} (bypassed)` : config.dryRun ? 'paper simulation' : `${snapshot.features.chopScore.toFixed(1)} / ${config.minPaperChopScore}`),
       condition('YES book tradable', entryBypass || buyQuoteReady(yesQuote, config), entryBypass ? `${quoteAgeLabel(yesQuote)} (bypassed)` : quoteAgeLabel(yesQuote)),
       condition('NO book tradable', entryBypass || buyQuoteReady(noQuote, config), entryBypass ? `${quoteAgeLabel(noQuote)} (bypassed)` : quoteAgeLabel(noQuote)),
       condition('Entry queue imbalance', queuePassed, entryBypass ? `${queueLabel(queue, config.maxEntryQueueImbalance)} (bypassed)` : queueLabel(queue, config.maxEntryQueueImbalance)),

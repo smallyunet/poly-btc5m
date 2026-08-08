@@ -1,6 +1,5 @@
 import WebSocket from 'ws';
-import type { BtcFeatureSnapshot, BtcRoundConfig, DataFeedStatus, MarketProfile, OrderBookQuote, PriceTick } from '../../../packages/shared/src';
-import { quoteFromBook } from '../../../packages/polymarket/src';
+import type { BtcFeatureSnapshot, BtcRoundConfig, DataFeedStatus, MarketProfile, OrderBookLevel, OrderBookQuote, PriceTick } from '../../../packages/shared/src';
 import type { AppConfig } from './config';
 import type { InMemoryStore } from './store';
 
@@ -357,6 +356,45 @@ export class MarketDataService {
     return this.priceTicksBySymbol.get((profile?.priceFeedSymbol || 'btcusdt').toLowerCase()) || [];
   }
 
+}
+
+export function quoteFromBook(tokenId: string, book: unknown, source: 'ws'): OrderBookQuote {
+  const value = book as { bids?: unknown; asks?: unknown } | null;
+  const bids = normalizeLevels(value?.bids).sort((a, b) => b.price - a.price);
+  const asks = normalizeLevels(value?.asks).sort((a, b) => a.price - b.price);
+  const bestBid = bids[0]?.price ?? null;
+  const bestAsk = asks[0]?.price ?? null;
+  const bidDepth = depthAtTop(bids);
+  const askDepth = depthAtTop(asks);
+  const totalDepth = bidDepth + askDepth;
+  return {
+    tokenId,
+    bestBid,
+    bestAsk,
+    midpoint: bestBid != null && bestAsk != null ? (bestBid + bestAsk) / 2 : null,
+    spread: bestBid != null && bestAsk != null ? bestAsk - bestBid : null,
+    bidDepth,
+    askDepth,
+    imbalance: totalDepth > 0 ? (bidDepth - askDepth) / totalDepth : null,
+    updatedAt: new Date().toISOString(),
+    source,
+    bids,
+    asks,
+  };
+}
+
+function normalizeLevels(levels: unknown): OrderBookLevel[] {
+  if (!Array.isArray(levels)) return [];
+  return levels
+    .map((level: unknown) => {
+      const value = level as { price?: unknown; size?: unknown };
+      return { price: finiteNumber(value.price), size: finiteNumber(value.size) };
+    })
+    .filter((level): level is OrderBookLevel => level.price != null && level.size != null && level.price > 0 && level.size > 0);
+}
+
+function depthAtTop(levels: OrderBookLevel[]): number {
+  return levels.slice(0, 3).reduce((sum, level) => sum + level.size, 0);
 }
 
 function countCrosses(ticks: PriceTick[], center: number): { crosses: number; latestCrossAt?: string } {

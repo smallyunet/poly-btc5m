@@ -1,6 +1,5 @@
 import { createHash } from 'node:crypto';
 
-import { PolymarketAdapter } from '../../../packages/polymarket/src';
 import { loadConfig } from './config';
 import { MarketDataService } from './marketData';
 import { PaperLedger } from './paper/PaperLedger';
@@ -14,15 +13,15 @@ import { TelegramNotifier } from './telegramNotifier';
 async function main() {
   const config = loadConfig();
   const paperConfig = paperConfigSnapshot(config);
-  const paperLedger = config.executionMode === 'paper' ? new PaperLedger({
+  const paperLedger = new PaperLedger({
     databasePath: config.paperDatabasePath,
     runId: config.paperRunId,
     codeSha: process.env.GIT_SHA || process.env.BUILD_SHA,
     configHash: createHash('sha256').update(JSON.stringify(paperConfig)).digest('hex'),
     fillModelVersion: config.paperFillModelVersion,
     config: paperConfig,
-  }) : undefined;
-  const store = new InMemoryStore(config.executionMode, config.tickIntervalMs, {
+  });
+  const store = new InMemoryStore(config.tickIntervalMs, {
     persistencePath: config.runtimeStatePath,
     maxRecords: config.runtimeMaxRecords,
     ledger: paperLedger,
@@ -31,16 +30,10 @@ async function main() {
     const result = store.refreshActiveSingleFillCooldowns();
     if (result.refreshed || result.cleared) console.log('[api] refreshed single-fill cooldowns on boot', JSON.stringify(result));
   }
-  const adapter = new PolymarketAdapter({
-    clobApiUrl: config.clobApiUrl,
-    chainId: config.chainId,
-    ownerPrivateKey: config.ownerPrivateKey,
-    depositWallet: config.depositWallet,
-  });
   const data = new MarketDataService(config, store);
   const discovery = new RecurringCryptoRoundDiscovery(config);
   const participation = new ParticipationService(config);
-  const telegramNotifier = new TelegramNotifier({ appConfig: config, store, adapter });
+  const telegramNotifier = new TelegramNotifier({ appConfig: config, store });
   data.start();
 
   let tickRunning = false;
@@ -54,7 +47,7 @@ async function main() {
     tickRunning = true;
     const startedAt = Date.now();
     try {
-      const snapshots = await runAllProfilesTick(config, store, data, adapter, discovery, participation);
+      const snapshots = await runAllProfilesTick(config, store, data, discovery, participation);
       const snapshot = snapshots[0];
       store.markRunningIfDegraded();
       store.recordRuntimeLog({
@@ -98,7 +91,6 @@ async function main() {
 
 function paperConfigSnapshot(config: ReturnType<typeof loadConfig>) {
   const {
-    ownerPrivateKey: _ownerPrivateKey,
     telegramBotToken: _telegramBotToken,
     dashboardInternalApiKey: _dashboardInternalApiKey,
     ...safeConfig
@@ -114,7 +106,7 @@ function entryRuntimeConfig(config: ReturnType<typeof loadConfig>) {
     orderSharesPerSide: config.orderSharesPerSide,
     maxOrderSharesPerSide: config.maxOrderSharesPerSide,
     minOrderShares: config.minOrderShares,
-    minLiveChopScore: config.minLiveChopScore,
+    minPaperChopScore: config.minPaperChopScore,
     bypassEntryScoreGating: config.bypassEntryScoreGating,
     bypassSingleFillCooldown: config.bypassSingleFillCooldown,
     entryConfirmTicks: config.entryConfirmTicks,

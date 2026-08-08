@@ -19,12 +19,8 @@ export type AppConfig = {
   dashboardInternalApiKey?: string;
   executionMode: ExecutionMode;
   activeStrategyProfile: StrategyProfile;
-  clobApiUrl: string;
   gammaApiUrl: string;
   dataApiUrl: string;
-  chainId: number;
-  ownerPrivateKey?: string;
-  depositWallet?: string;
   tickIntervalMs: number;
   runtimeStatePath: string;
   runtimeMaxRecords: number;
@@ -104,7 +100,7 @@ export type AppConfig = {
   pm5mTailCooldownRepeatWindowMs: number;
   pm5mTailCooldownSecondMs: number;
   pm5mTailCooldownThirdMs: number;
-  minLiveChopScore: number;
+  minPaperChopScore: number;
   bypassEntryScoreGating: boolean;
   bypassSingleFillCooldown: boolean;
   refreshSingleFillCooldownOnBoot: boolean;
@@ -166,20 +162,16 @@ export type AppConfig = {
 export function loadConfig(): AppConfig {
   const orderSharesPerSide = numberEnv('ORDER_SHARES_PER_SIDE', 5);
   const marketProfiles = loadMarketProfiles(orderSharesPerSide);
-  const executionMode = parseExecutionMode(process.env.EXECUTION_MODE);
+  const executionMode: ExecutionMode = 'paper';
   return {
     port: Number(process.env.PORT || 8788),
     dashboardInternalApiKey: process.env.DASHBOARD_INTERNAL_API_KEY,
     executionMode,
     activeStrategyProfile: parseStrategyProfile(process.env.ACTIVE_STRATEGY_PROFILE),
-    clobApiUrl: process.env.POLYMARKET_CLOB_API_URL || 'https://clob.polymarket.com',
     gammaApiUrl: process.env.POLYMARKET_GAMMA_API_URL || 'https://gamma-api.polymarket.com',
     dataApiUrl: process.env.POLYMARKET_DATA_API_URL || 'https://data-api.polymarket.com',
-    chainId: Number(process.env.POLYMARKET_CHAIN_ID || 137),
-    ownerPrivateKey: privateKeyForMode(executionMode, process.env.OWNER_PRIVATE_KEY),
-    depositWallet: walletForMode(executionMode, process.env.POLYMARKET_DEPOSIT_WALLET),
     tickIntervalMs: parsePositiveInteger(process.env.BOT_TICK_MS, 2_000),
-    runtimeStatePath: process.env.RUNTIME_STATE_PATH || path.resolve(process.cwd(), executionMode === 'paper' ? 'data/paper-runtime-state.json' : 'data/runtime-state.json'),
+    runtimeStatePath: process.env.RUNTIME_STATE_PATH || path.resolve(process.cwd(), 'data/paper-runtime-state.json'),
     runtimeMaxRecords: parsePositiveInteger(process.env.RUNTIME_MAX_RECORDS, 1_000),
     paperDatabasePath: process.env.PAPER_DATABASE_PATH || path.resolve(process.cwd(), 'data/paper.sqlite'),
     paperRunId: process.env.PAPER_RUN_ID?.trim() || 'paper-default',
@@ -257,7 +249,7 @@ export function loadConfig(): AppConfig {
     pm5mTailCooldownRepeatWindowMs: parsePositiveInteger(process.env.PM5M_TAIL_COOLDOWN_REPEAT_WINDOW_MS, 60 * 60_000),
     pm5mTailCooldownSecondMs: parsePositiveInteger(process.env.PM5M_TAIL_COOLDOWN_SECOND_MS, 60 * 60_000),
     pm5mTailCooldownThirdMs: parsePositiveInteger(process.env.PM5M_TAIL_COOLDOWN_THIRD_MS, 4 * 60 * 60_000),
-    minLiveChopScore: numberEnv('MIN_LIVE_CHOP_SCORE', 70),
+    minPaperChopScore: numberEnv('MIN_PAPER_CHOP_SCORE', 70),
     bypassEntryScoreGating: booleanEnv('BYPASS_ENTRY_SCORE_GATING', true),
     bypassSingleFillCooldown: booleanEnv('BYPASS_SINGLE_FILL_COOLDOWN', false),
     refreshSingleFillCooldownOnBoot: booleanEnv('REFRESH_SINGLE_FILL_COOLDOWN_ON_BOOT', false),
@@ -332,9 +324,9 @@ function loadMarketProfiles(orderSharesPerSide: number): MarketProfile[] {
   const baseMinSecondsToStart = parsePositiveInteger(process.env.ENTRY_MIN_SECONDS_TO_START, 15);
   const baseConfirmTicks = parsePositiveInteger(process.env.ENTRY_CONFIRM_TICKS, 3);
   const btcStatuses: Record<MarketInterval, MarketProfile['status']> = {
-    '5m': parseProfileStatus(process.env.BTC_5M_PROFILE_STATUS, process.env.EXECUTION_MODE === 'live' ? 'live' : 'monitor'),
-    '15m': parseProfileStatus(process.env.BTC_15M_PROFILE_STATUS, 'monitor'),
-    '1h': parseProfileStatus(process.env.BTC_1H_PROFILE_STATUS, 'monitor'),
+    '5m': parseProfileStatus(process.env.BTC_5M_PROFILE_STATUS, 'enabled'),
+    '15m': parseProfileStatus(process.env.BTC_15M_PROFILE_STATUS, 'enabled'),
+    '1h': parseProfileStatus(process.env.BTC_1H_PROFILE_STATUS, 'enabled'),
   };
   const altStatuses: Record<Exclude<SupportedAssetSymbol, 'BTC'>, Record<MarketInterval, MarketProfile['status']>> = {
     ETH: {
@@ -472,23 +464,8 @@ function profileCooldownMs(params: { assetSymbol: SupportedAssetSymbol; interval
 function parseProfileStatus(value: string | undefined, fallback: MarketProfile['status']): MarketProfile['status'] {
   const normalized = value?.trim().toLowerCase();
   if (normalized === 'disable') return 'disabled';
-  if (normalized === 'live' || normalized === 'monitor' || normalized === 'disabled') return normalized;
+  if (normalized === 'enabled' || normalized === 'disabled') return normalized;
   return fallback;
-}
-
-export function parseExecutionMode(value: string | undefined): ExecutionMode {
-  if (!value?.trim()) return 'live';
-  const normalized = value.trim().toLowerCase();
-  if (normalized === 'live' || normalized === 'paper' || normalized === 'monitor') return normalized;
-  throw new Error(`EXECUTION_MODE must be "monitor", "paper", or "live", got "${value}".`);
-}
-
-export function privateKeyForMode(mode: ExecutionMode, privateKey: string | undefined): string | undefined {
-  return mode === 'paper' ? undefined : privateKey;
-}
-
-export function walletForMode(mode: ExecutionMode, wallet: string | undefined): string | undefined {
-  return mode === 'paper' ? undefined : wallet;
 }
 
 function parseStrategyProfile(value: string | undefined): StrategyProfile {

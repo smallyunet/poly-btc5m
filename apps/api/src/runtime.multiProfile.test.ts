@@ -2,13 +2,12 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import type { MarketProfile } from '../../../packages/shared/src';
-import type { PolymarketAdapter } from '../../../packages/polymarket/src';
 import { loadConfig } from './config';
 import { runAllProfilesTick, runBotTick } from './runtime';
 import { InMemoryStore } from './store';
 
 test('entry signal confirmation counts are isolated by market profile', () => {
-  const store = new InMemoryStore('live', 2_000, { persistencePath: false });
+  const store = new InMemoryStore(2_000, { persistencePath: false });
 
   assert.equal(store.recordEntrySignal('btc-5m:round-a', true), 1);
   assert.equal(store.recordEntrySignal('btc-15m:round-b', true), 1);
@@ -22,7 +21,6 @@ test('entry signal confirmation counts are isolated by market profile', () => {
 
 test('runAllProfilesTick captures isolated six-asset 5m, 15m, and 1h profile snapshots', async () => {
   const config = loadConfig();
-  config.executionMode = 'monitor';
   config.activeStrategyProfile = 'classic';
   config.ownerPrivateKey = undefined;
   config.depositWallet = undefined;
@@ -33,10 +31,10 @@ test('runAllProfilesTick captures isolated six-asset 5m, 15m, and 1h profile sna
   config.pm5mTailEntryEnabled = false;
   config.dualEntryEnabled = true;
   config.marketProfiles = config.marketProfiles.map((profile) => (
-    { ...profile, status: 'monitor' }
+    { ...profile, status: 'enabled' }
   ));
   const enabledProfiles = config.marketProfiles.filter((profile) => profile.status !== 'disabled');
-  const store = new InMemoryStore('monitor', 2_000, { persistencePath: false }, 'classic', undefined, config.marketProfiles);
+  const store = new InMemoryStore(2_000, { persistencePath: false }, 'classic', undefined, config.marketProfiles);
   const syncedTokens: string[][] = [];
   let activeDiscoveries = 0;
   let maxConcurrentDiscoveries = 0;
@@ -128,16 +126,7 @@ test('runAllProfilesTick captures isolated six-asset 5m, 15m, and 1h profile sna
       };
     },
   };
-  const adapter = {
-    async getPortfolioPositions() {
-      return [];
-    },
-    async getCollateralBalanceAllowance() {
-      return { balance: 0, allowance: 0 };
-    },
-  } as unknown as PolymarketAdapter;
-
-  const snapshots = await runAllProfilesTick(config, store, data as never, adapter, discovery as never, participation as never);
+  const snapshots = await runAllProfilesTick(config, store, data as never, discovery as never, participation as never);
   const dashboard = store.dashboardState();
   const entryChecks = dashboard.profiles
     .map((item) => item.strategyChecks.find((check) => check.strategy === 'UPDOWN_DUAL_ENTRY'))
@@ -169,7 +158,6 @@ test('runAllProfilesTick captures isolated six-asset 5m, 15m, and 1h profile sna
 
 test('runBotTick blocks 5m entry intents when the asset selector does not select the profile', async () => {
   const config = loadConfig();
-  config.executionMode = 'monitor';
   config.activeStrategyProfile = 'classic';
   config.ownerPrivateKey = undefined;
   config.depositWallet = undefined;
@@ -179,9 +167,9 @@ test('runBotTick blocks 5m entry intents when the asset selector does not select
   config.pm5mAssetSelectorEnabled = true;
   config.pm5mTailEntryEnabled = false;
   config.dualEntryEnabled = true;
-  const profile = { ...config.marketProfiles.find((item) => item.id === 'btc-5m')!, status: 'monitor' as const };
+  const profile = { ...config.marketProfiles.find((item) => item.id === 'btc-5m')!, status: 'enabled' as const };
   config.marketProfiles = [profile];
-  const store = new InMemoryStore('monitor', 2_000, { persistencePath: false }, 'classic', undefined, config.marketProfiles);
+  const store = new InMemoryStore(2_000, { persistencePath: false }, 'classic', undefined, config.marketProfiles);
 
   const data = {
     latestPrice() {
@@ -261,16 +249,7 @@ test('runBotTick blocks 5m entry intents when the asset selector does not select
       };
     },
   };
-  const adapter = {
-    async getPortfolioPositions() {
-      return [];
-    },
-    async getCollateralBalanceAllowance() {
-      return { balance: 0, allowance: 0 };
-    },
-  } as unknown as PolymarketAdapter;
-
-  await runBotTick(config, store, data as never, adapter, discovery as never, participation as never, profile, {
+  await runBotTick(config, store, data as never, discovery as never, participation as never, profile, {
     profileId: 'btc-5m',
     selected: false,
     rank: 2,

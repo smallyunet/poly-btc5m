@@ -40,7 +40,7 @@ export type PendingSingleFillRiskRecord = {
 export type SingleFillHedgeOutcome = {
   profileId: MarketProfileId;
   roundId: string;
-  status: 'posted' | 'blocked' | 'failed' | 'monitor';
+  status: 'posted' | 'blocked' | 'failed';
   reason: string;
   recordedAt: string;
 };

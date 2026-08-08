@@ -25,7 +25,7 @@ const risk: StrategyRiskConfig = {
   maxDriftRatio120s: 0.45,
   maxMomentumRatio30s: 0.55,
   maxEntryQueueImbalance: 5,
-  minLiveChopScore: 80,
+  minPaperChopScore: 80,
   bypassEntryScoreGating: false,
   bypassSingleFillCooldown: false,
   minParticipationHoldersPerSide: 3,
@@ -195,16 +195,16 @@ test('uses 42c for edge-score entries', () => {
   assert.equal(result.intents[0].shares, 5);
 });
 
-test('blocks edge-score entries in live mode', () => {
+test('blocks edge-score entries under the strict Paper gate', () => {
   const snapshot = { ...baseSnapshot({ ...chopFeatures(), chopScore: 75 }), regime: 'CHOP' as const };
   const result = evaluateEntry(snapshot, { ...risk, dryRun: false });
   assert.equal(result.intents.length, 0);
   assert.equal(result.rejected.length, 2);
-  assert.match(result.rejected[0].rejectionReason || '', /ENTRY_SCORE_TOO_LOW_FOR_LIVE/);
-  assert.equal(result.checks[0].conditions.find((item) => item.label === 'Live score floor')?.passed, false);
+  assert.match(result.rejected[0].rejectionReason || '', /ENTRY_SCORE_TOO_LOW_FOR_PAPER/);
+  assert.equal(result.checks[0].conditions.find((item) => item.label === 'Paper score floor')?.passed, false);
 });
 
-test('bypasses score gating for live low-score entries when enabled', () => {
+test('bypasses score gating for low-score Paper entries when enabled', () => {
   const snapshot = { ...baseSnapshot({ chopScore: 12 }), regime: 'LOW_ACTIVITY' as const };
   const result = evaluateEntry(snapshot, { ...risk, dryRun: false, bypassEntryScoreGating: true });
   assert.equal(result.intents.length, 2);
@@ -217,7 +217,7 @@ test('bypasses score gating for live low-score entries when enabled', () => {
   assert.equal(result.checks[0].conditions.find((item) => item.label === 'center cross_120s threshold')?.passed, true);
   assert.equal(result.checks[0].conditions.find((item) => item.label === 'range_120s sufficient')?.passed, true);
   assert.equal(result.checks[0].conditions.find((item) => item.label === 'center two-sided excursion')?.passed, true);
-  assert.equal(result.checks[0].conditions.find((item) => item.label === 'Live score floor')?.passed, true);
+  assert.equal(result.checks[0].conditions.find((item) => item.label === 'Paper score floor')?.passed, true);
 });
 
 test('bypasses entry blockers except single-fill cooldown when entry bypass is enabled', () => {

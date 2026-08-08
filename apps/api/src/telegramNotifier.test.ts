@@ -2,34 +2,21 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import type { DashboardState } from '../../../packages/shared/src';
-import type { PolymarketAdapter } from '../../../packages/polymarket/src';
 import type { AppConfig } from './config';
 import type { InMemoryStore, TelegramNotificationState } from './store';
 import { TelegramNotifier } from './telegramNotifier';
 
-test('does not read balance when no Telegram notification is pending', async () => {
-  let balanceReads = 0;
-  const notifier = new TelegramNotifier({
+test('does not read balance when no Telegram notification is pending', async () => {  const notifier = new TelegramNotifier({
     appConfig: config(),
     store: fakeStore(),
-    adapter: {
-      async getCollateralBalanceAllowance() {
-        balanceReads += 1;
-        return { balance: 10, allowance: 10 };
-      },
-    } as PolymarketAdapter,
   });
 
   await withFetch(async () => {
     await notifier.notifyAfterTick(dashboardState());
   });
-
-  assert.equal(balanceReads, 0);
 });
 
-test('sends a round summary with on-demand balance and marks the summary notified', async () => {
-  let balanceReads = 0;
-  let sentText = '';
+test('sends a Paper round summary and marks it notified', async () => {  let sentText = '';
   let parseMode = '';
   const markedRoundKeys: string[] = [];
   const roundId = futureRoundId();
@@ -40,12 +27,6 @@ test('sends a round summary with on-demand balance and marks the summary notifie
         markedRoundKeys.push(key);
       },
     }),
-    adapter: {
-      async getCollateralBalanceAllowance() {
-        balanceReads += 1;
-        return { balance: 12.34, allowance: 20 };
-      },
-    } as PolymarketAdapter,
   });
 
   const state = dashboardState({
@@ -100,22 +81,17 @@ test('sends a round summary with on-demand balance and marks the summary notifie
   }, async () => {
     await notifier.notifyAfterTick(state);
   });
-
-  assert.equal(balanceReads, 1);
   assert.deepEqual(markedRoundKeys, [`btc-5m:${roundId}:settled`]);
   assert.equal(parseMode, 'HTML');
   assert.match(sentText, /BTC 5m Round Summary/);
   assert.match(sentText, /<b>PnL<\/b>/);
   assert.match(sentText, /Round: 🟢 PROFIT \+\$5\.50/);
   assert.match(sentText, /Settled: 🟢 PROFIT \+\$5\.50/);
-  assert.match(sentText, /<b>Account<\/b>/);
-  assert.match(sentText, /Balance: \$12\.34/);
   assert.doesNotMatch(sentText, /<pre>/);
   assert.doesNotMatch(sentText, /allowance/i);
 });
 
 test('bootstraps historical round summaries without sending backlog notifications', async () => {
-  let balanceReads = 0;
   let fetchCalls = 0;
   const markedRoundKeys: string[] = [];
   const notificationState: TelegramNotificationState = { notifiedRoundSummaryKeys: [] };
@@ -128,12 +104,6 @@ test('bootstraps historical round summaries without sending backlog notification
         markedRoundKeys.push(key);
       },
     }),
-    adapter: {
-      async getCollateralBalanceAllowance() {
-        balanceReads += 1;
-        return { balance: 12.34, allowance: 20 };
-      },
-    } as PolymarketAdapter,
   });
 
   const state = dashboardState({
@@ -174,8 +144,6 @@ test('bootstraps historical round summaries without sending backlog notification
   }, async () => {
     await notifier.notifyAfterTick(state);
   });
-
-  assert.equal(balanceReads, 0);
   assert.equal(fetchCalls, 0);
   assert.deepEqual(markedRoundKeys, ['btc-5m:btc-updown-5m-2000:settled']);
 });
@@ -191,11 +159,6 @@ test('sends idle summary with per-profile rows', async () => {
         notificationState.lastIdleSummaryAt = sentAt || new Date().toISOString();
       },
     }),
-    adapter: {
-      async getCollateralBalanceAllowance() {
-        return { balance: 12.34, allowance: 20 };
-      },
-    } as PolymarketAdapter,
   });
 
   const oldTime = new Date(Date.now() - 60_000).toISOString();
@@ -257,7 +220,7 @@ function dashboardState(overrides: Partial<DashboardState> = {}): DashboardState
   return {
     runtime: {
       status: 'running',
-      executionMode: 'monitor',
+      executionMode: 'paper',
       startedAt: new Date().toISOString(),
       tickIntervalMs: 2000,
       version: 'test',
@@ -299,7 +262,7 @@ function profileState(id: 'btc-5m' | 'btc-15m' | 'btc-1h', label: string, interv
       assetSymbol: 'BTC',
       interval,
       label,
-      status: interval === '5m' ? 'live' : 'monitor',
+      status: 'enabled',
       seriesSlug: `btc-updown-${interval}`,
       title: `Polymarket ${label}`,
       roundDurationSeconds: duration,

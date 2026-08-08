@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { loadConfig, parseExecutionMode, privateKeyForMode, walletForMode } from './config';
+import { loadConfig } from './config';
 
 const COOLDOWN_ENV_KEYS = [
   'SINGLE_FILL_COOLDOWN_BASE_MS',
@@ -86,16 +86,11 @@ const COOLDOWN_ENV_KEYS = [
   'CROSS_PROFILE_SINGLE_FILL_RISK_ENABLED',
 ];
 
-test('paper execution mode discards signing credentials', () => {
-  assert.equal(parseExecutionMode('paper'), 'paper');
-  assert.equal(privateKeyForMode('paper', 'must-not-survive'), undefined);
-  assert.equal(walletForMode('paper', 'must-not-survive'), undefined);
-  assert.equal(privateKeyForMode('live', 'live-key'), 'live-key');
-  assert.equal(walletForMode('live', 'live-wallet'), 'live-wallet');
-});
-
-test('unknown execution modes fail closed instead of silently becoming monitor', () => {
-  assert.throws(() => parseExecutionMode('typo'), /EXECUTION_MODE must be/);
+test('configuration is always Paper-only and exposes no credentials', () => {
+  const config = loadConfig();
+  assert.equal(config.executionMode, 'paper');
+  assert.equal('ownerPrivateKey' in config, false);
+  assert.equal('depositWallet' in config, false);
 });
 
 test('market profile cooldown defaults match the documented global cooldown policy', () => {
@@ -265,56 +260,56 @@ test('market profile cooldown supports profile-specific env override', () => {
 
 test('all recurring asset profiles can be enabled independently from BTC profiles', () => {
   withEnv(COOLDOWN_ENV_KEYS, {
-    ETH_5M_PROFILE_STATUS: 'monitor',
-    ETH_15M_PROFILE_STATUS: 'live',
+    ETH_5M_PROFILE_STATUS: 'enabled',
+    ETH_15M_PROFILE_STATUS: 'enabled',
     ETH_1H_PROFILE_STATUS: 'disabled',
     ETH_15M_SINGLE_FILL_COOLDOWN_BASE_MS: String(44 * 60_000),
-    SOL_5M_PROFILE_STATUS: 'monitor',
-    SOL_15M_PROFILE_STATUS: 'live',
+    SOL_5M_PROFILE_STATUS: 'enabled',
+    SOL_15M_PROFILE_STATUS: 'enabled',
     SOL_1H_PROFILE_STATUS: 'disabled',
     SOL_15M_SINGLE_FILL_COOLDOWN_BASE_MS: String(50 * 60_000),
-    DOGE_5M_PROFILE_STATUS: 'monitor',
-    DOGE_15M_PROFILE_STATUS: 'live',
+    DOGE_5M_PROFILE_STATUS: 'enabled',
+    DOGE_15M_PROFILE_STATUS: 'enabled',
     DOGE_1H_PROFILE_STATUS: 'disabled',
     DOGE_15M_SINGLE_FILL_COOLDOWN_BASE_MS: String(55 * 60_000),
-    XRP_5M_PROFILE_STATUS: 'monitor',
-    XRP_15M_PROFILE_STATUS: 'live',
+    XRP_5M_PROFILE_STATUS: 'enabled',
+    XRP_15M_PROFILE_STATUS: 'enabled',
     XRP_1H_PROFILE_STATUS: 'disabled',
     XRP_15M_SINGLE_FILL_COOLDOWN_BASE_MS: String(60 * 60_000),
-    HYPE_5M_PROFILE_STATUS: 'monitor',
-    HYPE_15M_PROFILE_STATUS: 'live',
+    HYPE_5M_PROFILE_STATUS: 'enabled',
+    HYPE_15M_PROFILE_STATUS: 'enabled',
     HYPE_1H_PROFILE_STATUS: 'disabled',
     HYPE_15M_SINGLE_FILL_COOLDOWN_BASE_MS: String(65 * 60_000),
   }, () => {
     const config = loadConfig();
     const byId = new Map(config.marketProfiles.map((profile) => [profile.id, profile]));
 
-    assert.equal(byId.get('eth-5m')?.status, 'monitor');
-    assert.equal(byId.get('eth-15m')?.status, 'live');
+    assert.equal(byId.get('eth-5m')?.status, 'enabled');
+    assert.equal(byId.get('eth-15m')?.status, 'enabled');
     assert.equal(byId.get('eth-1h')?.status, 'disabled');
     assert.equal(byId.get('eth-5m')?.seriesSlug, 'eth-updown-5m');
     assert.equal(byId.get('eth-15m')?.priceFeedSymbol, 'ethusdt');
     assert.equal(byId.get('eth-15m')?.cooldown.baseMs, 44 * 60_000);
-    assert.equal(byId.get('sol-5m')?.status, 'monitor');
-    assert.equal(byId.get('sol-15m')?.status, 'live');
+    assert.equal(byId.get('sol-5m')?.status, 'enabled');
+    assert.equal(byId.get('sol-15m')?.status, 'enabled');
     assert.equal(byId.get('sol-1h')?.status, 'disabled');
     assert.equal(byId.get('sol-5m')?.seriesSlug, 'sol-updown-5m');
     assert.equal(byId.get('sol-15m')?.priceFeedSymbol, 'solusdt');
     assert.equal(byId.get('sol-15m')?.cooldown.baseMs, 50 * 60_000);
-    assert.equal(byId.get('doge-5m')?.status, 'monitor');
-    assert.equal(byId.get('doge-15m')?.status, 'live');
+    assert.equal(byId.get('doge-5m')?.status, 'enabled');
+    assert.equal(byId.get('doge-15m')?.status, 'enabled');
     assert.equal(byId.get('doge-1h')?.status, 'disabled');
     assert.equal(byId.get('doge-5m')?.seriesSlug, 'doge-updown-5m');
     assert.equal(byId.get('doge-15m')?.priceFeedSymbol, 'dogeusdt');
     assert.equal(byId.get('doge-15m')?.cooldown.baseMs, 55 * 60_000);
-    assert.equal(byId.get('xrp-5m')?.status, 'monitor');
-    assert.equal(byId.get('xrp-15m')?.status, 'live');
+    assert.equal(byId.get('xrp-5m')?.status, 'enabled');
+    assert.equal(byId.get('xrp-15m')?.status, 'enabled');
     assert.equal(byId.get('xrp-1h')?.status, 'disabled');
     assert.equal(byId.get('xrp-5m')?.seriesSlug, 'xrp-updown-5m');
     assert.equal(byId.get('xrp-15m')?.priceFeedSymbol, 'xrpusdt');
     assert.equal(byId.get('xrp-15m')?.cooldown.baseMs, 60 * 60_000);
-    assert.equal(byId.get('hype-5m')?.status, 'monitor');
-    assert.equal(byId.get('hype-15m')?.status, 'live');
+    assert.equal(byId.get('hype-5m')?.status, 'enabled');
+    assert.equal(byId.get('hype-15m')?.status, 'enabled');
     assert.equal(byId.get('hype-1h')?.status, 'disabled');
     assert.equal(byId.get('hype-5m')?.seriesSlug, 'hype-updown-5m');
     assert.equal(byId.get('hype-15m')?.priceFeedSymbol, 'hypeusdt');
@@ -325,10 +320,10 @@ test('all recurring asset profiles can be enabled independently from BTC profile
 test('enabled non-BTC profiles are added to an existing Binance multi-stream URL', () => {
   withEnv(COOLDOWN_ENV_KEYS, {
     BINANCE_WS_URL: 'wss://stream.binance.com:9443/stream?streams=btcusdt@aggTrade/ethusdt@aggTrade',
-    SOL_5M_PROFILE_STATUS: 'monitor',
-    DOGE_5M_PROFILE_STATUS: 'monitor',
-    XRP_5M_PROFILE_STATUS: 'monitor',
-    HYPE_5M_PROFILE_STATUS: 'monitor',
+    SOL_5M_PROFILE_STATUS: 'enabled',
+    DOGE_5M_PROFILE_STATUS: 'enabled',
+    XRP_5M_PROFILE_STATUS: 'enabled',
+    HYPE_5M_PROFILE_STATUS: 'enabled',
   }, () => {
     const config = loadConfig();
 
@@ -344,7 +339,7 @@ test('enabled non-BTC profiles are added to an existing Binance multi-stream URL
 test('enabled DOGE profiles upgrade an existing Binance single-stream URL', () => {
   withEnv(COOLDOWN_ENV_KEYS, {
     BINANCE_WS_URL: 'wss://stream.binance.com:9443/ws/btcusdt@aggTrade',
-    DOGE_5M_PROFILE_STATUS: 'monitor',
+    DOGE_5M_PROFILE_STATUS: 'enabled',
   }, () => {
     const config = loadConfig();
 

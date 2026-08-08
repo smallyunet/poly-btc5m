@@ -1,4 +1,4 @@
-export type ExecutionMode = 'monitor' | 'paper' | 'live';
+export type ExecutionMode = 'paper';
 
 export type TradeSide = 'BUY' | 'SELL';
 
@@ -14,7 +14,7 @@ export type MarketInterval = '5m' | '15m' | '1h';
 
 export type MarketProfileId = `${MarketAsset}-${MarketInterval}`;
 
-export type MarketProfileStatus = 'disabled' | 'monitor' | 'live';
+export type MarketProfileStatus = 'disabled' | 'enabled';
 
 export type MarketProfile = {
   id: MarketProfileId;
@@ -102,7 +102,7 @@ export type EntryRuntimeConfig = {
   orderSharesPerSide: number;
   maxOrderSharesPerSide: number;
   minOrderShares: number;
-  minLiveChopScore: number;
+  minPaperChopScore: number;
   bypassEntryScoreGating: boolean;
   bypassSingleFillCooldown: boolean;
   entryConfirmTicks: number;

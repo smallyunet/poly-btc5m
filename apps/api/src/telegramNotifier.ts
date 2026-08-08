@@ -1,23 +1,15 @@
 import type { DashboardState, FillRecord, OrderRecord, SettlementRecord, StrategyCheck } from '../../../packages/shared/src';
-import type { PolymarketAdapter } from '../../../packages/polymarket/src';
 import type { AppConfig } from './config';
 import type { InMemoryStore } from './store';
 
 type TelegramNotifierOptions = {
   appConfig: AppConfig;
   store: InMemoryStore;
-  adapter: PolymarketAdapter;
 };
 
 type PendingNotification =
   | { kind: 'round-summary'; key: string; text: string }
   | { kind: 'idle-summary'; text: string };
-
-type AccountSummary = {
-  balance?: number;
-  allowance?: number | null;
-  error?: string;
-};
 
 export class TelegramNotifier {
   private readonly startedAtMs = Date.now();
@@ -31,10 +23,8 @@ export class TelegramNotifier {
     const pending = this.pendingNotifications(state);
     if (!pending.length) return;
 
-    const account = await this.loadAccountSummary();
     for (const notification of pending) {
-      const text = `${notification.text}\n\n${formatAccountSummary(account)}`;
-      const sent = await this.sendMessage(text);
+      const sent = await this.sendMessage(notification.text);
       if (!sent) continue;
       if (notification.kind === 'round-summary') {
         this.options.store.markTelegramRoundSummaryNotified(notification.key);
@@ -108,21 +98,6 @@ export class TelegramNotifier {
     };
   }
 
-  private async loadAccountSummary(): Promise<AccountSummary> {
-    try {
-      const account = await this.options.adapter.getCollateralBalanceAllowance();
-      return account;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      this.options.store.recordRuntimeLog({
-        level: 'warn',
-        source: 'telegram',
-        message: `Telegram account summary balance read failed: ${message}`,
-      });
-      return { error: message };
-    }
-  }
-
   private async sendMessage(text: string): Promise<boolean> {
     const token = this.options.appConfig.telegramBotToken?.trim();
     const chatId = this.options.appConfig.telegramChatId?.trim();
@@ -180,7 +155,7 @@ function buildRoundSummary(state: DashboardState, settlement: SettlementRecord, 
 }
 
 function buildIdleSummary(state: DashboardState, referenceMs: number): string {
-  const openOrders = state.orders.filter((order) => order.status === 'posted' || order.status === 'partially_filled' || (state.runtime.executionMode === 'monitor' && order.status === 'local')).length;
+  const openOrders = state.orders.filter((order) => order.status === 'posted' || order.status === 'partially_filled').length;
   const profileRows = profileIdleRows(state);
   return formatTelegramSummary('Profile Idle Summary', [
     section('Idle', [
@@ -228,13 +203,6 @@ function fillSideSummary(fills: FillRecord[], label: 'YES' | 'NO'): string {
   const buyCost = sum(sideFills.filter((fill) => fill.side === 'BUY').map((fill) => fill.price * fill.size));
   const avgBuy = buyShares > 0 ? buyCost / buyShares : null;
   return `${label} buy ${formatNumber(buyShares, 2)}${avgBuy == null ? '' : ` @ ${formatNumber(avgBuy, 3)}`}${sellShares > 0 ? `, sell ${formatNumber(sellShares, 2)}` : ''}`;
-}
-
-function formatAccountSummary(account: AccountSummary): string {
-  return [
-    '<b>Account</b>',
-    formatRow('Balance', account.error ? 'unavailable' : formatMoney(account.balance ?? 0)),
-  ].join('\n');
 }
 
 function topBlockers(check: StrategyCheck | undefined): string[] {

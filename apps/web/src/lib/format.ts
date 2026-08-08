@@ -1,9 +1,7 @@
 import type { ExecutionMode } from '../../../../packages/shared/src';
 
 export function modeLabel(mode: ExecutionMode): string {
-  if (mode === 'live') return 'live trading';
-  if (mode === 'paper') return 'paper trading';
-  return 'monitor only';
+  return 'paper trading';
 }
 
 export function formatMoney(value: number): string {

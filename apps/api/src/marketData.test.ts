@@ -49,7 +49,7 @@ test('keeps Binance price samples isolated by profile symbol', () => {
   const btcProfile = config.marketProfiles.find((profile) => profile.id === 'btc-5m') as MarketProfile;
   const ethProfile = config.marketProfiles.find((profile) => profile.id === 'eth-5m') as MarketProfile;
   const dogeProfile = config.marketProfiles.find((profile) => profile.id === 'doge-5m') as MarketProfile;
-  const service = new MarketDataService(config, new InMemoryStore('monitor', 2_000, { persistencePath: false }));
+  const service = new MarketDataService(config, new InMemoryStore(2_000, { persistencePath: false }));
   const injected = service as unknown as {
     binanceConnected: boolean;
     handleBinancePriceMessage(data: string): void;

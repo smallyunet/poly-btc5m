@@ -2,9 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import type { AppConfig } from './config';
-import { executeSingleFillHedges, planSingleFillHedge } from './hedge';
+import { planSingleFillHedge } from './hedge';
 import { InMemoryStore, type SingleFillHedgeCandidate } from './store';
-import type { PolymarketAdapter } from '../../../packages/polymarket/src';
 import type { OrderBookQuote, OrderRecord, TradeIntent } from '../../../packages/shared/src';
 
 const nowMs = new Date('2026-06-26T00:04:35.000Z').getTime();
@@ -185,71 +184,6 @@ test('does not hedge after the single filled side was sold by profit exit', () =
   assert.deepEqual(plan, { ok: false, reason: 'NO_MATERIAL_SINGLE_FILL_EXPOSURE' });
 });
 
-test('does not execute a hedge after a prior profit exit sell fill', async () => {
-  const now = Date.now();
-  const activeCandidate = candidate({
-    startAt: new Date(now - 4 * 60_000).toISOString(),
-    endAt: new Date(now + 25_000).toISOString(),
-    secondsToEnd: 25,
-  });
-  const store = new InMemoryStore('live', 2_000, { persistencePath: false });
-  store.recordOrder(order('YES', {
-    id: 'classic-yes-buy',
-    roundId: activeCandidate.roundId,
-    eventSlug: activeCandidate.eventSlug,
-    strategy: 'UPDOWN_DUAL_ENTRY',
-    filledSize: 10,
-    avgFillPrice: 0.44,
-    status: 'filled',
-  }));
-  store.recordOrder(order('NO', {
-    id: 'classic-no-buy',
-    roundId: activeCandidate.roundId,
-    eventSlug: activeCandidate.eventSlug,
-    strategy: 'UPDOWN_DUAL_ENTRY',
-    filledSize: 0,
-    status: 'cancelled',
-    clobOrderId: 'no-cancelled',
-  }));
-  store.recordOrder(order('YES', {
-    id: 'profit-exit-yes-sell',
-    intentId: 'profit-exit-intent',
-    roundId: activeCandidate.roundId,
-    eventSlug: activeCandidate.eventSlug,
-    strategy: 'UPDOWN_SINGLE_FILL_PROFIT_EXIT',
-    side: 'SELL',
-    filledSize: 10,
-    avgFillPrice: 0.51,
-    status: 'filled',
-  }));
-  let cancelAttempts = 0;
-  let postAttempts = 0;
-  const adapter = {
-    async getRecentFillsForTargets() {
-      return [];
-    },
-    async cancelOrders() {
-      cancelAttempts += 1;
-      return {};
-    },
-    async executeLimitIntent() {
-      postAttempts += 1;
-      throw new Error('should not post hedge after profit exit');
-    },
-  } as unknown as PolymarketAdapter;
-
-  const diagnostics = await executeSingleFillHedges({
-    appConfig: { ...config(), executionMode: 'live', ownerPrivateKey: '0xabc', depositWallet: '0xwallet' },
-    adapter,
-    store,
-    candidates: [activeCandidate],
-    orderbooks: [quote('no-token', 0.59)],
-  });
-
-  assert.deepEqual(diagnostics, []);
-  assert.equal(cancelAttempts, 0);
-  assert.equal(postAttempts, 0);
-});
 
 test('pauses hedge while a profit-exit sell order is awaiting reconciliation', () => {
   const plan = planSingleFillHedge({
@@ -267,68 +201,6 @@ test('pauses hedge while a profit-exit sell order is awaiting reconciliation', (
   assert.deepEqual(plan, { ok: false, reason: 'PROFIT_EXIT_ORDER_ACTIVE' });
 });
 
-test('does not execute another hedge while a prior hedge order is still non-failed', async () => {
-  const now = Date.now();
-  const activeCandidate = candidate({
-    startAt: new Date(now - 4 * 60_000).toISOString(),
-    endAt: new Date(now + 25_000).toISOString(),
-    secondsToEnd: 25,
-  });
-  const store = new InMemoryStore('live', 2_000, { persistencePath: false });
-  store.recordOrder(order('YES', {
-    id: 'classic-yes-buy',
-    roundId: activeCandidate.roundId,
-    eventSlug: activeCandidate.eventSlug,
-    strategy: 'UPDOWN_DUAL_ENTRY',
-    filledSize: 10,
-    avgFillPrice: 0.44,
-    status: 'filled',
-  }));
-  store.recordOrder(order('NO', {
-    id: 'classic-no-buy',
-    roundId: activeCandidate.roundId,
-    eventSlug: activeCandidate.eventSlug,
-    strategy: 'UPDOWN_DUAL_ENTRY',
-    filledSize: 0,
-    status: 'cancelled',
-    clobOrderId: 'no-cancelled',
-  }));
-  store.recordOrder(order('NO', {
-    id: 'hedge-no-buy',
-    intentId: 'hedge-intent',
-    roundId: activeCandidate.roundId,
-    eventSlug: activeCandidate.eventSlug,
-    strategy: 'UPDOWN_SINGLE_FILL_HEDGE',
-    filledSize: 0,
-    status: 'posted',
-    createdAt: new Date(now - 2 * 60_000).toISOString(),
-  }));
-  let postAttempts = 0;
-  const adapter = {
-    async getRecentFillsForTargets() {
-      return [];
-    },
-    async cancelOrders() {
-      return {};
-    },
-    async executeLimitIntent() {
-      postAttempts += 1;
-      throw new Error('should not post duplicate hedge');
-    },
-  } as unknown as PolymarketAdapter;
-
-  const diagnostics = await executeSingleFillHedges({
-    appConfig: { ...config(), executionMode: 'live', ownerPrivateKey: '0xabc', depositWallet: '0xwallet' },
-    adapter,
-    store,
-    candidates: [activeCandidate],
-    orderbooks: [{ ...quote('no-token', 0.59), updatedAt: new Date().toISOString() }],
-  });
-
-  assert.deepEqual(diagnostics, []);
-  assert.equal(postAttempts, 0);
-  assert.equal(store.getSingleFillHedgeOutcome(activeCandidate.profileId, activeCandidate.roundId)?.reason, 'HEDGE_ORDER_EXISTS');
-});
 
 test('blocks a marketable hedge below the Polymarket minimum notional', () => {
   const plan = planSingleFillHedge({
@@ -345,91 +217,12 @@ test('blocks a marketable hedge below the Polymarket minimum notional', () => {
   assert.deepEqual(plan, { ok: false, reason: 'HEDGE_NOTIONAL_BELOW_MIN' });
 });
 
-test('executes final-window hedge as a FAK limit', async () => {
-  const now = Date.now();
-  const activeCandidate = candidate({
-    startAt: new Date(now - 4 * 60_000).toISOString(),
-    endAt: new Date(now + 25_000).toISOString(),
-    secondsToEnd: 25,
-  });
-  const store = new InMemoryStore('live', 2_000, { persistencePath: false });
-  store.recordOrder(order('YES', { roundId: activeCandidate.roundId, eventSlug: activeCandidate.eventSlug, filledSize: 10, avgFillPrice: 0.44, status: 'filled' }));
-  store.recordOrder(order('NO', { roundId: activeCandidate.roundId, eventSlug: activeCandidate.eventSlug, filledSize: 0, status: 'posted', clobOrderId: 'no-open' }));
-  let postedOptions: { execute: boolean; orderType?: string } | undefined;
-  const adapter = {
-    async getRecentFillsForTargets() {
-      return [];
-    },
-    async cancelOrders() {
-      return {};
-    },
-    async executeLimitIntent(_intent: TradeIntent, options: { execute: boolean; orderType?: string }) {
-      postedOptions = options;
-      return { ok: true, orderId: 'hedge-order', price: 0.6, size: 10 };
-    },
-  } as unknown as PolymarketAdapter;
 
-  const diagnostics = await executeSingleFillHedges({
-    appConfig: { ...config(), executionMode: 'live', ownerPrivateKey: '0xabc', depositWallet: '0xwallet' },
-    adapter,
-    store,
-    candidates: [activeCandidate],
-    orderbooks: [quote('no-token', 0.59)],
-  });
-
-  assert.deepEqual(diagnostics, []);
-  assert.equal(postedOptions?.orderType, 'FAK');
-});
-
-test('retries a hedge FAK when the book has no matching orders', async () => {
-  const now = Date.now();
-  const activeCandidate = candidate({
-    startAt: new Date(now - 4 * 60_000).toISOString(),
-    endAt: new Date(now + 25_000).toISOString(),
-    secondsToEnd: 25,
-  });
-  const store = new InMemoryStore('live', 2_000, { persistencePath: false });
-  store.recordOrder(order('YES', { roundId: activeCandidate.roundId, eventSlug: activeCandidate.eventSlug, filledSize: 10, avgFillPrice: 0.44, status: 'filled' }));
-  store.recordOrder(order('NO', { roundId: activeCandidate.roundId, eventSlug: activeCandidate.eventSlug, filledSize: 0, status: 'posted', clobOrderId: 'no-open' }));
-  let attempts = 0;
-  const adapter = {
-    async getRecentFillsForTargets() {
-      return [];
-    },
-    async cancelOrders() {
-      return {};
-    },
-    async executeLimitIntent(_intent: TradeIntent, options: { execute: boolean; orderType?: string }) {
-      attempts += 1;
-      assert.equal(options.orderType, 'FAK');
-      if (attempts === 1) {
-        return {
-          ok: false,
-          price: 0.6,
-          size: 10,
-          error: 'no orders found to match with FAK order. FAK orders are partially filled or killed if no match is found.',
-        };
-      }
-      return { ok: true, orderId: 'hedge-order', price: 0.6, size: 10 };
-    },
-  } as unknown as PolymarketAdapter;
-
-  const diagnostics = await executeSingleFillHedges({
-    appConfig: { ...config(), executionMode: 'live', ownerPrivateKey: '0xabc', depositWallet: '0xwallet' },
-    adapter,
-    store,
-    candidates: [activeCandidate],
-    orderbooks: [quote('no-token', 0.59)],
-  });
-
-  assert.deepEqual(diagnostics, []);
-  assert.equal(attempts, 2);
-});
 
 function config(): AppConfig {
   return {
     port: 8788,
-    executionMode: 'monitor',
+    executionMode: 'paper',
     clobApiUrl: 'https://clob.polymarket.com',
     gammaApiUrl: 'https://gamma-api.polymarket.com',
     dataApiUrl: 'https://data-api.polymarket.com',
@@ -459,7 +252,7 @@ function config(): AppConfig {
     maxDriftRatio120s: 0.45,
     maxMomentumRatio30s: 0.55,
     maxEntryQueueImbalance: 5,
-    minLiveChopScore: 80,
+    minPaperChopScore: 80,
     bypassEntryScoreGating: false,
     bypassSingleFillCooldown: false,
     entryConfirmTicks: 3,

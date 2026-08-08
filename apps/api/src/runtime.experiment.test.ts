@@ -7,7 +7,7 @@ import { evaluateExperimentEntry } from './runtime';
 import { InMemoryStore } from './store';
 
 test('generates paired 50c experiment intents without orderbook readiness', () => {
-  const store = new InMemoryStore('monitor', 2_000, { persistencePath: false }, 'experiment_next_round');
+  const store = new InMemoryStore(2_000, { persistencePath: false }, 'experiment_next_round');
   const evaluation = evaluateExperimentEntry(snapshot(), config(), store);
 
   assert.equal(evaluation.rejected.length, 0);

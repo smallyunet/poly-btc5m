@@ -2,11 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import type { AppConfig } from './config';
-import { executeSingleFillLossExits, planSingleFillLossExit } from './lossExit';
+import { planSingleFillLossExit } from './lossExit';
 import { planSingleFillHedge } from './hedge';
 import { InMemoryStore } from './store';
 import type { OrderBookQuote, OrderRecord, TradeIntent } from '../../../packages/shared/src';
-import type { PolymarketAdapter } from '../../../packages/polymarket/src';
 import type { SingleFillProfitExitCandidate } from './store';
 
 const nowMs = new Date('2026-06-26T00:02:00.000Z').getTime();
@@ -63,87 +62,6 @@ test('blocks loss exit when the filled side is not losing', () => {
   assert.deepEqual(plan, { ok: false, reason: 'LOSS_EXIT_NOT_LOSS' });
 });
 
-test('executes loss exit before hedge and prevents a later hedge from seeing open exposure', async () => {
-  const now = Date.now();
-  const activeCandidate = {
-    ...candidate(),
-    startAt: new Date(now - 3 * 60_000).toISOString(),
-    endAt: new Date(now + 90_000).toISOString(),
-    secondsToEnd: 90,
-  };
-  const store = new InMemoryStore('live', 2_000, { persistencePath: false });
-  store.recordOrder(order('YES', 'BUY', {
-    id: 'classic-yes-buy',
-    roundId: activeCandidate.roundId,
-    eventSlug: activeCandidate.eventSlug,
-    filledSize: 5,
-    avgFillPrice: 0.45,
-    status: 'filled',
-    strategy: 'UPDOWN_DUAL_ENTRY',
-  }));
-  store.recordOrder(order('NO', 'BUY', {
-    id: 'classic-no-buy',
-    roundId: activeCandidate.roundId,
-    eventSlug: activeCandidate.eventSlug,
-    filledSize: 0,
-    status: 'posted',
-    clobOrderId: 'no-open',
-    strategy: 'UPDOWN_DUAL_ENTRY',
-  }));
-
-  const cancelled: string[] = [];
-  const adapter = {
-    async getRecentFillsForTargets() {
-      return [];
-    },
-    async cancelOrders(ids: string[]) {
-      cancelled.push(...ids);
-      return {};
-    },
-    async getAvailableShares() {
-      return 5;
-    },
-    async executeLimitIntent(intent: TradeIntent, options: { execute: boolean; orderType?: string }) {
-      assert.equal(options.orderType, 'FAK');
-      assert.equal(intent.strategy, 'UPDOWN_SINGLE_FILL_LOSS_EXIT');
-      return { ok: true, orderId: 'loss-exit-order', price: intent.limitPrice, size: intent.shares };
-    },
-  } as unknown as PolymarketAdapter;
-
-  const diagnostics = await executeSingleFillLossExits({
-    appConfig: { ...config(), executionMode: 'live', ownerPrivateKey: '0xabc', depositWallet: '0xwallet' },
-    adapter,
-    store,
-    candidates: [activeCandidate],
-    orderbooks: [{ ...quote('yes-token', 0.34), updatedAt: new Date().toISOString() }],
-  });
-
-  assert.deepEqual(diagnostics, []);
-  assert.deepEqual(cancelled, ['no-open']);
-
-  const hedgePlan = planSingleFillHedge({
-    candidate: activeCandidate,
-    orders: store.roundOrders(activeCandidate.profileId, activeCandidate.roundId),
-    orderbooks: [{ ...askQuote('no-token', 0.59), updatedAt: new Date().toISOString() }],
-    appConfig: {
-      ...config(),
-      singleFillHedgeEnabled: true,
-      singleFillEarlyHedgeWindowSeconds: 60,
-      singleFillHedgeWindowSeconds: 120,
-      singleFillEmergencyHedgeWindowSeconds: 15,
-      singleFillHedgeMinSecondsToEnd: 5,
-      singleFillHedgeMaxPrice: 0.65,
-      singleFillHedgePriceOffset: 0.01,
-      singleFillHedgeMaxPairCost: 1.1,
-      singleFillEarlyHedgeMaxPairCost: 1.02,
-      singleFillEmergencyHedgeMaxPrice: 0.75,
-      singleFillEmergencyHedgeMaxPairCost: 1.2,
-      maxOrderbookAgeSeconds: 5,
-    } as AppConfig,
-    nowMs: now,
-  });
-  assert.deepEqual(hedgePlan, { ok: false, reason: 'PROFIT_EXIT_ORDER_ACTIVE' });
-});
 
 function config(): AppConfig {
   return {

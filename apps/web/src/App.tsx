@@ -304,7 +304,7 @@ export function App() {
   const isAllProfiles = selectedProfileId === 'all';
   const scopeLabel = isAllProfiles ? 'All profiles' : viewState.profileState.profile.label;
   const enabledProfileCount = state.profiles.filter((item) => item.profile.status !== 'disabled').length;
-  const liveProfileCount = state.profiles.filter((item) => item.profile.status === 'live').length;
+  const liveProfileCount = enabledProfileCount;
   const allProfilePositions = state.profiles.flatMap((item) => (
     item.latestSnapshot?.positions.map((position) => ({
       ...position,
@@ -414,11 +414,11 @@ export function App() {
   const scopedDecisionState = isAllProfiles
     ? {
       label: 'PROFILE OVERVIEW',
-      detail: `${enabledProfileCount} enabled profiles, ${liveProfileCount} live. Select one profile for current-round entry, hedge, and orderbook detail.`,
+      detail: `${enabledProfileCount} enabled Paper profiles. Select one profile for current-round entry, hedge, and orderbook detail.`,
       tone: state.profiles.some((item) => item.entryCooldownUntil && new Date(item.entryCooldownUntil).getTime() > Date.now()) ? 'warn' as const : 'neutral' as const,
     }
     : decisionState;
-  const executionLabel = state.runtime.executionMode === 'live' ? 'LIVE' : state.runtime.executionMode === 'paper' ? 'PAPER' : 'MONITOR';
+  const executionLabel = 'PAPER';
   const feedLabel = `${viewState.feed.source.toUpperCase()} / CLOB ${viewState.feed.clobConnected ? 'ON' : 'OFF'}`;
   const hedgeCheck = viewState.strategyChecks.find((check) => check.strategy === 'UPDOWN_SINGLE_FILL_HEDGE');
   const profitExitCheck = viewState.strategyChecks.find((check) => check.strategy === 'UPDOWN_SINGLE_FILL_PROFIT_EXIT');
@@ -444,7 +444,6 @@ export function App() {
   const currentRoundOpenOrders = currentRoundOrders.filter((order) => (
     order.status === 'posted'
     || order.status === 'partially_filled'
-    || (state.runtime.executionMode === 'monitor' && order.status === 'local')
   ));
   const currentExposure = currentRoundExposure(viewState.fills, snapshot.round.id);
   const roundSettlement = viewState.settlements.find((settlement) => settlement.roundId === snapshot.round.id);
@@ -636,7 +635,7 @@ export function App() {
           tone={pageTone}
           meta={(
             <>
-              <Badge tone={state.runtime.executionMode === 'live' ? 'warn' : 'neutral'}>{executionLabel}</Badge>
+              <Badge tone="neutral">{executionLabel}</Badge>
               <Badge tone={state.runtime.status === 'running' ? 'good' : 'bad'}>{state.runtime.status}</Badge>
               <Badge tone="neutral">{scopeLabel}</Badge>
             </>
@@ -679,7 +678,7 @@ export function App() {
               <DecisionMetric label="Loaded rules" value={String(state.rules.length)} detail="runtime strategy contracts" tone={state.rules.length ? 'good' : 'warn'} />
               <DecisionMetric label="Classic entry" value={strategyCheckLabel(entryCheck).toUpperCase()} detail={entryActionDetail} tone={strategyCheckTone(entryCheck)} />
               <DecisionMetric label="Tail Entry" value={strategyCheckLabel(tailEntryCheck).toUpperCase()} detail={tailEntryDetail} tone={strategyCheckTone(tailEntryCheck)} />
-              <DecisionMetric label="Execution mode" value={executionLabel} detail={runtimeBuildLabel(state.runtime)} tone={state.runtime.executionMode === 'live' ? 'warn' : 'neutral'} />
+              <DecisionMetric label="Execution mode" value={executionLabel} detail={runtimeBuildLabel(state.runtime)} tone="neutral" />
             </>
           )}
           {activeTab === 'logs' && (
@@ -720,7 +719,7 @@ export function App() {
                 </div>
                 <div className="opsHeroMeta">
                   <Badge tone={entryStatusTone}>{entryStatusLabel}</Badge>
-                  <Badge tone={state.runtime.executionMode === 'live' ? 'warn' : 'neutral'}>{executionLabel}</Badge>
+                  <Badge tone="neutral">{executionLabel}</Badge>
                 </div>
               </div>
 

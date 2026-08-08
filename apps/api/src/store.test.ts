@@ -10,7 +10,7 @@ import { InMemoryStore } from './store';
 const PROFILE = 'btc-5m';
 
 test('keeps Telegram round notification keys for the retained settlement window', () => {
-  const store = new InMemoryStore('live', 2_000, { persistencePath: false, maxRecords: 1_000 });
+  const store = new InMemoryStore(2_000, { persistencePath: false, maxRecords: 1_000 });
 
   for (let index = 0; index < 600; index += 1) {
     store.markTelegramRoundSummaryNotified(`btc-5m:btc-updown-5m-${index}:settled`);
@@ -25,7 +25,7 @@ test('keeps Telegram round notification keys for the retained settlement window'
 test('does not start single-fill cooldown before the round is final', () => {
   const nowMs = Date.now();
   const roundId = roundIdFromStart(nowMs - 4 * 60_000);
-  const store = new InMemoryStore('live', 2_000, { persistencePath: false });
+  const store = new InMemoryStore(2_000, { persistencePath: false });
 
   store.recordOrder(order(roundId, 'YES'));
   store.recordFills([fill(roundId, 'YES')]);
@@ -37,7 +37,7 @@ test('does not start single-fill cooldown before the round is final', () => {
 test('exposes pending single-fill risk before final review and clears it when paired', () => {
   const nowMs = Date.now();
   const roundId = roundIdFromStart(nowMs - 4 * 60_000);
-  const store = new InMemoryStore('live', 2_000, { persistencePath: false }, 'classic', undefined, [marketProfile('btc-5m'), marketProfile('btc-15m')]);
+  const store = new InMemoryStore(2_000, { persistencePath: false }, 'classic', undefined, [marketProfile('btc-5m'), marketProfile('btc-15m')]);
 
   store.recordOrder(order(roundId, 'YES'));
   const yesFill = fill(roundId, 'YES');
@@ -60,7 +60,7 @@ test('finds only later open Dual orders for pending-risk cancellation', () => {
   const nowMs = Date.now();
   const sourceRound = roundIdFromStart(nowMs - 4 * 60_000);
   const laterRound = roundIdFromStart(nowMs + 60_000);
-  const store = new InMemoryStore('live', 2_000, { persistencePath: false });
+  const store = new InMemoryStore(2_000, { persistencePath: false });
 
   store.recordOrder(order(sourceRound, 'NO', { clobOrderId: 'source-order' }));
   store.recordOrder(order(laterRound, 'YES', { clobOrderId: 'later-yes' }));
@@ -72,7 +72,7 @@ test('finds only later open Dual orders for pending-risk cancellation', () => {
 test('starts single-fill cooldown only after final round state is single-sided', () => {
   const nowMs = Date.now();
   const roundId = roundIdFromStart(nowMs - 7 * 60_000);
-  const store = new InMemoryStore('live', 2_000, { persistencePath: false });
+  const store = new InMemoryStore(2_000, { persistencePath: false });
 
   store.recordOrder(order(roundId, 'YES'));
   store.recordFills([fill(roundId, 'YES')]);
@@ -89,7 +89,7 @@ test('starts single-fill cooldown only after final round state is single-sided',
 test('does not start cooldown when the final round state is paired', () => {
   const nowMs = Date.now();
   const roundId = roundIdFromStart(nowMs - 7 * 60_000);
-  const store = new InMemoryStore('live', 2_000, { persistencePath: false });
+  const store = new InMemoryStore(2_000, { persistencePath: false });
 
   store.recordOrder(order(roundId, 'YES'));
   store.recordOrder(order(roundId, 'NO'));
@@ -103,7 +103,7 @@ test('does not start cooldown when the final round state is paired', () => {
 test('does not start cooldown when the single filled side was sold out', () => {
   const nowMs = Date.now();
   const roundId = roundIdFromStart(nowMs - 7 * 60_000);
-  const store = new InMemoryStore('live', 2_000, { persistencePath: false });
+  const store = new InMemoryStore(2_000, { persistencePath: false });
 
   store.recordOrder(order(roundId, 'YES'));
   store.recordFills([fill(roundId, 'YES'), fill(roundId, 'YES', { side: 'SELL', price: 0.57 })]);
@@ -116,7 +116,7 @@ test('does not start cooldown when the single filled side was sold out', () => {
 test('clears an active cooldown if later fills make the round paired', () => {
   const nowMs = Date.now();
   const roundId = roundIdFromStart(nowMs - 7 * 60_000);
-  const store = new InMemoryStore('live', 2_000, { persistencePath: false });
+  const store = new InMemoryStore(2_000, { persistencePath: false });
 
   store.recordOrder(order(roundId, 'YES'));
   store.recordOrder(order(roundId, 'NO'));
@@ -132,7 +132,7 @@ test('clears an active cooldown if later fills make the round paired', () => {
 test('uses shorter cooldown for price-capped single-fill hedge misses', () => {
   const nowMs = Date.now();
   const roundId = roundIdFromStart(nowMs - 7 * 60_000);
-  const store = new InMemoryStore('live', 2_000, { persistencePath: false });
+  const store = new InMemoryStore(2_000, { persistencePath: false });
 
   store.recordOrder(order(roundId, 'YES'));
   store.recordFills([fill(roundId, 'YES')]);
@@ -156,7 +156,7 @@ test('escalates cooldown for repeated final single fills inside the repeat windo
   const nowMs = Date.now();
   const firstRoundId = roundIdFromStart(nowMs - 100 * 60_000);
   const secondRoundId = roundIdFromStart(nowMs - 7 * 60_000);
-  const store = new InMemoryStore('live', 2_000, { persistencePath: false });
+  const store = new InMemoryStore(2_000, { persistencePath: false });
 
   store.recordOrder(order(firstRoundId, 'YES'));
   store.recordFills([fill(firstRoundId, 'YES')]);
@@ -177,7 +177,7 @@ test('does not queue stale pending cooldown after an active cooldown expires', (
   const nowMs = Date.now();
   const activeRoundId = roundIdFromStart(nowMs - 7 * 60_000);
   const staleRoundId = roundIdFromStart(nowMs - 66 * 60_000);
-  const store = new InMemoryStore('live', 2_000, { persistencePath: false });
+  const store = new InMemoryStore(2_000, { persistencePath: false });
 
   store.recordOrder(order(activeRoundId, 'YES'));
   store.recordFills([fill(activeRoundId, 'YES')]);
@@ -198,7 +198,7 @@ test('does not queue stale pending cooldown after an active cooldown expires', (
 test('does not scan historical fills without a pending final review', () => {
   const nowMs = Date.now();
   const roundId = roundIdFromStart(nowMs - 7 * 60_000);
-  const store = new InMemoryStore('live', 2_000, { persistencePath: false });
+  const store = new InMemoryStore(2_000, { persistencePath: false });
 
   store.recordOrder(order(roundId, 'YES'));
   store.recordFills([fill(roundId, 'YES')]);
@@ -210,7 +210,7 @@ test('does not scan historical fills without a pending final review', () => {
 test('does not start cooldown for external fills without tracked strategy orders', () => {
   const nowMs = Date.now();
   const roundId = roundIdFromStart(nowMs - 7 * 60_000);
-  const store = new InMemoryStore('live', 2_000, { persistencePath: false });
+  const store = new InMemoryStore(2_000, { persistencePath: false });
 
   store.recordFills([fill(roundId, 'YES')]);
 
@@ -222,7 +222,7 @@ test('does not start cooldown for external fills without tracked strategy orders
 test('stops experimental profile after final experimental single fill', () => {
   const nowMs = Date.now();
   const roundId = roundIdFromStart(nowMs - 7 * 60_000);
-  const store = new InMemoryStore('live', 2_000, { persistencePath: false }, 'experiment_next_round');
+  const store = new InMemoryStore(2_000, { persistencePath: false }, 'experiment_next_round');
 
   store.recordOrder(order(roundId, 'YES', {
     strategy: 'UPDOWN_NEXT_ROUND_50_49_STOP_ON_SINGLE',
@@ -240,7 +240,7 @@ test('stops experimental profile after final experimental single fill', () => {
 test('experimental single fill does not trigger classic cooldown', () => {
   const nowMs = Date.now();
   const roundId = roundIdFromStart(nowMs - 7 * 60_000);
-  const store = new InMemoryStore('live', 2_000, { persistencePath: false }, 'experiment_next_round');
+  const store = new InMemoryStore(2_000, { persistencePath: false }, 'experiment_next_round');
 
   store.recordOrder(order(roundId, 'NO', {
     strategy: 'UPDOWN_NEXT_ROUND_50_49_STOP_ON_SINGLE',
@@ -273,7 +273,7 @@ test('new experimental process ignores persisted experiment stop from before sta
     },
   }));
 
-  const store = new InMemoryStore('live', 2_000, { persistencePath: statePath }, 'experiment_next_round');
+  const store = new InMemoryStore(2_000, { persistencePath: statePath }, 'experiment_next_round');
 
   assert.equal(store.getExperimentStop(), null);
   assert.equal(store.getRuntime().experimentStoppedRoundId, undefined);
@@ -302,7 +302,7 @@ test('clears persisted profile cooldown records that were not created from final
     },
   }));
 
-  const store = new InMemoryStore('live', 2_000, { persistencePath: statePath });
+  const store = new InMemoryStore(2_000, { persistencePath: statePath });
 
   assert.equal(store.getActiveEntryCooldown(PROFILE, nowMs), null);
 });
@@ -338,7 +338,7 @@ test('refreshes persisted active cooldown expiry from the current profile policy
       { profileId: PROFILE, sourceProfileId: PROFILE, roundId, sourceRoundId: roundId, triggeredAt: new Date(reviewMs).toISOString(), category: 'unhedged' },
     ],
   }));
-  const store = new InMemoryStore('live', 2_000, { persistencePath: statePath }, 'classic', undefined, [
+  const store = new InMemoryStore(2_000, { persistencePath: statePath }, 'classic', undefined, [
     marketProfile(PROFILE, { baseMs: 90 * 60_000 }),
   ]);
 
@@ -376,7 +376,7 @@ test('refresh clears persisted active cooldown when the current profile policy h
       },
     },
   }));
-  const store = new InMemoryStore('live', 2_000, { persistencePath: statePath }, 'classic', undefined, [
+  const store = new InMemoryStore(2_000, { persistencePath: statePath }, 'classic', undefined, [
     marketProfile(PROFILE, { baseMs: 30_000 }),
   ]);
 
@@ -387,7 +387,7 @@ test('refresh clears persisted active cooldown when the current profile policy h
 test('single-fill cooldown is shared to sibling intervals and keeps each target policy length', () => {
   const nowMs = Date.now();
   const roundId = roundIdFromStart(nowMs - 7 * 60_000);
-  const store = new InMemoryStore('live', 2_000, { persistencePath: false }, 'classic', undefined, [
+  const store = new InMemoryStore(2_000, { persistencePath: false }, 'classic', undefined, [
     marketProfile('btc-5m', { baseMs: 30 * 60_000 }),
     marketProfile('btc-15m', { baseMs: 90 * 60_000 }),
     marketProfile('btc-1h', { baseMs: 6 * 60 * 60_000 }),
@@ -411,7 +411,7 @@ test('single-fill cooldown is shared to sibling intervals and keeps each target 
 test('single-fill cooldown shared without configured profiles uses the source policy for every interval', () => {
   const nowMs = Date.now();
   const roundId = roundIdFromStart(nowMs - 7 * 60_000);
-  const store = new InMemoryStore('live', 2_000, { persistencePath: false });
+  const store = new InMemoryStore(2_000, { persistencePath: false });
 
   store.recordOrder(order(roundId, 'YES', { profileId: 'btc-5m' }));
   store.recordFills([fill(roundId, 'YES', { profileId: 'btc-5m' })]);
@@ -428,7 +428,7 @@ test('single-fill cooldown shared without configured profiles uses the source po
 test('pending single-fill review is not consumed by a different profile tick', () => {
   const nowMs = Date.now();
   const fiveMinuteRound = roundIdFromStart(nowMs - 7 * 60_000);
-  const store = new InMemoryStore('live', 2_000, { persistencePath: false }, 'classic', undefined, [
+  const store = new InMemoryStore(2_000, { persistencePath: false }, 'classic', undefined, [
     marketProfile('btc-5m'),
     marketProfile('btc-15m'),
     marketProfile('btc-1h'),
@@ -453,7 +453,7 @@ test('cross-profile single-fill risk candidates include active same-asset long i
   const fifteenMinuteRound = `btc-updown-15m-${Math.floor((nowMs - 5 * 60_000) / 1000)}`;
   const oneHourRound = `btc-updown-1h-${Math.floor((nowMs - 10 * 60_000) / 1000)}`;
   const ethRound = `eth-updown-15m-${Math.floor((nowMs - 5 * 60_000) / 1000)}`;
-  const store = new InMemoryStore('live', 2_000, { persistencePath: false }, 'classic', undefined, [
+  const store = new InMemoryStore(2_000, { persistencePath: false }, 'classic', undefined, [
     marketProfile('btc-5m'),
     marketProfile('btc-15m'),
     marketProfile('btc-1h'),
@@ -476,7 +476,7 @@ test('cross-profile single-fill risk candidates include active same-asset long i
 test('profile duration controls final single-fill review timing', () => {
   const nowMs = Date.now();
   const roundId = `btc-updown-15m-${Math.floor((nowMs - 7 * 60_000) / 1000)}`;
-  const store = new InMemoryStore('live', 2_000, { persistencePath: false });
+  const store = new InMemoryStore(2_000, { persistencePath: false });
 
   store.recordOrder(order(roundId, 'YES', { profileId: 'btc-15m' }));
   store.recordFills([fill(roundId, 'YES', { profileId: 'btc-15m' })]);
@@ -487,7 +487,7 @@ test('profile duration controls final single-fill review timing', () => {
 });
 
 test('BTC 1h human-readable round slugs are eligible for settlement after expiry', () => {
-  const store = new InMemoryStore('live', 2_000, { persistencePath: false });
+  const store = new InMemoryStore(2_000, { persistencePath: false });
   const roundId = 'bitcoin-up-or-down-july-4-2026-11pm-et';
 
   store.recordFills([fill(roundId, 'YES', {
@@ -507,7 +507,7 @@ test('BTC 1h human-readable round slugs are eligible for settlement after expiry
 });
 
 test('Tail loss cooldown escalates from base to second and third loss durations', () => {
-  const store = new InMemoryStore('live', 2_000, { persistencePath: false });
+  const store = new InMemoryStore(2_000, { persistencePath: false });
   const now = Date.now();
   const policy = { baseMs: 900_000, repeatWindowMs: 3_600_000, secondMs: 3_600_000, thirdMs: 14_400_000 };
 
@@ -525,7 +525,7 @@ test('open-order reconciliation only cancels orders for the requested profile', 
   const nowMs = Date.now();
   const fiveMinuteRound = roundIdFromStart(nowMs - 7 * 60_000);
   const fifteenMinuteRound = `btc-updown-15m-${Math.floor((nowMs - 20 * 60_000) / 1000)}`;
-  const store = new InMemoryStore('live', 2_000, { persistencePath: false });
+  const store = new InMemoryStore(2_000, { persistencePath: false });
 
   store.recordOrder(order(fiveMinuteRound, 'YES', { profileId: 'btc-5m' }));
   store.recordOrder(order(fifteenMinuteRound, 'YES', { profileId: 'btc-15m', interval: '15m' }));
