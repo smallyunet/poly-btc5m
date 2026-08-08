@@ -4,48 +4,39 @@ type Props = {
   rules: DashboardState['rules'];
 };
 
+export const PAPER_VISIBLE_STRATEGY_IDS = new Set([
+  'UPDOWN_DUAL_ENTRY',
+  'UPDOWN_TAIL_ENTRY',
+  'UPDOWN_NEXT_ROUND_50_49_STOP_ON_SINGLE',
+]);
+
 export function StrategyRulesTab({ rules }: Props) {
+  const paperRules = rules.filter((rule) => PAPER_VISIBLE_STRATEGY_IDS.has(rule.id));
+
   return (
     <div className="panel">
       <div className="sectionHeader">
         <div>
-          <span className="sectionKicker">Executable contract</span>
-          <h2>Trading Strategy & Configured Rules</h2>
+          <span className="sectionKicker">Paper experiment scope</span>
+          <h2>Active Paper Strategies</h2>
         </div>
-        <span className="panelSubTitle">{rules.length} loaded</span>
+        <span className="panelSubTitle">{paperRules.length} visible</span>
       </div>
       <div className="rulesGrid">
-        {rules && rules.length > 0 ? (
-          rules.map((rule) => (
+        {paperRules.length > 0 ? (
+          paperRules.map((rule) => (
             <div key={rule.id} className="ruleCard">
               <div className="ruleHeader">
                 <span className="ruleTitle">{rule.title} ({rule.id})</span>
-                <span className="ruleAllocation">{rule.allocationPct}% ALLOCATION</span>
+                <span className="ruleAllocation">PAPER</span>
               </div>
               <p className="ruleSummary">{rule.summary}</p>
-              <div className="ruleLists">
-                <div className="ruleSection">
-                  <h4>Entry triggers</h4>
-                  <ul>
-                    {rule.entryRules.map((entry, idx) => (
-                      <li key={idx}>{entry}</li>
-                    ))}
-                  </ul>
-                </div>
-                <div className="ruleSection">
-                  <h4>Exit parameters</h4>
-                  <ul>
-                    {rule.exitRules.map((exit, idx) => (
-                      <li key={idx}>{exit}</li>
-                    ))}
-                  </ul>
-                </div>
-              </div>
+              <p className="ruleSummary">Current gates, selected prices, and blockers are reported in Overview for each profile.</p>
             </div>
           ))
         ) : (
           <div className="empty" style={{ width: '100%' }}>
-            <p className="emptyText">No strategy rules loaded in bot configuration</p>
+            <p className="emptyText">No paper strategy rules loaded in this run</p>
           </div>
         )}
       </div>

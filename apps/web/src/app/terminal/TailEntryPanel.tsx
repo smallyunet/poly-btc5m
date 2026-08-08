@@ -47,7 +47,7 @@ export function TailEntryPanel({
   const decisionDetail = hasCurrentTailOrder && latestCurrentOrder
     ? `${outcomeLabel(latestCurrentOrder.label)} ${latestCurrentOrder.side} ${latestCurrentOrder.size.toFixed(2)} @ ${latestCurrentOrder.price.toFixed(3)} (${latestCurrentOrder.status})`
     : tailEntryCheck?.status === 'eligible'
-      ? 'Tail entry gates are eligible; waiting for execution record.'
+      ? 'Tail entry gates are eligible; waiting for a paper order record.'
       : primaryBlocker;
   const checkpointActual = checkpointCondition?.actual || '-';
 
@@ -127,7 +127,7 @@ export function TailEntryPanel({
                       <Badge tone={outcomeTone(order.label)}>{outcomeLabel(order.label)}</Badge>
                     </div>
                     <strong>{order.side} {order.size.toFixed(2)} @ {order.price.toFixed(3)}</strong>
-                    <span>{formatEtTime(order.createdAt)} · {shortenTokenId(order.clobOrderId || order.id)}</span>
+                    <span>{formatEtTime(order.createdAt)} · paper {shortenTokenId(order.id)}</span>
                     <em title={orderMarketTitle(order)}>{orderFailureReason(order)}</em>
                   </div>
                 ))}
@@ -135,13 +135,13 @@ export function TailEntryPanel({
             ) : (
               <div className="tailEntryNoOrder">
                 <strong>{primaryBlocker}</strong>
-                <span>No Tail Entry order is recorded for this evaluated round. See Activity → Orders for older Tail attempts.</span>
+                <span>No Tail Entry order is recorded for this evaluated round. See Performance → Orders for older Tail attempts.</span>
               </div>
             )}
           </div>
 
           {tailEntryCheck?.blockers.length ? (
-            <div className="portfolioDiagnostics">
+            <div className="analysisDiagnostics">
               {tailEntryCheck.blockers.slice(0, 6).map((blocker) => (
                 <span key={blocker}>{blocker}</span>
               ))}

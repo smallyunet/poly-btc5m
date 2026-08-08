@@ -17,7 +17,7 @@ type Props = {
   runtimeStatus: string;
   alertLogCount: number;
   signalLogCount: number;
-  portfolioPnl: number;
+  settledPnl: number;
   diagnostics: string[];
   onSelectProfile: (profileId: string) => void;
 };
@@ -30,7 +30,7 @@ export function ProfileRail({
   runtimeStatus,
   alertLogCount,
   signalLogCount,
-  portfolioPnl,
+  settledPnl,
   diagnostics,
   onSelectProfile,
 }: Props) {
@@ -40,7 +40,7 @@ export function ProfileRail({
       {activeProfiles.length > 1 && <div className="panel opsPanel">
         <h2>Profiles</h2>
         <div className="opsProfileList">
-          {activeProfiles.map(({ item, entryCheck, tailEntryCheck, hedgeCheck, profitExitCheck, cooldownActive }) => (
+          {activeProfiles.map(({ item, entryCheck, tailEntryCheck, cooldownActive }) => (
             <button key={item.profile.id} type="button" className={`opsProfileRow ${selectedProfileId === item.profile.id ? 'active' : ''}`} onClick={() => onSelectProfile(item.profile.id)}>
               <div>
                 <strong><AssetLabel profileId={item.profile.id} label={item.profile.label} size="sm" /></strong>
@@ -49,8 +49,6 @@ export function ProfileRail({
               <div className="opsProfileBadges">
                 <Badge tone={strategyCheckTone(entryCheck)}>entry {strategyCheckLabel(entryCheck)}</Badge>
                 <Badge tone={strategyCheckTone(tailEntryCheck)}>tail {strategyCheckLabel(tailEntryCheck)}</Badge>
-                <Badge tone={strategyCheckTone(profitExitCheck)}>exit {strategyCheckLabel(profitExitCheck)}</Badge>
-                <Badge tone={strategyCheckTone(hedgeCheck)}>hedge {strategyCheckLabel(hedgeCheck)}</Badge>
                 {cooldownActive && <Badge tone="warn">{formatCooldownRemaining(item.entryCooldownUntil)}</Badge>}
               </div>
             </button>
@@ -66,7 +64,7 @@ export function ProfileRail({
           <div><span>Runtime</span><strong>{runtimeStatus}</strong></div>
           <div><span>Alerts</span><strong>{alertLogCount}</strong></div>
           <div><span>Signals</span><strong>{signalLogCount}</strong></div>
-          <div><span>Portfolio PnL</span><strong>{formatSignedMoney(portfolioPnl)}</strong></div>
+          <div><span>Settled PnL</span><strong>{formatSignedMoney(settledPnl)}</strong></div>
         </div>
       </div>
 

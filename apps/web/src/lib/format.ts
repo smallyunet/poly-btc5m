@@ -1,9 +1,3 @@
-import type { ExecutionMode } from '../../../../packages/shared/src';
-
-export function modeLabel(mode: ExecutionMode): string {
-  return 'paper trading';
-}
-
 export function formatMoney(value: number): string {
   return `${value < 0 ? '-' : ''}$${Math.abs(value).toFixed(2)}`;
 }

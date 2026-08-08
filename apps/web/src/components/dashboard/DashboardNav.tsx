@@ -1,11 +1,10 @@
-import { Activity, BarChart3, BookOpen, ChevronDown, CircleDollarSign, RefreshCw, ScrollText, Settings2, Terminal } from 'lucide-react';
+import { Activity, BarChart3, BookOpen, ChevronDown, RefreshCw, ScrollText, Settings2, Terminal } from 'lucide-react';
 
 import type { TabType } from '../../app/dashboardHelpers';
 import { Badge } from './Ui';
 
 type Props = {
   activeTab: TabType;
-  executionMode: string;
   runtimeStatus: string;
   refreshing: boolean;
   lastRefreshLabel: string;
@@ -17,20 +16,18 @@ type Props = {
 
 const primaryTabs: Array<{ id: TabType; label: string; icon: typeof Terminal }> = [
   { id: 'terminal', label: 'Overview', icon: Terminal },
-  { id: 'activity', label: 'Activity', icon: Activity },
+  { id: 'activity', label: 'Performance', icon: Activity },
   { id: 'simulation', label: 'Research', icon: BarChart3 },
-  { id: 'portfolio', label: 'Portfolio', icon: CircleDollarSign },
+  { id: 'orderbooks', label: 'Market Data', icon: BookOpen },
 ];
 
 const secondaryTabs: Array<{ id: TabType; label: string; icon: typeof Terminal }> = [
-  { id: 'orderbooks', label: 'Order Books', icon: BookOpen },
-  { id: 'strategy', label: 'Strategy Rules', icon: ScrollText },
+  { id: 'strategy', label: 'Experiment Config', icon: ScrollText },
   { id: 'logs', label: 'Runtime Logs', icon: Settings2 },
 ];
 
 export function DashboardNav({
   activeTab,
-  executionMode,
   runtimeStatus,
   refreshing,
   lastRefreshLabel,
@@ -46,8 +43,8 @@ export function DashboardNav({
       <div className="dashboardBrand">
         <span className="dashboardBrandMark">P</span>
         <div>
-          <h1>BTC5m Operator</h1>
-          <span>Dual + Tail execution</span>
+          <h1>BTC5m Paper Lab</h1>
+          <span>Dual + Tail research runtime</span>
         </div>
       </div>
 
@@ -76,7 +73,6 @@ export function DashboardNav({
       </nav>
 
       <div className="navRuntime">
-        <Badge tone="neutral">{executionMode}</Badge>
         <Badge tone={runtimeStatus === 'running' ? 'good' : 'bad'}>{runtimeStatus}</Badge>
         <button
           type="button"

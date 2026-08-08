@@ -1,6 +1,6 @@
 import type { DashboardState } from '../../../../../packages/shared/src';
 import { formatEtTime } from '../../lib/dashboardFormat';
-import { OrderbookCapacityPanel, OrderbookExecutionSummary, OrderbookTable } from '../../components/dashboard/OrderbookPanels';
+import { OrderbookCapacityPanel, OrderbookFillSummary, OrderbookTable } from '../../components/dashboard/OrderbookPanels';
 import { Badge } from '../../components/dashboard/Ui';
 import { AssetLabel } from '../dashboardHelpers';
 
@@ -45,7 +45,7 @@ export function OrderbooksTab({ state, snapshot, isAllProfiles, scopeLabel, onSe
         </div>
       ) : (
         <>
-          <OrderbookExecutionSummary quotes={snapshot.orderbooks} yesTokenId={snapshot.round.yesTokenId} noTokenId={snapshot.round.noTokenId} />
+          <OrderbookFillSummary quotes={snapshot.orderbooks} yesTokenId={snapshot.round.yesTokenId} noTokenId={snapshot.round.noTokenId} />
           <OrderbookCapacityPanel depth={snapshot.orderbookDepth} />
           <OrderbookTable quotes={snapshot.orderbooks} yesTokenId={snapshot.round.yesTokenId} noTokenId={snapshot.round.noTokenId} />
         </>

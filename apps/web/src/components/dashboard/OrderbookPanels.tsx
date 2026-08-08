@@ -3,7 +3,7 @@ import { formatMoney, formatNumber } from '../../lib/format';
 import { formatEtTime, outcomeLabel, outcomeTone, shortenTokenId } from '../../lib/dashboardFormat';
 import { Badge, DataTable, DecisionMetric } from './Ui';
 
-export function OrderbookExecutionSummary({ quotes, yesTokenId, noTokenId }: { quotes: OrderBookQuote[]; yesTokenId: string; noTokenId: string }) {
+export function OrderbookFillSummary({ quotes, yesTokenId, noTokenId }: { quotes: OrderBookQuote[]; yesTokenId: string; noTokenId: string }) {
   const yesQuote = quotes.find((quote) => quote.tokenId === yesTokenId);
   const noQuote = quotes.find((quote) => quote.tokenId === noTokenId);
   const pairAskCost = yesQuote?.bestAsk != null && noQuote?.bestAsk != null ? yesQuote.bestAsk + noQuote.bestAsk : null;
@@ -19,9 +19,9 @@ export function OrderbookExecutionSummary({ quotes, yesTokenId, noTokenId }: { q
   const bookState = quotes.length === 0 ? 'UNKNOWN' : quotes.every((quote) => quote.source === 'ws') ? 'LIVE WS' : 'MIXED';
 
   return (
-    <section className="orderbookHero" aria-label="Orderbook execution summary">
+    <section className="orderbookHero" aria-label="Orderbook paper fill summary">
       <div className={`orderbookHeroPrimary ${pairTone}`}>
-        <span>Executable Pair</span>
+        <span>Fillable Pair</span>
         <strong>{pairState}</strong>
         <p>
           Pair ask cost {pairAskCost == null ? '-' : pairAskCost.toFixed(3)}
@@ -74,7 +74,7 @@ export function OrderbookCapacityPanel({ depth }: { depth?: OrderbookDepthSnapsh
       <div className="capacityHeader">
         <div>
           <span className="sectionKicker">Depth at Active Limit</span>
-          <h3>{formatCapacityPrice(depth.activeLimitPrice)} execution capacity</h3>
+          <h3>{formatCapacityPrice(depth.activeLimitPrice)} paper-fill capacity</h3>
           <p>
             Current size {formatCapacityShares(depth.baseSharesPerSide)} shares per side / refreshed {formatEtTime(depth.updatedAt)}
           </p>

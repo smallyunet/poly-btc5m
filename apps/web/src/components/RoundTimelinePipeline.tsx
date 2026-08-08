@@ -25,7 +25,7 @@ export const RoundTimelinePipeline: React.FC<RoundTimelinePipelineProps> = ({
   const steps: PipelineStep[] = [
     { key: 'observing', label: 'OBSERVING', subLabel: 'Pre-round analysis' },
     { key: 'decision', label: 'DECISION', subLabel: 'T-30s entry gate' },
-    { key: 'posting', label: 'POSTING', subLabel: 'Order execution' },
+    { key: 'posting', label: 'POSTING', subLabel: 'Paper order' },
     { key: 'running', label: 'RUNNING', subLabel: '5m contract life' },
     { key: 'settled', label: 'SETTLED', subLabel: 'Round conclusion' },
   ];

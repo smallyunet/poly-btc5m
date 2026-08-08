@@ -62,10 +62,6 @@
     grid-template-columns: 1fr;
   }
 
-  .portfolioMetricGrid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
   .terminalContextRail {
     position: static;
   }
@@ -80,10 +76,6 @@
 
   .span-4, .span-6, .span-8 {
     grid-column: span 12;
-  }
-
-  .positionCard {
-    grid-template-columns: minmax(180px, 1.5fr) repeat(3, minmax(110px, 1fr));
   }
 
   .tailEntryOrderRow {
@@ -295,19 +287,6 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .positionCard {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    align-items: stretch;
-  }
-
-  .posToken {
-    grid-column: 1 / -1;
-  }
-
-  .posPnL {
-    align-items: flex-start;
-  }
-
   .gaugeHeader,
   .gaugeLabels {
     flex-direction: column;
@@ -394,10 +373,6 @@
   }
 
   .rulesGrid {
-    grid-template-columns: 1fr;
-  }
-
-  .ruleLists {
     grid-template-columns: 1fr;
   }
 
@@ -499,22 +474,10 @@
     padding: 10px;
   }
 
-  .positionCard {
-    grid-template-columns: 1fr;
-  }
-
   .metricRow {
     align-items: flex-start;
     flex-direction: column;
     gap: 4px;
-  }
-
-  .portfolioHero {
-    flex-direction: column;
-  }
-
-  .portfolioMetricGrid {
-    grid-template-columns: 1fr;
   }
 
   .metricValue {

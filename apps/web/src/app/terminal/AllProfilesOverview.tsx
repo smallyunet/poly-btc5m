@@ -15,13 +15,11 @@ import type { ProfileStatusRow } from './types';
 type Props = {
   state: DashboardState;
   enabledProfileCount: number;
-  liveProfileCount: number;
   executionLabel: string;
   orderCount: number;
   fillCount: number;
   settlementCount: number;
-  displayedPositionCount: number;
-  portfolioPnl: number;
+  settledPnl: number;
   profileStatusRows: ProfileStatusRow[];
   onSelectProfile: (profileId: string) => void;
 };
@@ -29,13 +27,11 @@ type Props = {
 export function AllProfilesOverview({
   state,
   enabledProfileCount,
-  liveProfileCount,
   executionLabel,
   orderCount,
   fillCount,
   settlementCount,
-  displayedPositionCount,
-  portfolioPnl,
+  settledPnl,
   profileStatusRows,
   onSelectProfile,
 }: Props) {
@@ -50,15 +46,15 @@ export function AllProfilesOverview({
           <Badge tone="neutral">{executionLabel}</Badge>
         </div>
         <div className="scopeMetricGrid">
-          <DecisionMetric label="Enabled" value={`${enabledProfileCount}/${state.profiles.length}`} detail={`${liveProfileCount} Paper profiles`} tone="neutral" />
-          <DecisionMetric label="Orders" value={String(orderCount)} detail={`${fillCount} fills / ${settlementCount} settlements`} tone={orderCount > 0 ? 'good' : 'neutral'} />
-          <DecisionMetric label="Open Positions" value={String(displayedPositionCount)} detail="latest profile snapshots" tone={displayedPositionCount > 0 ? 'warn' : 'neutral'} />
-          <DecisionMetric label="Settled PnL" value={formatSignedMoney(portfolioPnl)} detail="filtered settlements" tone={portfolioPnl > 0 ? 'good' : portfolioPnl < 0 ? 'bad' : 'neutral'} />
+          <DecisionMetric label="Enabled" value={`${enabledProfileCount}/${state.profiles.length}`} detail="paper profiles active" tone="neutral" />
+          <DecisionMetric label="Orders" value={String(orderCount)} detail="paper order ledger" tone={orderCount > 0 ? 'good' : 'neutral'} />
+          <DecisionMetric label="Fills" value={String(fillCount)} detail={`${settlementCount} settled rounds`} tone={fillCount > 0 ? 'good' : 'neutral'} />
+          <DecisionMetric label="Settled PnL" value={formatSignedMoney(settledPnl)} detail="filtered settlements" tone={settledPnl > 0 ? 'good' : settledPnl < 0 ? 'bad' : 'neutral'} />
         </div>
       </section>
 
       <section className="profileGridPanel" aria-label="Profile runtime matrix">
-        {profileStatusRows.map(({ item, entryCheck, tailEntryCheck, hedgeCheck, profitExitCheck, cooldownActive }) => (
+        {profileStatusRows.map(({ item, entryCheck, tailEntryCheck, cooldownActive }) => (
           <button key={item.profile.id} type="button" className="profileRuntimeCard" onClick={() => onSelectProfile(item.profile.id)}>
             <div className="profileRuntimeHeader">
               <div>
@@ -73,8 +69,6 @@ export function AllProfilesOverview({
               <div><span>Price</span><strong>{item.dynamicEntryPrice ? formatPriceCents(item.dynamicEntryPrice.selectedPrice) : entryCheck?.limitPrice != null ? formatPriceCents(entryCheck.limitPrice) : '-'}</strong></div>
               <div><span>Route</span><strong>{assetRouteLabel(item.dynamicEntryPrice)}</strong></div>
               <div><span>Score</span><strong>{assetSelectorScoreLabel(item.dynamicEntryPrice)}</strong></div>
-              <div><span>Exit</span><strong>{strategyCheckLabel(profitExitCheck)}</strong></div>
-              <div><span>Hedge</span><strong>{strategyCheckLabel(hedgeCheck)}</strong></div>
               <div><span>Cooldown</span><strong>{cooldownActive ? formatCooldownRemaining(item.entryCooldownUntil) : 'clear'}</strong></div>
             </div>
             <div className="profileRuntimeFooter">

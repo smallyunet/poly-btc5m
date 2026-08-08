@@ -987,42 +987,6 @@
   text-align: right;
 }
 
-.opsPositionGrid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.opsPosition {
-  display: grid;
-  gap: 8px;
-  padding: 12px;
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  background: rgba(248, 250, 252, 0.72);
-}
-
-.opsPosition div {
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.opsPosition strong {
-  color: var(--text-primary);
-}
-
-.opsPosition span,
-.opsPosition em {
-  color: var(--text-muted);
-  font-family: var(--font-mono);
-  font-size: 12px;
-  font-style: normal;
-  overflow-wrap: anywhere;
-}
-
 .opsEmptyState {
   min-height: 96px;
   display: grid;
@@ -1111,8 +1075,7 @@
 @media (max-width: 720px) {
   .opsHero,
   .opsProfileRow,
-  .opsMetricGrid,
-  .opsPositionGrid {
+  .opsMetricGrid {
     grid-template-columns: 1fr;
   }
 

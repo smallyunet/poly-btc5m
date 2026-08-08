@@ -5,7 +5,7 @@ import { formatMoney } from '../lib/format';
 import type { Tone } from '../lib/dashboardFormat';
 import { formatEtTime, outcomeLabel } from '../lib/dashboardFormat';
 
-export type TabType = 'terminal' | 'portfolio' | 'orderbooks' | 'activity' | 'simulation' | 'strategy' | 'logs';
+export type TabType = 'terminal' | 'orderbooks' | 'activity' | 'simulation' | 'strategy' | 'logs';
 export type ActivitySubTab = 'daily' | 'rounds' | 'orders';
 export type OrderStrategyFilter = 'all' | 'dual' | 'tail' | 'exit' | 'experiment';
 export type DashboardOrder = DashboardState['orders'][number];
@@ -83,7 +83,7 @@ export const ROUND_PAGE_SIZE = 20;
 export const ORDER_PAGE_SIZE = 25;
 export const DAILY_PAGE_SIZE = 1;
 export const LOG_PAGE_SIZE = 75;
-export const TAB_TYPES: TabType[] = ['terminal', 'portfolio', 'orderbooks', 'activity', 'simulation', 'strategy', 'logs'];
+export const TAB_TYPES: TabType[] = ['terminal', 'orderbooks', 'activity', 'simulation', 'strategy', 'logs'];
 export const STATS_WINDOW_MS = 24 * 60 * 60 * 1000;
 export const ORDER_STRATEGY_FILTERS: OrderStrategyFilter[] = ['all', 'dual', 'tail', 'exit', 'experiment'];
 const SINGLE_FILL_TARGET_RATE = 0.18;
@@ -325,26 +325,8 @@ export function netFilledShares(round: Pick<RoundExecutionSummary, 'filledBuyYes
   };
 }
 
-export function portfolioStatusTone(status?: NonNullable<DashboardSnapshot['portfolio']>['status']): 'good' | 'warn' | 'bad' | 'neutral' {
-  if (status === 'enabled') return 'good';
-  if (status === 'partial') return 'warn';
-  if (status === 'unavailable') return 'bad';
-  return 'neutral';
-}
-
-export function portfolioStatusLabel(status?: NonNullable<DashboardSnapshot['portfolio']>['status']): string {
-  if (status === 'enabled') return 'ready';
-  if (status === 'partial') return 'partial';
-  if (status === 'unavailable') return 'unavailable';
-  return 'disabled';
-}
-
 export function formatSignedMoney(value: number): string {
   return `${value >= 0 ? '+' : ''}${formatMoney(value)}`;
-}
-
-export function formatPercentValue(value: number | null | undefined): string {
-  return value == null || !Number.isFinite(value) ? 'n/a' : `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`;
 }
 
 export function formatRate(value: number | null | undefined): string {
@@ -363,20 +345,6 @@ export function touchOutcomeTone(outcome: TouchOutcome): 'good' | 'warn' | 'neut
   if (outcome === 'paired') return 'good';
   if (outcome === 'single') return 'warn';
   return 'neutral';
-}
-
-export function positionValue(position: DashboardSnapshot['positions'][number]): number {
-  if (position.currentValue != null) return position.currentValue;
-  return position.shares * (position.currentPrice ?? position.avgPrice);
-}
-
-export function positionCost(position: DashboardSnapshot['positions'][number]): number {
-  return position.shares * position.avgPrice;
-}
-
-export function positionPnl(position: DashboardSnapshot['positions'][number]): number {
-  if (position.cashPnl != null) return position.cashPnl;
-  return positionValue(position) - positionCost(position);
 }
 
 export function roundStatusSummary(round: RoundExecutionSummary): RoundStatusSummary {
