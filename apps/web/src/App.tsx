@@ -8,6 +8,7 @@ import { formatEtTime, outcomeLabel, outcomeTone } from './lib/dashboardFormat';
 
 import { RoundTimelinePipeline } from './components/RoundTimelinePipeline';
 import { DashboardNav } from './components/dashboard/DashboardNav';
+import { ProfileScopePicker } from './components/dashboard/ProfileScopePicker';
 import { Badge, DataTable, DecisionMetric, PageIntro, PaginationControls, Shell, ViewHeader } from './components/dashboard/Ui';
 import { DynamicEntryPricePanel } from './app/DynamicEntryPricePanel';
 import { AllProfilesOverview } from './app/terminal/AllProfilesOverview';
@@ -92,7 +93,7 @@ export function App() {
   const [tailSimulationSubTab, setTailSimulationSubTab] = React.useState<TailSimulationSubTab>('checkpoint');
   const [simulationAssetTab, setSimulationAssetTab] = React.useState<string>('btc');
   const [tailSimulationAssetTab, setTailSimulationAssetTab] = React.useState<string>('btc');
-  const [selectedProfileId, setSelectedProfileId] = React.useState<string>('btc-5m');
+  const [selectedProfileId, setSelectedProfileId] = React.useState<string>('all');
 
   // Logs Search & Filter States
   const [logSearch, setLogSearch] = React.useState('');
@@ -560,23 +561,11 @@ export function App() {
       />
 
       {!isResearchTab && (
-        <>
-          {state.profiles.filter((item) => item.profile.status !== 'disabled').length > 1 && (
-            <section className="profileSwitcher compact" aria-label="Active market profiles">
-              {state.profiles.filter((item) => item.profile.status !== 'disabled').map((item) => (
-                <button
-                  key={item.profile.id}
-                  type="button"
-                  className={`profilePill ${selectedProfileId === item.profile.id ? 'active' : ''}`}
-                  onClick={() => setSelectedProfileId(item.profile.id)}
-                >
-                  <AssetLabel profileId={item.profile.id} label={item.profile.label} />
-                  <em>{item.profile.status}</em>
-                </button>
-              ))}
-            </section>
-          )}
-        </>
+        <ProfileScopePicker
+          profiles={state.profiles}
+          selectedProfileId={selectedProfileId}
+          onSelectProfile={setSelectedProfileId}
+        />
       )}
 
       {/* Main Tabbed Area */}
@@ -754,8 +743,6 @@ export function App() {
             </section>
 
             <ProfileRail
-              profileStatusRows={profileStatusRows}
-              selectedProfileId={selectedProfileId}
               feedLabel={feedLabel}
               feed={viewState.feed}
               runtimeStatus={state.runtime.status}
@@ -763,7 +750,6 @@ export function App() {
               signalLogCount={signalLogCount}
               settledPnl={settledPnl}
               diagnostics={snapshot.diagnostics}
-              onSelectProfile={setSelectedProfileId}
             />
           </div>
         ))}

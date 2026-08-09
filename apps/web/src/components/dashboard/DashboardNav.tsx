@@ -16,14 +16,14 @@ type Props = {
 
 const primaryTabs: Array<{ id: TabType; label: string; icon: typeof Terminal }> = [
   { id: 'terminal', label: 'Overview', icon: Terminal },
-  { id: 'activity', label: 'Performance', icon: Activity },
+  { id: 'activity', label: 'Results', icon: Activity },
   { id: 'simulation', label: 'Research', icon: BarChart3 },
-  { id: 'orderbooks', label: 'Market Data', icon: BookOpen },
+  { id: 'orderbooks', label: 'Data', icon: BookOpen },
 ];
 
 const secondaryTabs: Array<{ id: TabType; label: string; icon: typeof Terminal }> = [
-  { id: 'strategy', label: 'Experiment Config', icon: ScrollText },
-  { id: 'logs', label: 'Runtime Logs', icon: Settings2 },
+  { id: 'strategy', label: 'Strategy config', icon: ScrollText },
+  { id: 'logs', label: 'Runtime logs', icon: Settings2 },
 ];
 
 export function DashboardNav({
@@ -41,10 +41,10 @@ export function DashboardNav({
   return (
     <header className="topbar dashboardNav">
       <div className="dashboardBrand">
-        <span className="dashboardBrandMark">P</span>
+        <span className="dashboardBrandMark" aria-hidden="true">P</span>
         <div>
-          <h1>BTC5m Paper Lab</h1>
-          <span>Dual + Tail research runtime</span>
+          <h1>Paper Lab</h1>
+          <span>Up / Down research runtime</span>
         </div>
       </div>
 
@@ -55,7 +55,7 @@ export function DashboardNav({
           </button>
         ))}
         <details className={`navMore ${secondaryActive ? 'active' : ''}`}>
-          <summary className="tabBtn">
+          <summary className="tabBtn" aria-label="More dashboard views">
             More <ChevronDown size={13} />
           </summary>
           <div className="navMoreMenu">
@@ -73,7 +73,10 @@ export function DashboardNav({
       </nav>
 
       <div className="navRuntime">
-        <Badge tone={runtimeStatus === 'running' ? 'good' : 'bad'}>{runtimeStatus}</Badge>
+        <Badge tone={runtimeStatus === 'running' ? 'good' : 'bad'}>
+          <span className="statusDot" aria-hidden="true" />
+          {runtimeStatus}
+        </Badge>
         <button
           type="button"
           className="navRefresh"

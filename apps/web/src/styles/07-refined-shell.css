@@ -1,0 +1,370 @@
+/* Refined shell: one calm visual hierarchy for navigation, scope, and content. */
+:root {
+  --bg-obsidian: #f5f7fa;
+  --bg-panel: #ffffff;
+  --bg-panel-hover: #ffffff;
+  --border-color: #e2e8f0;
+  --border-color-light: #cbd5e1;
+  --border-color-active: #1e3a5f;
+  --color-primary: #1e3a5f;
+  --color-primary-hover: #172f4e;
+  --color-primary-glow: rgba(30, 58, 95, 0.1);
+  --color-success: #087f5b;
+  --color-success-glow: rgba(8, 127, 91, 0.09);
+  --color-danger: #c92a2a;
+  --color-danger-glow: rgba(201, 42, 42, 0.08);
+  --color-warning: #a16207;
+  --color-warning-glow: rgba(161, 98, 7, 0.09);
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --text-muted: #64748b;
+}
+
+body {
+  background: var(--bg-obsidian);
+  overscroll-behavior-y: contain;
+}
+
+.appShell {
+  width: min(1480px, 100%);
+  padding: 18px 24px 32px;
+  gap: 14px;
+}
+
+.dashboardNav {
+  top: 8px;
+  min-height: 58px;
+  padding: 8px 10px;
+  border-color: rgba(203, 213, 225, 0.9);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.07);
+}
+
+.dashboardBrandMark {
+  border-radius: 8px;
+  background: var(--color-primary);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+}
+
+.dashboardBrand h1 {
+  background: none;
+  color: var(--text-primary);
+  -webkit-text-fill-color: currentColor;
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.tabBar {
+  padding: 3px;
+  gap: 2px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.tabBtn {
+  min-height: 36px;
+  padding: 0 11px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.tabBtn:hover:not(:disabled) {
+  border-color: transparent;
+  background: #eef2f7;
+  box-shadow: none;
+}
+
+.tabBtn.active,
+.navMore.active > summary,
+.navMore[open] > summary {
+  background: #ffffff;
+  color: var(--color-primary);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.12);
+}
+
+.navRuntime .badge {
+  gap: 6px;
+}
+
+.statusDot {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+.navRefresh {
+  min-height: 36px;
+  background: #ffffff;
+}
+
+.scopePicker {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 9px;
+  background: #ffffff;
+}
+
+.scopePickerLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 7px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.scopePickerOptions {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.scopePickerOptions::-webkit-scrollbar {
+  display: none;
+}
+
+.scopePickerButton {
+  min-height: 34px;
+  flex: 0 0 auto;
+  padding: 0 10px;
+  border-color: transparent;
+  border-radius: 6px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.scopePickerButton > span:last-child:not(.assetLabel) {
+  min-width: 19px;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: #e2e8f0;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.scopePickerButton:hover:not(:disabled) {
+  border-color: transparent;
+  background: #f1f5f9;
+  box-shadow: none;
+}
+
+.scopePickerButton.active {
+  border-color: rgba(30, 58, 95, 0.16);
+  background: var(--color-primary-glow);
+  color: var(--color-primary);
+}
+
+main {
+  gap: 14px;
+}
+
+.pageIntro {
+  padding: 15px 16px;
+  border-left-width: 3px;
+  border-radius: 9px;
+  background: #ffffff;
+  box-shadow: none;
+}
+
+.pageIntroMain h2 {
+  font-size: 19px;
+}
+
+.pageIntroMetrics {
+  gap: 8px;
+}
+
+.decisionMetric {
+  border-color: var(--border-color);
+  background: #f8fafc;
+  box-shadow: none;
+}
+
+.panel,
+.opsHero,
+.profileRuntimeCard {
+  border-radius: 9px;
+  background: #ffffff;
+  backdrop-filter: none;
+  box-shadow: none;
+}
+
+.opsWorkspace {
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 0.28fr);
+  gap: 14px;
+}
+
+.opsPrimary,
+.opsRail {
+  gap: 14px;
+}
+
+.opsHero {
+  padding: 16px 18px;
+}
+
+.opsHero h2 {
+  font-size: clamp(21px, 2vw, 26px);
+}
+
+.opsMetricGrid {
+  gap: 8px;
+}
+
+.profileGridPanel {
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+}
+
+.profileRuntimeCard {
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.profileRuntimeCard:hover:not(:disabled) {
+  border-color: #94a3b8;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.06);
+}
+
+button:focus-visible,
+summary:focus-visible,
+select:focus-visible,
+input:focus-visible {
+  outline: 3px solid rgba(37, 99, 235, 0.28);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@media (max-width: 1024px) {
+  .appShell {
+    padding: 14px 16px 26px;
+  }
+
+  .opsWorkspace {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 768px) {
+  .appShell {
+    padding: 8px 10px 20px;
+    gap: 10px;
+  }
+
+  .dashboardNav {
+    position: sticky;
+    top: 0;
+    padding: 10px;
+    gap: 9px;
+  }
+
+  .dashboardBrandMark {
+    width: 30px;
+    height: 30px;
+  }
+
+  .navRuntime {
+    position: absolute;
+    top: 9px;
+    right: 9px;
+    width: auto;
+  }
+
+  .navRuntime > .badge {
+    display: none;
+  }
+
+  .navRefresh {
+    min-width: 44px;
+    min-height: 44px;
+    padding: 0 10px;
+  }
+
+  .tabBar {
+    order: 3;
+    padding: 3px;
+    gap: 3px;
+    overscroll-behavior-x: contain;
+  }
+
+  .tabBtn,
+  .scopePickerButton {
+    min-height: 44px;
+  }
+
+  .scopePicker {
+    align-items: stretch;
+    padding: 6px;
+  }
+
+  .scopePickerLabel {
+    display: none;
+  }
+
+  .scopePickerOptions {
+    gap: 8px;
+  }
+
+  .pageIntroMetrics,
+  .opsMetricGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .pageIntroMain p {
+    max-width: none;
+  }
+}
+
+@media (max-width: 540px) {
+  .dashboardBrand span:last-child {
+    display: none;
+  }
+
+  .navRefresh span {
+    display: none;
+  }
+
+  .tabBtn {
+    padding: 0 10px;
+  }
+
+  .pageIntroMetrics,
+  .opsMetricGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .pageIntroMeta {
+    display: none;
+  }
+}

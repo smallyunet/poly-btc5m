@@ -238,42 +238,6 @@
     letter-spacing: 0.2px;
   }
 }
-/* Multi-profile controls */
-.profileSwitcher {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  padding: 10px 0 14px;
-}
-
-.profilePill {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 34px;
-  padding: 0 12px;
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
-  background: var(--bg-panel);
-  color: var(--text-secondary);
-  font-size: 13px;
-  font-weight: 700;
-}
-
-.profilePill em {
-  color: var(--text-muted);
-  font-family: var(--font-mono);
-  font-size: 10px;
-  font-style: normal;
-  text-transform: uppercase;
-}
-
-.profilePill.active {
-  border-color: var(--color-primary);
-  color: var(--text-primary);
-  background: var(--color-primary-glow);
-}
-
 .scopeSummary {
   display: flex;
   align-items: center;
@@ -517,8 +481,7 @@
   font-size: 14px;
 }
 
-.opsHeroMeta,
-.opsProfileBadges {
+.opsHeroMeta {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
@@ -997,46 +960,6 @@
   font-size: 13px;
 }
 
-.opsProfileList {
-  display: grid;
-  gap: 8px;
-}
-
-.opsProfileRow {
-  width: 100%;
-  min-height: auto;
-  padding: 12px;
-  display: grid;
-  grid-template-columns: minmax(120px, 0.85fr) minmax(0, 1.15fr);
-  gap: 12px;
-  align-items: center;
-  text-align: left;
-  border-radius: 8px;
-  box-shadow: none;
-}
-
-.opsProfileRow.active {
-  border-color: var(--color-primary);
-  background: rgba(37, 99, 235, 0.05);
-}
-
-.opsProfileRow div:first-child {
-  min-width: 0;
-  display: grid;
-  gap: 3px;
-}
-
-.opsProfileRow strong {
-  color: var(--text-primary);
-  font-size: 13px;
-}
-
-.opsProfileRow span {
-  color: var(--text-muted);
-  font-family: var(--font-mono);
-  font-size: 11px;
-}
-
 .opsDiagnostics summary {
   cursor: pointer;
 }
@@ -1074,7 +997,6 @@
 
 @media (max-width: 720px) {
   .opsHero,
-  .opsProfileRow,
   .opsMetricGrid {
     grid-template-columns: 1fr;
   }
@@ -1083,8 +1005,7 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .opsHeroMeta,
-  .opsProfileBadges {
+  .opsHeroMeta {
     justify-content: flex-start;
   }
 }

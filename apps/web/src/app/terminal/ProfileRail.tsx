@@ -1,17 +1,7 @@
 import type { DashboardState } from '../../../../../packages/shared/src';
-import { Badge } from '../../components/dashboard/Ui';
-import {
-  AssetLabel,
-  formatCooldownRemaining,
-  formatSignedMoney,
-  strategyCheckLabel,
-  strategyCheckTone,
-} from '../dashboardHelpers';
-import type { ProfileStatusRow } from './types';
+import { formatSignedMoney } from '../dashboardHelpers';
 
 type Props = {
-  profileStatusRows: ProfileStatusRow[];
-  selectedProfileId: string;
   feedLabel: string;
   feed: DashboardState['profiles'][number]['feed'];
   runtimeStatus: string;
@@ -19,12 +9,9 @@ type Props = {
   signalLogCount: number;
   settledPnl: number;
   diagnostics: string[];
-  onSelectProfile: (profileId: string) => void;
 };
 
 export function ProfileRail({
-  profileStatusRows,
-  selectedProfileId,
   feedLabel,
   feed,
   runtimeStatus,
@@ -32,30 +19,9 @@ export function ProfileRail({
   signalLogCount,
   settledPnl,
   diagnostics,
-  onSelectProfile,
 }: Props) {
-  const activeProfiles = profileStatusRows.filter(({ item }) => item.profile.status !== 'disabled');
   return (
     <aside className="opsRail">
-      {activeProfiles.length > 1 && <div className="panel opsPanel">
-        <h2>Profiles</h2>
-        <div className="opsProfileList">
-          {activeProfiles.map(({ item, entryCheck, tailEntryCheck, cooldownActive }) => (
-            <button key={item.profile.id} type="button" className={`opsProfileRow ${selectedProfileId === item.profile.id ? 'active' : ''}`} onClick={() => onSelectProfile(item.profile.id)}>
-              <div>
-                <strong><AssetLabel profileId={item.profile.id} label={item.profile.label} size="sm" /></strong>
-                <span>{item.latestSnapshot?.round.phase || 'pending'} · {item.profile.status}</span>
-              </div>
-              <div className="opsProfileBadges">
-                <Badge tone={strategyCheckTone(entryCheck)}>entry {strategyCheckLabel(entryCheck)}</Badge>
-                <Badge tone={strategyCheckTone(tailEntryCheck)}>tail {strategyCheckLabel(tailEntryCheck)}</Badge>
-                {cooldownActive && <Badge tone="warn">{formatCooldownRemaining(item.entryCooldownUntil)}</Badge>}
-              </div>
-            </button>
-          ))}
-        </div>
-      </div>}
-
       <div className="panel opsPanel">
         <h2>System</h2>
         <div className="opsSystemList">
