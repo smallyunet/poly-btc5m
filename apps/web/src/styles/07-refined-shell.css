@@ -22,7 +22,8 @@
 
 body {
   background: var(--bg-obsidian);
-  overscroll-behavior-y: contain;
+  overflow-y: auto;
+  overscroll-behavior-y: auto;
 }
 
 .appShell {
