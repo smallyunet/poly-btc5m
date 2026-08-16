@@ -468,14 +468,17 @@ export function App() {
         : 'unavailable';
   const tailAssets = tailSim?.config?.assets?.length ? tailSim.config.assets : ['btc', 'eth', 'sol', 'doge', 'xrp', 'hype'];
   const selectedTailAsset = tailAssets.includes(tailSimulationAssetTab) ? tailSimulationAssetTab : tailAssets[0] || 'btc';
-  const hasTailAssetCheckpoints = Array.isArray(tailSim?.completed?.byAssetCheckpoint);
+  const tailAllTimeResults = tailSim?.completedAllTime ?? tailSim?.completed;
+  const tailAllTimeRows = tailSimStatus?.completedAllTimeRows ?? tailAllTimeResults?.rows ?? 0;
+  const tailWindowRows = tailSimStatus?.completedRows ?? tailSim?.completed?.rows ?? 0;
+  const hasTailAssetCheckpoints = Array.isArray(tailAllTimeResults?.byAssetCheckpoint);
   const tailCheckpointRows = hasTailAssetCheckpoints
-    ? tailSim?.completed?.byAssetCheckpoint?.filter((row) => row.asset === selectedTailAsset) ?? []
-    : selectedTailAsset === 'btc' ? tailSim?.completed?.byCheckpoint ?? tailSim?.completed?.byCheckpointSize ?? [] : [];
-  const hasTailAssetBands = Array.isArray(tailSim?.completed?.byAssetAskBand);
+    ? tailAllTimeResults?.byAssetCheckpoint?.filter((row) => row.asset === selectedTailAsset) ?? []
+    : selectedTailAsset === 'btc' ? tailAllTimeResults?.byCheckpoint ?? tailAllTimeResults?.byCheckpointSize ?? [] : [];
+  const hasTailAssetBands = Array.isArray(tailAllTimeResults?.byAssetAskBand);
   const tailBandRows = hasTailAssetBands
-    ? tailSim?.completed?.byAssetAskBand?.filter((row) => row.asset === selectedTailAsset) ?? []
-    : selectedTailAsset === 'btc' ? tailSim?.completed?.byAskBand ?? [] : [];
+    ? tailAllTimeResults?.byAssetAskBand?.filter((row) => row.asset === selectedTailAsset) ?? []
+    : selectedTailAsset === 'btc' ? tailAllTimeResults?.byAskBand ?? [] : [];
   const tailRecentRounds = (tailSim?.recentRounds ?? []).filter((round) => round.asset === selectedTailAsset);
   const tailCommand = 'npm run research:pm5m-tail -- --assets btc,eth,sol,doge,xrp,hype --checkpoints 60,45,30,20,15,10,5 --size 5 --lookback-hours 12';
   const tailGeneratedAtMs = tailSim?.generatedAt ? new Date(tailSim.generatedAt).getTime() : 0;
@@ -512,7 +515,7 @@ export function App() {
       kicker: 'Research Calibration',
       title: simulationResearchTab === 'tail' ? 'Tail Entry simulation results' : 'Touch-fill simulation results',
       summary: simulationResearchTab === 'tail'
-        ? 'Use this view to compare each asset\'s 5m tail paper parameters against its most recent simulation PnL.'
+        ? 'Compare each asset\'s 5m tail parameters across the complete recorded simulation history.'
         : 'Use this view to calibrate pre-round entry price levels across 5m assets.',
     },
     strategy: {
@@ -538,9 +541,9 @@ export function App() {
         ? { title: 'Asset x price matrix', summary: 'Check whether a price level works broadly or only on specific 5m assets.' }
         : { title: 'Current round touch strip', summary: 'Watch active recorder observations without mixing them into paper order outcomes.' })
     : (tailSimulationSubTab === 'checkpoint'
-      ? { title: 'Checkpoint x size PnL', summary: `Primary paper ${selectedTailAsset.toUpperCase()} 5m tail gate: use that asset's best positive 12h PnL row, otherwise keep its paper tail stopped.` }
+      ? { title: 'All-time checkpoint PnL', summary: `Complete recorded ${selectedTailAsset.toUpperCase()} 5m checkpoint results. The runtime Tail gate still uses its configured ${tailLookbackLabel} rolling window.` }
       : tailSimulationSubTab === 'bands'
-        ? { title: 'Ask-band performance', summary: 'Check which entry price bands historically retained enough EV after fill and win rates.' }
+        ? { title: 'All-time ask-band performance', summary: 'Compare every recorded entry-price band without limiting the table to the current rolling gate window.' }
         : { title: 'Recent tail sample strip', summary: 'Inspect how recent markets were sampled at each checkpoint and what side/price would have been selected.' });
 
   return (
@@ -604,7 +607,7 @@ export function App() {
             <>
               <DecisionMetric label="Recorder" value={simulationResearchTab === 'tail' ? tailSimStatusLabel.toUpperCase() : touchSimStatusLabel.toUpperCase()} detail={simulationResearchTab === 'tail' ? `updated ${tailGeneratedLabel}` : `updated ${touchGeneratedLabel}`} tone={(simulationResearchTab === 'tail' ? tailSim?.ok : touchSim?.ok) ? 'good' : 'warn'} />
               <DecisionMetric label="Current view" value={simulationViewCopy.title} detail={simulationViewCopy.summary} tone="neutral" />
-              <DecisionMetric label="Window rows" value={String(simulationResearchTab === 'tail' ? tailSimStatus?.completedRows ?? tailSim?.completed?.rows ?? 0 : touchSimStatus?.completedRounds ?? touchSim?.completed?.rounds ?? 0)} detail={simulationResearchTab === 'tail' ? tailLookbackLabel : touchLookbackLabel} tone="neutral" />
+              <DecisionMetric label={simulationResearchTab === 'tail' ? 'All-time rows' : 'Window rows'} value={String(simulationResearchTab === 'tail' ? tailAllTimeRows : touchSimStatus?.completedRounds ?? touchSim?.completed?.rounds ?? 0)} detail={simulationResearchTab === 'tail' ? 'complete recorded history' : touchLookbackLabel} tone="neutral" />
               <DecisionMetric label="Paper config" value={simulationResearchTab === 'tail' ? 'TAIL PARAMS' : 'ENTRY PRICE'} detail={simulationResearchTab === 'tail' ? 'checkpoint + min strength price' : 'price routing reference'} tone="warn" />
             </>
           )}
@@ -1161,7 +1164,7 @@ export function App() {
                 onClick={() => setSimulationResearchTab('tail')}
               >
                 Tail Entry
-                <span>{tailSimStatus?.completedRows ?? tailSim?.completed?.rows ?? 0}</span>
+                <span>{tailAllTimeRows}</span>
               </button>
             </div>
             {simulationResearchTab === 'touch' && (
@@ -1412,7 +1415,7 @@ export function App() {
                 <>
                   <div className="assetMatrixTabs" aria-label="Tail simulation asset filter">
                     {tailAssets.map((asset) => {
-                      const count = tailSim.completed?.byAssetCheckpoint?.filter((row) => row.asset === asset).length ?? 0;
+                      const count = tailAllTimeResults?.byAssetCheckpoint?.filter((row) => row.asset === asset).length ?? 0;
                       return (
                         <button
                           key={asset}
@@ -1441,15 +1444,15 @@ export function App() {
                       tone={(tailSimStatus?.activeRounds ?? tailSim.active?.rounds ?? 0) > 0 ? 'good' : 'neutral'}
                     />
                     <DecisionMetric
-                      label="Window rows"
-                      value={String(tailSimStatus?.completedRows ?? tailSim.completed?.rows ?? 0)}
-                      detail={`${selectedTailAsset.toUpperCase()} / ${tailLookbackLabel} lookback / ${tailCheckpointRows.length} checkpoint rows`}
-                      tone={(tailSimStatus?.completedRows ?? tailSim.completed?.rows ?? 0) > 0 ? 'good' : 'warn'}
+                      label="All-time result rows"
+                      value={String(tailAllTimeRows)}
+                      detail={`${selectedTailAsset.toUpperCase()} / complete history / ${tailCheckpointRows.length} checkpoint rows`}
+                      tone={tailAllTimeRows > 0 ? 'good' : 'warn'}
                     />
                     <DecisionMetric
-                      label="All-time rows"
-                      value={String(tailSimStatus?.completedAllTimeRows ?? tailSim.completedAllTime?.rows ?? 0)}
-                      detail={`${tailSim.config?.size ?? tailSim.config?.sizes?.[0] ?? 5} reference shares (spend capped)`}
+                      label="Rolling gate rows"
+                      value={String(tailWindowRows)}
+                      detail={`${tailLookbackLabel} runtime gate / ${tailSim.config?.size ?? tailSim.config?.sizes?.[0] ?? 5} reference shares`}
                       tone="neutral"
                     />
                   </div>
@@ -1476,7 +1479,7 @@ export function App() {
                       className={`subTabBtn ${tailSimulationSubTab === 'rounds' ? 'active' : ''}`}
                       onClick={() => setTailSimulationSubTab('rounds')}
                     >
-                      Round Strip
+                      Recent Samples
                       <span>{tailRecentRounds.length}</span>
                     </button>
                   </div>
@@ -1492,10 +1495,10 @@ export function App() {
                   <section className="simulationSection">
                     <div className="sectionHeader compact">
                       <div>
-                        <span className="sectionKicker">Completed samples</span>
-                        <h3>Checkpoint PnL Gate</h3>
+                        <span className="sectionKicker">Complete recorded history</span>
+                        <h3>All-Time Checkpoint PnL</h3>
                       </div>
-                      <span className="panelSubTitle">{tailSim.completed?.rows ?? 0} finalized rows / {tailLookbackLabel}</span>
+                      <span className="panelSubTitle">{tailAllTimeRows} finalized result rows / all-time</span>
                     </div>
                     {tailCheckpointRows.length > 0 ? (
                       <DataTable headers={['T-End', 'Rows', 'Fill', 'Win', 'VWAP', 'Spread', 'Overround', 'EV/share', 'PnL']}>
@@ -1523,10 +1526,10 @@ export function App() {
                   <section className="simulationSection">
                     <div className="sectionHeader compact">
                       <div>
-                        <span className="sectionKicker">Execution price split</span>
-                        <h3>Selected Ask Bands</h3>
+                        <span className="sectionKicker">Complete execution-price history</span>
+                        <h3>All-Time Ask Bands</h3>
                       </div>
-                      <span className="panelSubTitle">{tailBandRows.length} rows</span>
+                      <span className="panelSubTitle">{tailBandRows.length} aggregate rows / all-time</span>
                     </div>
                     {tailBandRows.length > 0 ? (
                       <DataTable headers={['T-End', 'Ask band', 'Rows', 'Fill', 'Win', 'VWAP', 'EV/share', 'PnL']}>
