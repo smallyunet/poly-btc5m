@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import WebSocket from 'ws';
+import { roundSlugCandidates } from './round-slugs.mjs';
 
 const DEFAULT_ASSETS = ['btc', 'eth', 'sol', 'doge', 'xrp', 'hype'];
 const INTERVAL_SECONDS = { '5m': 300, '15m': 900, '1h': 3600 };
@@ -148,11 +149,17 @@ async function discoverAll() {
 }
 
 async function discoverRound(asset, startSec) {
-  const slug = `${asset}-updown-${config.interval}-${startSec}`;
-  const key = `${asset}:${config.interval}:${slug}`;
+  const key = `${asset}:${config.interval}:${startSec}`;
   if (rounds.has(key)) return;
-  const market = await gammaMarket(slug);
-  if (!isUsableMarket(market, slug)) return;
+  let market = null;
+  for (const candidate of roundSlugCandidates(asset, config.interval, startSec)) {
+    const fetched = await gammaMarket(candidate);
+    if (!isUsableMarket(fetched, candidate)) continue;
+    market = fetched;
+    break;
+  }
+  if (!market) return;
+  const slug = String(market.slug || '');
   const tokenIds = parseStringArray(market.clobTokenIds);
   const outcomes = parseStringArray(market.outcomes).map((item) => item.toLowerCase());
   const upIndex = outcomes.indexOf('up');
