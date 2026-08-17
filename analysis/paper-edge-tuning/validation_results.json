@@ -1,0 +1,244 @@
+{
+  "status": "pass",
+  "paper_checks": {
+    "baseline": {
+      "n": 2689,
+      "pnl": -45.355,
+      "ev": -0.016867
+    },
+    "cooldown_5m_after_single": {
+      "n": 1926,
+      "pnl": 54.05,
+      "ev": 0.028063
+    },
+    "utc8_00_04": {
+      "n": 448,
+      "pnl": 15.2,
+      "ev": 0.033929
+    },
+    "btc5m_utc8_00_04": {
+      "n": 336,
+      "pnl": 11.2,
+      "ev": 0.033333
+    },
+    "combo": {
+      "n": 655,
+      "pnl": 87.25,
+      "ev": 0.133206
+    }
+  },
+  "btc5m_20_24_paper": {
+    "candidate": "btc-5m UTC+8 20-24",
+    "dimension": "profile_time",
+    "value": "btc-5m|20-24",
+    "full": {
+      "n": 336,
+      "pnl": 50.25,
+      "cost": 589.75,
+      "ev": 0.149554,
+      "roi_pct": 8.521,
+      "both_rate_pct": 38.095,
+      "single_rate_pct": 61.905,
+      "positive_days": 6,
+      "covered_days": 7,
+      "daily_pnl_mean": 7.178571,
+      "daily_pnl_std": 7.902471,
+      "worst_day_pnl": -7.15,
+      "daily_max_drawdown": -7.15
+    },
+    "discovery": {
+      "n": 192,
+      "pnl": 41.35,
+      "cost": 348.65,
+      "ev": 0.215365,
+      "roi_pct": 11.86,
+      "both_rate_pct": 40.625,
+      "single_rate_pct": 59.375,
+      "positive_days": 4,
+      "covered_days": 4,
+      "daily_pnl_mean": 10.3375,
+      "daily_pnl_std": 1.363436,
+      "worst_day_pnl": 8.6,
+      "daily_max_drawdown": 0.0
+    },
+    "holdout": {
+      "n": 144,
+      "pnl": 8.9,
+      "cost": 241.1,
+      "ev": 0.061806,
+      "roi_pct": 3.691,
+      "both_rate_pct": 34.722,
+      "single_rate_pct": 65.278,
+      "positive_days": 2,
+      "covered_days": 3,
+      "daily_pnl_mean": 2.966667,
+      "daily_pnl_std": 11.74695,
+      "worst_day_pnl": -7.15,
+      "daily_max_drawdown": -7.15
+    },
+    "block_bootstrap_ev95": {
+      "low": 0.027679,
+      "high": 0.250446
+    },
+    "leave_one_day_out_ev": {
+      "low": 0.119444,
+      "high": 0.199306
+    }
+  },
+  "cross_source_agreement": {
+    "matched_btc5m_rounds": 2017,
+    "target_rounds": 336,
+    "paper_paired": 128,
+    "recorder_paired": 45,
+    "paired_in_both": 44,
+    "paper_side_fills": 464,
+    "paper_only_side_fills": 163,
+    "paper_only_side_fill_rate": 0.351293,
+    "contingency": {
+      "none": {
+        "paired": 38,
+        "single": 40
+      },
+      "paired": {
+        "paired": 44,
+        "single": 1
+      },
+      "single": {
+        "paired": 46,
+        "single": 167
+      }
+    }
+  },
+  "recorder_actual_touch": {
+    "btc5m_20_24_all_history": {
+      "rounds": 880,
+      "days": 19,
+      "paired_rate": 0.148864,
+      "single_rate": 0.610227,
+      "none_rate": 0.240909,
+      "ev_per_share": -0.047469,
+      "positive_days": 3,
+      "daily_pnl_per_share": {
+        "2026-07-06": -2.29,
+        "2026-07-07": -1.78,
+        "2026-07-08": -0.62,
+        "2026-07-09": -0.65,
+        "2026-07-10": -2.55,
+        "2026-07-11": -5.82,
+        "2026-07-12": -5.067,
+        "2026-07-13": -3.71,
+        "2026-07-14": -2.67,
+        "2026-07-15": -1.035,
+        "2026-08-08": 0.39,
+        "2026-08-09": 0.98,
+        "2026-08-10": 1.53,
+        "2026-08-11": -3.8,
+        "2026-08-12": -0.64,
+        "2026-08-13": -2.05,
+        "2026-08-14": -1.861,
+        "2026-08-15": -6.05,
+        "2026-08-16": -4.08
+      },
+      "block_bootstrap_ev95": {
+        "low": -0.067053,
+        "high": -0.027784
+      },
+      "leave_one_day_out_ev": {
+        "low": -0.052047,
+        "high": -0.042936
+      }
+    },
+    "btc5m_20_24_paper_overlap": {
+      "rounds": 336,
+      "days": 7,
+      "paired_rate": 0.133929,
+      "single_rate": 0.633929,
+      "none_rate": 0.232143,
+      "ev_per_share": -0.03539,
+      "positive_days": 2,
+      "daily_pnl_per_share": {
+        "2026-08-09": 0.98,
+        "2026-08-10": 1.53,
+        "2026-08-11": -3.8,
+        "2026-08-12": -0.64,
+        "2026-08-13": -2.05,
+        "2026-08-14": -1.861,
+        "2026-08-15": -6.05
+      },
+      "block_bootstrap_ev95": {
+        "low": -0.073988,
+        "high": 0.001009
+      },
+      "leave_one_day_out_ev": {
+        "low": -0.046601,
+        "high": -0.020281
+      }
+    },
+    "cooldown_all_history": {
+      "rounds": 3460,
+      "days": 21,
+      "paired_rate": 0.145665,
+      "single_rate": 0.585838,
+      "none_rate": 0.268497,
+      "ev_per_share": -0.046284,
+      "positive_days": 1,
+      "daily_pnl_per_share": {
+        "2026-07-06": -1.573,
+        "2026-07-07": -11.43,
+        "2026-07-08": -5.57,
+        "2026-07-09": -0.206,
+        "2026-07-10": -1.251,
+        "2026-07-11": -12.76,
+        "2026-07-12": -9.454,
+        "2026-07-13": -11.38,
+        "2026-07-14": -13.292,
+        "2026-07-15": -8.421,
+        "2026-07-16": -4.35,
+        "2026-08-08": 0.32,
+        "2026-08-09": -1.5,
+        "2026-08-10": -6.792,
+        "2026-08-11": -12.26,
+        "2026-08-12": -11.58,
+        "2026-08-13": -10.0,
+        "2026-08-14": -2.73,
+        "2026-08-15": -14.021,
+        "2026-08-16": -15.49,
+        "2026-08-17": -6.403
+      },
+      "block_bootstrap_ev95": {
+        "low": -0.059279,
+        "high": -0.033374
+      },
+      "leave_one_day_out_ev": {
+        "low": -0.049227,
+        "high": -0.043954
+      }
+    },
+    "cooldown_paper_overlap": {
+      "rounds": 1239,
+      "days": 7,
+      "paired_rate": 0.130751,
+      "single_rate": 0.625504,
+      "none_rate": 0.243745,
+      "ev_per_share": -0.047525,
+      "positive_days": 0,
+      "daily_pnl_per_share": {
+        "2026-08-09": -1.5,
+        "2026-08-10": -6.792,
+        "2026-08-11": -12.26,
+        "2026-08-12": -11.58,
+        "2026-08-13": -10.0,
+        "2026-08-14": -2.73,
+        "2026-08-15": -14.021
+      },
+      "block_bootstrap_ev95": {
+        "low": -0.067841,
+        "high": -0.027243
+      },
+      "leave_one_day_out_ev": {
+        "low": -0.055389,
+        "high": -0.042006
+      }
+    }
+  }
+}

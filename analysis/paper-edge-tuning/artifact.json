@@ -1,0 +1,821 @@
+{
+  "surface": "report",
+  "manifest": {
+    "version": 1,
+    "surface": "report",
+    "title": "历史数据中的 Edge：Paper 与独立成交记录交叉审计",
+    "description": "对 Paper 候选信号做 discovery/holdout、日区块 bootstrap 与独立 recorder 反证检验。",
+    "generatedAt": "2026-08-17T06:42:05.100Z",
+    "cards": [
+      {
+        "id": "baseline_card",
+        "description": "当前 Paper 基线为负，日区块 bootstrap 95% 区间跨零。",
+        "dataset": "overview",
+        "sourceId": "overview_sql",
+        "metrics": [
+          {
+            "label": "Baseline PnL",
+            "field": "baseline_pnl",
+            "format": "currency"
+          },
+          {
+            "label": "Baseline EV/round",
+            "field": "baseline_ev",
+            "format": "currency",
+            "signed": true
+          },
+          {
+            "label": "Positive days",
+            "field": "baseline_positive_days",
+            "format": "percent"
+          }
+        ]
+      },
+      {
+        "id": "validation_card",
+        "description": "最强 Paper 分段在独立 recorder 上翻为负；成交分歧大于候选 EV。",
+        "dataset": "overview",
+        "sourceId": "overview_sql",
+        "metrics": [
+          {
+            "label": "Paper target EV",
+            "field": "paper_target_ev",
+            "format": "currency",
+            "signed": true
+          },
+          {
+            "label": "Recorder target EV/share",
+            "field": "recorder_target_ev",
+            "format": "currency",
+            "signed": true
+          },
+          {
+            "label": "Paper-only side fills",
+            "field": "paper_only_fill_rate",
+            "format": "percent"
+          }
+        ]
+      }
+    ],
+    "charts": [
+      {
+        "id": "policy_ev",
+        "title": "候选策略的每轮 EV",
+        "subtitle": "组合策略的历史 EV 最高，但候选来自同一数据集的多重搜索。",
+        "headerMarkdown": "柱高是每个已选择轮次的平均 PnL；**不是未见样本的收益保证**。",
+        "type": "bar",
+        "dataset": "policy_comparison",
+        "sourceId": "policy_sql",
+        "palette": {
+          "kind": "diverging",
+          "midpoint": 0
+        },
+        "encodings": {
+          "x": {
+            "field": "policy",
+            "type": "nominal",
+            "label": "Policy"
+          },
+          "y": {
+            "field": "ev",
+            "type": "quantitative",
+            "label": "EV / round",
+            "format": "currency"
+          },
+          "tooltip": [
+            {
+              "field": "rounds",
+              "type": "quantitative",
+              "label": "Rounds",
+              "format": "number"
+            },
+            {
+              "field": "pnl",
+              "type": "quantitative",
+              "label": "PnL",
+              "format": "currency"
+            },
+            {
+              "field": "coverage",
+              "type": "quantitative",
+              "label": "Coverage",
+              "format": "percent"
+            }
+          ]
+        },
+        "valueFormat": "currency"
+      },
+      {
+        "id": "daily_pnl",
+        "title": "Baseline 与最佳历史组合的逐日 PnL",
+        "subtitle": "用于展示筛选如何改变逐日路径；组合来自事后搜索，首尾日不完整。",
+        "type": "line",
+        "dataset": "daily_pnl",
+        "sourceId": "daily_sql",
+        "palette": {
+          "kind": "semantic",
+          "name": "actual-vs-comparison"
+        },
+        "encodings": {
+          "x": {
+            "field": "day",
+            "type": "temporal",
+            "label": "Beijing day"
+          },
+          "y": {
+            "field": "pnl",
+            "type": "quantitative",
+            "label": "Daily PnL",
+            "format": "currency"
+          },
+          "color": {
+            "field": "series",
+            "type": "nominal",
+            "label": "Policy"
+          }
+        },
+        "valueFormat": "currency"
+      },
+      {
+        "id": "time_block_ev",
+        "title": "北京时间四小时分段 EV",
+        "subtitle": "20–24 全样本最高，但全 profile holdout 接近零；16–20 在前后段均为负。",
+        "type": "bar",
+        "dataset": "time_blocks",
+        "sourceId": "time_sql",
+        "palette": {
+          "kind": "diverging",
+          "midpoint": 0
+        },
+        "encodings": {
+          "x": {
+            "field": "time_block",
+            "type": "ordinal",
+            "label": "UTC+8"
+          },
+          "y": {
+            "field": "ev",
+            "type": "quantitative",
+            "label": "EV / round",
+            "format": "currency"
+          },
+          "tooltip": [
+            {
+              "field": "discovery_ev",
+              "type": "quantitative",
+              "label": "Discovery EV",
+              "format": "currency"
+            },
+            {
+              "field": "holdout_ev",
+              "type": "quantitative",
+              "label": "Holdout EV",
+              "format": "currency"
+            },
+            {
+              "field": "rounds",
+              "type": "quantitative",
+              "label": "Rounds",
+              "format": "number"
+            }
+          ]
+        },
+        "valueFormat": "currency"
+      }
+    ],
+    "tables": [
+      {
+        "id": "policy_table",
+        "title": "候选策略完整对比",
+        "subtitle": "Discovery 截止 2026-08-12；Holdout 为之后的数据。置信区间未校正多重搜索。",
+        "dataset": "policy_comparison",
+        "sourceId": "policy_sql",
+        "defaultSort": {
+          "field": "ev",
+          "direction": "desc"
+        },
+        "columns": [
+          {
+            "field": "policy",
+            "label": "Policy",
+            "type": "text"
+          },
+          {
+            "field": "status",
+            "label": "Role",
+            "type": "text"
+          },
+          {
+            "field": "rounds",
+            "label": "Rounds",
+            "format": "number"
+          },
+          {
+            "field": "coverage",
+            "label": "Coverage",
+            "format": "percent"
+          },
+          {
+            "field": "pnl",
+            "label": "PnL",
+            "format": "currency"
+          },
+          {
+            "field": "ev",
+            "label": "EV/round",
+            "format": "currency",
+            "movement": true
+          },
+          {
+            "field": "discovery_ev",
+            "label": "Discovery EV",
+            "format": "currency",
+            "movement": true
+          },
+          {
+            "field": "holdout_ev",
+            "label": "Holdout EV",
+            "format": "currency",
+            "movement": true
+          },
+          {
+            "field": "daily_std",
+            "label": "Daily σ",
+            "format": "currency"
+          },
+          {
+            "field": "max_drawdown",
+            "label": "Daily max DD",
+            "format": "currency",
+            "movement": true
+          }
+        ]
+      },
+      {
+        "id": "cross_source_table",
+        "title": "关键候选的跨数据源验证",
+        "subtitle": "Paper EV/round 与 recorder EV/share 的单位不同，不直接比较幅度；这里只检查符号、区间和成交一致性。",
+        "dataset": "cross_source",
+        "sourceId": "cross_source_sql",
+        "columns": [
+          {
+            "field": "test",
+            "label": "Test",
+            "type": "text"
+          },
+          {
+            "field": "source",
+            "label": "Source",
+            "type": "text"
+          },
+          {
+            "field": "period",
+            "label": "Period",
+            "type": "text"
+          },
+          {
+            "field": "rounds",
+            "label": "Rounds",
+            "format": "number"
+          },
+          {
+            "field": "days",
+            "label": "Days",
+            "format": "number"
+          },
+          {
+            "field": "ev",
+            "label": "EV",
+            "format": "currency",
+            "movement": true
+          },
+          {
+            "field": "ci_low",
+            "label": "95% low",
+            "format": "currency",
+            "movement": true
+          },
+          {
+            "field": "ci_high",
+            "label": "95% high",
+            "format": "currency",
+            "movement": true
+          },
+          {
+            "field": "result",
+            "label": "Verdict",
+            "type": "text"
+          }
+        ]
+      }
+    ],
+    "sources": [
+      {
+        "id": "overview_sql",
+        "label": "Headline metrics from reviewed analysis",
+        "query": {
+          "engine": "sqlite",
+          "sql": "SELECT \"baseline_pnl\", \"baseline_ev\", \"baseline_positive_days\", \"paper_target_ev\", \"recorder_target_ev\", \"paper_only_fill_rate\" FROM \"report_overview\"",
+          "description": "Selects the reviewed report dataset materialized from the Paper ledger analysis.",
+          "executed_at": "2026-08-17T06:42:05.100Z"
+        }
+      },
+      {
+        "id": "policy_sql",
+        "label": "Policy comparison from reviewed analysis",
+        "query": {
+          "engine": "sqlite",
+          "sql": "SELECT \"policy\", \"status\", \"rounds\", \"coverage\", \"pnl\", \"ev\", \"roi\", \"positive_day_rate\", \"daily_std\", \"worst_day\", \"max_drawdown\", \"discovery_ev\", \"holdout_ev\", \"ci_low\", \"ci_high\" FROM \"policy_comparison\"",
+          "description": "Selects the reviewed report dataset materialized from the Paper ledger analysis.",
+          "executed_at": "2026-08-17T06:42:05.100Z"
+        }
+      },
+      {
+        "id": "daily_sql",
+        "label": "Daily PnL from reviewed analysis",
+        "query": {
+          "engine": "sqlite",
+          "sql": "SELECT \"day\", \"series\", \"pnl\" FROM \"daily_pnl\"",
+          "description": "Selects the reviewed report dataset materialized from the Paper ledger analysis.",
+          "executed_at": "2026-08-17T06:42:05.100Z"
+        }
+      },
+      {
+        "id": "time_sql",
+        "label": "Time-block metrics from reviewed analysis",
+        "query": {
+          "engine": "sqlite",
+          "sql": "SELECT \"time_block\", \"rounds\", \"pnl\", \"ev\", \"discovery_ev\", \"holdout_ev\", \"positive_days\" FROM \"time_blocks\"",
+          "description": "Selects the reviewed report dataset materialized from the Paper ledger analysis.",
+          "executed_at": "2026-08-17T06:42:05.100Z"
+        }
+      },
+      {
+        "id": "cross_source_sql",
+        "label": "Cross-source falsification checks",
+        "query": {
+          "engine": "sqlite",
+          "sql": "SELECT \"test\", \"source\", \"period\", \"rounds\", \"days\", \"ev\", \"ci_low\", \"ci_high\", \"result\" FROM \"cross_source\"",
+          "description": "Selects the reviewed report dataset materialized from the Paper ledger analysis.",
+          "executed_at": "2026-08-17T06:42:05.100Z"
+        }
+      }
+    ],
+    "blocks": [
+      {
+        "id": "executive_summary",
+        "type": "markdown",
+        "body": "## Executive Summary / 执行摘要\n\n**目前没有找到可以部署的 edge。** Paper 中最强的候选是 BTC 5m 北京时间 20–24：336 轮、PnL +$50.25、EV/round +$0.150，discovery 和 holdout 都为正。但独立 recorder 用真实首次 bestAsk 重算后，全历史 880 轮 EV/share -$0.047，日区块 95% 区间完全低于零。目标分段 464 个 Paper 单边成交里，有 163 个（35.1%）没有被 recorder 看到；Paper 的 128 个双边成交，只有 44 个在两边都成立。**成交测量偏差大于策略信号，先修测量，再谈调参。**"
+      },
+      {
+        "id": "headline_metrics",
+        "type": "metric-strip",
+        "cardIds": [
+          "baseline_card",
+          "validation_card"
+        ]
+      },
+      {
+        "id": "key_findings",
+        "type": "markdown",
+        "body": "## Key Findings / 关键发现\n\n- Paper baseline：2,689 轮，PnL -$45.36，EV/round -$0.0169；日区块 95% 区间 -$0.124 至 +$0.082。\n- BTC 5m 20–24 是最强 Paper 分段，7 天中 6 天为正；但这是 39 个候选中挑出的赢家，holdout 只有 3 天。\n- 独立 recorder 覆盖 5,486 个 BTC 5m 轮次、21 个北京时间日期；20–24 与 cooldown 的 EV 都仍为负。\n- 5 分钟 cooldown 在 Paper 中 EV +$0.028；在 recorder 中只是把 EV/share 从 -$0.0523 改善到 -$0.0463，不能称为 alpha。\n- 16–20 在 Paper discovery 和 holdout 均为负，是较合理的预注册 avoidance arm。\n- 报价年龄不是主要解释：Paper 成交记录的 quote age 通常只有毫秒级；核心矛盾是两个独立 WS/快照语义对‘触价’的判定不一致。"
+      },
+      {
+        "id": "policy_ev_block",
+        "type": "chart",
+        "chartId": "policy_ev"
+      },
+      {
+        "id": "daily_block",
+        "type": "chart",
+        "chartId": "daily_pnl"
+      },
+      {
+        "id": "time_block",
+        "type": "chart",
+        "chartId": "time_block_ev"
+      },
+      {
+        "id": "policy_detail",
+        "type": "table",
+        "tableId": "policy_table",
+        "layout": "full"
+      },
+      {
+        "id": "cross_source_detail",
+        "type": "table",
+        "tableId": "cross_source_table",
+        "layout": "full"
+      },
+      {
+        "id": "recommended_next_steps",
+        "type": "markdown",
+        "body": "## Recommended Next Steps / 建议下一步\n\n1. 暂不调整或发布交易策略；先让 Paper 与 recorder 对同一 token、同一盘口事件产出可逐笔对账的 receipt。\n2. 将保守成交口径作为主口径：至少要求 recorder 可复核，进一步加入队列位置或触价折扣；报告 Paper-only、recorder-only 和共同成交率。\n3. 成交一致性达标后再冻结实验：A=baseline；B=结算 single 后 cooldown 5m；C=排除 16–20。20–24 仅作为探索臂，不作为优先上线候选。\n4. 连续跑满至少 30 个完整北京时间自然日，中途不重选窗口；主指标固定为 EV/eligible round、PnL/day、日最大回撤、覆盖率和跨源成交一致率。\n5. 只有独立成交口径下的日区块区间高于零，且收益不集中在少数日期，才进入小仓位真钱验证。"
+      },
+      {
+        "id": "further_questions",
+        "type": "markdown",
+        "body": "## Further Questions / 后续问题\n\n- Paper 与 recorder 的差异来自初始盘口快照、增量 WS 丢包，还是订单事件与盘口事件的时间排序？\n- 对共同成交、Paper-only 与 recorder-only 三组，盘口深度和停留时间分别如何？\n- cooldown 的‘少亏’是否只是减少交易次数，还是对 paired rate 有稳定的条件提升？\n- 排除 16–20 在新的、冻结规则的样本里能否继续降低损失？"
+      },
+      {
+        "id": "caveats",
+        "type": "markdown",
+        "body": "## Caveats & Assumptions / 限制与假设\n\n- Paper run 只有 8 个北京时间日期，首尾日不完整；候选搜索有明显多重比较偏差。\n- Holdout 是同一 run 的后段，不是真正独立实验；20–24 holdout 只有 3 天。\n- Recorder 只记录开盘到结算之间的触价；Paper 会提前挂单，因此两者不是完全相同的执行模型。但目标分段 Paper 双边成交均在开盘后完成，差异仍需要解释。\n- Recorder 的 actual-touch PnL 使用首次观察到的 bestAsk，不含真实队列、延迟和手续费，因此仍偏乐观；负结果具有反证意义。\n- cooldown 反事实假设跳过订单不会改变后续成交或资金占用。\n- Strategy-check 特征不可用，尚不能检验波动率、chop、drift、momentum 或 queue 状态。"
+      }
+    ]
+  },
+  "snapshot": {
+    "version": 1,
+    "generatedAt": "2026-08-17T06:42:05.100Z",
+    "status": "partial",
+    "datasets": {
+      "overview": [
+        {
+          "baseline_pnl": -45.355,
+          "baseline_ev": -0.016867,
+          "baseline_positive_days": 0.5,
+          "paper_target_ev": 0.149554,
+          "recorder_target_ev": -0.047469,
+          "paper_only_fill_rate": 0.351293
+        }
+      ],
+      "policy_comparison": [
+        {
+          "policy": "Baseline",
+          "status": "Negative reference",
+          "rounds": 2689,
+          "coverage": 1.0,
+          "pnl": -45.355,
+          "ev": -0.016867,
+          "roi": -0.00861,
+          "positive_day_rate": 0.5,
+          "daily_std": 53.167432,
+          "worst_day": -83.65,
+          "max_drawdown": -126.55,
+          "discovery_ev": -0.026166,
+          "holdout_ev": -0.007421,
+          "ci_low": -0.124166,
+          "ci_high": 0.081506
+        },
+        {
+          "policy": "5m cooldown after single",
+          "status": "Risk-control hypothesis",
+          "rounds": 1926,
+          "coverage": 0.7162513945704723,
+          "pnl": 54.05,
+          "ev": 0.028063,
+          "roi": 0.01341,
+          "positive_day_rate": 0.625,
+          "daily_std": 35.149085,
+          "worst_day": -53.85,
+          "max_drawdown": -56.75,
+          "discovery_ev": 0.03,
+          "holdout_ev": 0.026078,
+          "ci_low": -0.074882,
+          "ci_high": 0.113588
+        },
+        {
+          "policy": "UTC+8 00–04",
+          "status": "Time-window candidate",
+          "rounds": 448,
+          "coverage": 0.1666046857567869,
+          "pnl": 15.2,
+          "ev": 0.033929,
+          "roi": 0.017079999999999998,
+          "positive_day_rate": 0.5714285714285714,
+          "daily_std": 30.704042,
+          "worst_day": -38.95,
+          "max_drawdown": -56.75,
+          "discovery_ev": 0.098698,
+          "holdout_ev": -0.014648,
+          "ci_low": -0.298103,
+          "ci_high": 0.346116
+        },
+        {
+          "policy": "BTC 5m, UTC+8 00–04",
+          "status": "Profile-specific candidate",
+          "rounds": 336,
+          "coverage": 0.12495351431759018,
+          "pnl": 11.2,
+          "ev": 0.033333,
+          "roi": 0.019870000000000002,
+          "positive_day_rate": 0.5714285714285714,
+          "daily_std": 24.392314,
+          "worst_day": -33.05,
+          "max_drawdown": -48.2,
+          "discovery_ev": 0.166319,
+          "holdout_ev": -0.066406,
+          "ci_low": -0.315327,
+          "ci_high": 0.371131
+        },
+        {
+          "policy": "Exclude UTC+8 16–20",
+          "status": "Avoidance candidate",
+          "rounds": 2241,
+          "coverage": 0.8333953142432131,
+          "pnl": 9.095,
+          "ev": 0.004058,
+          "roi": 0.0020599999999999998,
+          "positive_day_rate": 0.625,
+          "daily_std": 51.944193,
+          "worst_day": -83.65,
+          "max_drawdown": -101.9,
+          "discovery_ev": -0.006601,
+          "holdout_ev": 0.014317,
+          "ci_low": -0.12083,
+          "ci_high": 0.115639
+        },
+        {
+          "policy": "UTC+8 00–04 or 20–24",
+          "status": "Exploratory",
+          "rounds": 896,
+          "coverage": 0.3332093715135738,
+          "pnl": 58.75,
+          "ev": 0.065569,
+          "roi": 0.032440000000000004,
+          "positive_day_rate": 0.625,
+          "daily_std": 30.644149,
+          "worst_day": -38.95,
+          "max_drawdown": -57.95,
+          "discovery_ev": 0.139621,
+          "holdout_ev": -0.008482,
+          "ci_low": -0.123125,
+          "ci_high": 0.221652
+        },
+        {
+          "policy": "5m cooldown + 00–04/20–24",
+          "status": "Selection-biased combo",
+          "rounds": 655,
+          "coverage": 0.24358497582744515,
+          "pnl": 87.25,
+          "ev": 0.133206,
+          "roi": 0.06198000000000001,
+          "positive_day_rate": 0.875,
+          "daily_std": 17.29429,
+          "worst_day": -16.7,
+          "max_drawdown": -16.7,
+          "discovery_ev": 0.22997,
+          "holdout_ev": 0.033746,
+          "ci_low": -0.002646,
+          "ci_high": 0.255339
+        },
+        {
+          "policy": "BTC 5m, UTC+8 20–24",
+          "status": "Strongest Paper hypothesis",
+          "rounds": 336,
+          "coverage": 0.12495351431759018,
+          "pnl": 50.25,
+          "ev": 0.149554,
+          "roi": 0.08521000000000001,
+          "positive_day_rate": 0.8571428571428571,
+          "daily_std": 7.902471,
+          "worst_day": -7.15,
+          "max_drawdown": -7.15,
+          "discovery_ev": 0.215365,
+          "holdout_ev": 0.061806,
+          "ci_low": 0.027679,
+          "ci_high": 0.250446
+        }
+      ],
+      "daily_pnl": [
+        {
+          "day": "2026-08-09",
+          "series": "Baseline",
+          "pnl": 24.05
+        },
+        {
+          "day": "2026-08-10",
+          "series": "Baseline",
+          "pnl": -59.805
+        },
+        {
+          "day": "2026-08-11",
+          "series": "Baseline",
+          "pnl": -4.6
+        },
+        {
+          "day": "2026-08-12",
+          "series": "Baseline",
+          "pnl": 4.9
+        },
+        {
+          "day": "2026-08-13",
+          "series": "Baseline",
+          "pnl": 48.25
+        },
+        {
+          "day": "2026-08-14",
+          "series": "Baseline",
+          "pnl": 68.4
+        },
+        {
+          "day": "2026-08-15",
+          "series": "Baseline",
+          "pnl": -42.9
+        },
+        {
+          "day": "2026-08-16",
+          "series": "Baseline",
+          "pnl": -83.65
+        },
+        {
+          "day": "2026-08-09",
+          "series": "5m cooldown + 00–04/20–24",
+          "pnl": 7.5
+        },
+        {
+          "day": "2026-08-10",
+          "series": "5m cooldown + 00–04/20–24",
+          "pnl": 4.1
+        },
+        {
+          "day": "2026-08-11",
+          "series": "5m cooldown + 00–04/20–24",
+          "pnl": 41.0
+        },
+        {
+          "day": "2026-08-12",
+          "series": "5m cooldown + 00–04/20–24",
+          "pnl": 23.75
+        },
+        {
+          "day": "2026-08-13",
+          "series": "5m cooldown + 00–04/20–24",
+          "pnl": 20.35
+        },
+        {
+          "day": "2026-08-14",
+          "series": "5m cooldown + 00–04/20–24",
+          "pnl": 5.6
+        },
+        {
+          "day": "2026-08-15",
+          "series": "5m cooldown + 00–04/20–24",
+          "pnl": 1.65
+        },
+        {
+          "day": "2026-08-16",
+          "series": "5m cooldown + 00–04/20–24",
+          "pnl": -16.7
+        }
+      ],
+      "time_blocks": [
+        {
+          "time_block": "00-04",
+          "rounds": 448,
+          "pnl": 15.2,
+          "ev": 0.033929,
+          "discovery_ev": 0.098698,
+          "holdout_ev": -0.014648,
+          "positive_days": "4/7"
+        },
+        {
+          "time_block": "04-08",
+          "rounds": 448,
+          "pnl": -22.8,
+          "ev": -0.050893,
+          "discovery_ev": -0.23099,
+          "holdout_ev": 0.08418,
+          "positive_days": "3/7"
+        },
+        {
+          "time_block": "08-12",
+          "rounds": 458,
+          "pnl": -12.95,
+          "ev": -0.028275,
+          "discovery_ev": -0.033744,
+          "holdout_ev": -0.023922,
+          "positive_days": "5/8"
+        },
+        {
+          "time_block": "12-16",
+          "rounds": 439,
+          "pnl": -13.905,
+          "ev": -0.031674,
+          "discovery_ev": -0.072676,
+          "holdout_ev": 0.025683,
+          "positive_days": "3/7"
+        },
+        {
+          "time_block": "16-20",
+          "rounds": 448,
+          "pnl": -54.45,
+          "ev": -0.12154,
+          "discovery_ev": -0.110156,
+          "holdout_ev": -0.136719,
+          "positive_days": "1/7"
+        },
+        {
+          "time_block": "20-24",
+          "rounds": 448,
+          "pnl": 43.55,
+          "ev": 0.09721,
+          "discovery_ev": 0.170313,
+          "holdout_ev": -0.00026,
+          "positive_days": "5/7"
+        }
+      ],
+      "cross_source": [
+        {
+          "test": "BTC5m 20–24",
+          "source": "Paper",
+          "period": "2026-08-09–15",
+          "rounds": 336,
+          "days": 7,
+          "ev": 0.149554,
+          "ci_low": 0.027679,
+          "ci_high": 0.250446,
+          "result": "Positive hypothesis"
+        },
+        {
+          "test": "BTC5m 20–24",
+          "source": "Independent recorder",
+          "period": "2026-07-05–08-17",
+          "rounds": 880,
+          "days": 19,
+          "ev": -0.047469,
+          "ci_low": -0.067053,
+          "ci_high": -0.027784,
+          "result": "Rejected"
+        },
+        {
+          "test": "5m cooldown",
+          "source": "Independent recorder",
+          "period": "2026-07-05–08-17",
+          "rounds": 3460,
+          "days": 21,
+          "ev": -0.046284,
+          "ci_low": -0.059279,
+          "ci_high": -0.033374,
+          "result": "Still negative"
+        }
+      ]
+    },
+    "accessIssues": [
+      {
+        "id": "strategy_checks_unavailable",
+        "dataset": "strategy_check_features",
+        "message": "The bounded read-only extraction timed out for strategy_check events; feature-level tuning was not evaluated."
+      }
+    ]
+  },
+  "package_info": {
+    "originUrl": "artifact://paper-dual-entry-edge-tuning",
+    "controls": {
+      "edit": true,
+      "refresh": true
+    }
+  },
+  "sources": [
+    {
+      "id": "overview_sql",
+      "label": "Headline metrics from reviewed analysis",
+      "query": {
+        "engine": "sqlite",
+        "sql": "SELECT \"baseline_pnl\", \"baseline_ev\", \"baseline_positive_days\", \"paper_target_ev\", \"recorder_target_ev\", \"paper_only_fill_rate\" FROM \"report_overview\"",
+        "description": "Selects the reviewed report dataset materialized from the Paper ledger analysis.",
+        "executed_at": "2026-08-17T06:42:05.100Z"
+      }
+    },
+    {
+      "id": "policy_sql",
+      "label": "Policy comparison from reviewed analysis",
+      "query": {
+        "engine": "sqlite",
+        "sql": "SELECT \"policy\", \"status\", \"rounds\", \"coverage\", \"pnl\", \"ev\", \"roi\", \"positive_day_rate\", \"daily_std\", \"worst_day\", \"max_drawdown\", \"discovery_ev\", \"holdout_ev\", \"ci_low\", \"ci_high\" FROM \"policy_comparison\"",
+        "description": "Selects the reviewed report dataset materialized from the Paper ledger analysis.",
+        "executed_at": "2026-08-17T06:42:05.100Z"
+      }
+    },
+    {
+      "id": "daily_sql",
+      "label": "Daily PnL from reviewed analysis",
+      "query": {
+        "engine": "sqlite",
+        "sql": "SELECT \"day\", \"series\", \"pnl\" FROM \"daily_pnl\"",
+        "description": "Selects the reviewed report dataset materialized from the Paper ledger analysis.",
+        "executed_at": "2026-08-17T06:42:05.100Z"
+      }
+    },
+    {
+      "id": "time_sql",
+      "label": "Time-block metrics from reviewed analysis",
+      "query": {
+        "engine": "sqlite",
+        "sql": "SELECT \"time_block\", \"rounds\", \"pnl\", \"ev\", \"discovery_ev\", \"holdout_ev\", \"positive_days\" FROM \"time_blocks\"",
+        "description": "Selects the reviewed report dataset materialized from the Paper ledger analysis.",
+        "executed_at": "2026-08-17T06:42:05.100Z"
+      }
+    },
+    {
+      "id": "cross_source_sql",
+      "label": "Cross-source falsification checks",
+      "query": {
+        "engine": "sqlite",
+        "sql": "SELECT \"test\", \"source\", \"period\", \"rounds\", \"days\", \"ev\", \"ci_low\", \"ci_high\", \"result\" FROM \"cross_source\"",
+        "description": "Selects the reviewed report dataset materialized from the Paper ledger analysis.",
+        "executed_at": "2026-08-17T06:42:05.100Z"
+      }
+    }
+  ]
+}
