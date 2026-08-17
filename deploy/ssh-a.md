@@ -6,8 +6,12 @@ when needed, builds the image, and starts `docker-compose.prod.yml`.
 The deployed application is Paper-only. Do not add wallet credentials to the
 server environment; the application has no authenticated trading client.
 
-Before deployment, choose a durable `PAPER_RUN_ID`, verify the enabled profile
-set, and ensure `data/` is included in the server backup policy.
+Each deployment creates and persists a new `PAPER_RUN_ID` so code, configuration,
+and fill-model changes cannot reuse an incompatible ledger run. Set
+`DEPLOY_PAPER_RUN_ID` only when an explicit durable run identifier is required.
+Verify the enabled profile set and ensure `data/` is included in the server
+backup policy. The deploy script preserves remote certificates and restores
+them from the local ignored `certs/` directory only when they are missing.
 
 ```bash
 ./deploy/deploy-a.sh
