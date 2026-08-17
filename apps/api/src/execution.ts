@@ -6,7 +6,12 @@ export type ExecutePaperIntentsParams = {
   store: InMemoryStore;
   snapshot: StateSnapshot;
   intents: TradeIntent[];
+  maxQuoteAgeSeconds?: number;
+  fillModelVersion?: string;
 };
+
+const DEFAULT_MAX_QUOTE_AGE_SECONDS = 5;
+const DEFAULT_FILL_MODEL_VERSION = 'best-ask-touch-full-fill-v2';
 
 export function executePaperIntents(params: ExecutePaperIntentsParams): string[] {
   if (!params.intents.length) return [];
@@ -18,18 +23,25 @@ export function executePaperIntents(params: ExecutePaperIntentsParams): string[]
       diagnostics.push(`Paper execution blocked for ${intent.label}: LOCAL_STRATEGY_ORDER_EXISTS.`);
       continue;
     }
-    const order = paperOrder(params.snapshot, intent, executionKey);
+    const order = paperOrder(params.snapshot, intent, executionKey, params.fillModelVersion);
     params.store.recordOrder(order);
     params.store.updateIntent(intent.id, { status: 'executed' });
     const quote = params.snapshot.orderbooks.find((item) => item.tokenId === intent.tokenId);
-    const fill = paperTouchFill(order, quote);
+    const fill = paperTouchFill(order, quote, Date.now(), params.maxQuoteAgeSeconds, params.fillModelVersion);
     if (fill) recordPaperFill(params.store, order, fill);
   }
   diagnostics.push(`Paper simulation recorded ${params.intents.length} GTC order intents.`);
   return diagnostics;
 }
 
-export function reconcilePaperOrders(params: { store: InMemoryStore; profileId: MarketProfileId; quotes: OrderBookQuote[]; nowMs?: number }): FillRecord[] {
+export function reconcilePaperOrders(params: {
+  store: InMemoryStore;
+  profileId: MarketProfileId;
+  quotes: OrderBookQuote[];
+  nowMs?: number;
+  maxQuoteAgeSeconds?: number;
+  fillModelVersion?: string;
+}): FillRecord[] {
   const nowMs = params.nowMs ?? Date.now();
   const quotes = new Map(params.quotes.map((quote) => [quote.tokenId, quote]));
   const fills: FillRecord[] = [];
@@ -38,7 +50,7 @@ export function reconcilePaperOrders(params: { store: InMemoryStore; profileId: 
       params.store.recordOrder({ ...order, status: 'cancelled', updatedAt: new Date(nowMs).toISOString() });
       continue;
     }
-    const fill = paperTouchFill(order, quotes.get(order.tokenId), nowMs);
+    const fill = paperTouchFill(order, quotes.get(order.tokenId), nowMs, params.maxQuoteAgeSeconds, params.fillModelVersion);
     if (!fill) continue;
     recordPaperFill(params.store, order, fill);
     fills.push(fill);
@@ -57,7 +69,7 @@ function recordPaperFill(store: InMemoryStore, order: OrderRecord, fill: FillRec
   });
 }
 
-function paperOrder(snapshot: StateSnapshot, intent: TradeIntent, executionKey: string): OrderRecord {
+function paperOrder(snapshot: StateSnapshot, intent: TradeIntent, executionKey: string, fillModelVersion = DEFAULT_FILL_MODEL_VERSION): OrderRecord {
   return {
     id: `paper-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
     profileId: intent.profileId,
@@ -80,14 +92,23 @@ function paperOrder(snapshot: StateSnapshot, intent: TradeIntent, executionKey: 
     createdAt: new Date().toISOString(),
     rawResponse: {
       paper: true,
-      fillModel: 'best-ask-touch-full-fill-v1',
+      fillModel: fillModelVersion,
       submittedQuote: snapshot.orderbooks.find((quote) => quote.tokenId === intent.tokenId) || null,
     },
   };
 }
 
-function paperTouchFill(order: OrderRecord, quote: OrderBookQuote | undefined, nowMs = Date.now()): FillRecord | null {
+function paperTouchFill(
+  order: OrderRecord,
+  quote: OrderBookQuote | undefined,
+  nowMs = Date.now(),
+  maxQuoteAgeSeconds = DEFAULT_MAX_QUOTE_AGE_SECONDS,
+  fillModelVersion = DEFAULT_FILL_MODEL_VERSION,
+): FillRecord | null {
   if (!quote || quote.source !== 'ws' || quote.bestAsk == null || quote.bestAsk > order.price) return null;
+  const quoteUpdatedAtMs = Date.parse(quote.updatedAt);
+  const quoteAgeMs = nowMs - quoteUpdatedAtMs;
+  if (!Number.isFinite(quoteUpdatedAtMs) || quoteAgeMs < -1_000 || quoteAgeMs > maxQuoteAgeSeconds * 1_000) return null;
   const matchedAt = new Date(nowMs).toISOString();
   return {
     id: `paper-fill-${order.id}`,
@@ -106,7 +127,20 @@ function paperTouchFill(order: OrderRecord, quote: OrderBookQuote | undefined, n
     price: Math.min(order.price, quote.bestAsk),
     size: order.size,
     matchedAt,
-    raw: { paper: true, fillModel: 'best-ask-touch-full-fill-v1', quote },
+    raw: {
+      paper: true,
+      fillModel: fillModelVersion,
+      decision: {
+        observedAt: matchedAt,
+        orderCreatedAt: order.createdAt,
+        quoteUpdatedAt: quote.updatedAt,
+        quoteAgeMs,
+        bestAsk: quote.bestAsk,
+        limitPrice: order.price,
+        maxQuoteAgeMs: maxQuoteAgeSeconds * 1_000,
+      },
+      quote,
+    },
   };
 }
 

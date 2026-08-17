@@ -20,12 +20,16 @@ The archived pre-Paper implementation is preserved by the
 ## Paper fill models
 
 - Dual entry: simulated resting GTC order; full fill when a public websocket
-  best ask touches the limit (`best-ask-touch-full-fill-v1`).
+  best ask no older than the configured orderbook limit touches the order limit
+  (`best-ask-touch-full-fill-v2`). Each fill stores the quote timestamp, quote
+  age, observed time, order time, ask, limit, and model version for reconciliation.
 - Tail entry: immediate full fill at the evaluated ask-band VWAP
   (`fak-vwap-immediate-full-fill-v1`).
 
 These are assumptions, not claims about real queue position or execution
 quality. Every run records its config hash, code SHA, and fill-model version.
+The independent touch recorders use a versioned pre-start observation window
+matching the interval length, rather than discarding touches before market open.
 
 ## Local development
 

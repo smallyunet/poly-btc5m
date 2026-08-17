@@ -30,6 +30,42 @@ test('Paper Dual rests until a later ask touches the limit', () => {
   assert.equal(store.dashboardState().orders[0].status, 'filled');
 });
 
+test('Paper Dual ignores stale touch quotes and records auditable fresh-quote evidence', () => {
+  const store = new InMemoryStore(2_000, { persistencePath: false });
+  const trade = intent(0.45);
+  store.recordIntents([trade]);
+  executePaperIntents({
+    store,
+    snapshot: snapshot(quote(0.44, new Date(Date.now() - 6_000).toISOString())),
+    intents: [trade],
+    maxQuoteAgeSeconds: 5,
+    fillModelVersion: 'best-ask-touch-full-fill-v2',
+  });
+  assert.equal(store.dashboardState().orders[0].status, 'posted');
+  assert.equal(store.dashboardState().fills.length, 0);
+
+  const nowMs = Date.now();
+  const fills = reconcilePaperOrders({
+    store,
+    profileId: 'btc-5m',
+    quotes: [quote(0.44, new Date(nowMs - 250).toISOString())],
+    nowMs,
+    maxQuoteAgeSeconds: 5,
+    fillModelVersion: 'best-ask-touch-full-fill-v2',
+  });
+  assert.equal(fills.length, 1);
+  assert.equal(fills[0].raw?.fillModel, 'best-ask-touch-full-fill-v2');
+  assert.deepEqual(fills[0].raw?.decision, {
+    observedAt: new Date(nowMs).toISOString(),
+    orderCreatedAt: store.dashboardState().orders[0].createdAt,
+    quoteUpdatedAt: new Date(nowMs - 250).toISOString(),
+    quoteAgeMs: 250,
+    bestAsk: 0.44,
+    limitPrice: 0.45,
+    maxQuoteAgeMs: 5_000,
+  });
+});
+
 function intent(limitPrice: number): TradeIntent {
   const startSeconds = Math.floor(Date.now() / 1_000) + 300;
   return {
@@ -85,7 +121,7 @@ function snapshot(book: OrderBookQuote): StateSnapshot {
   };
 }
 
-function quote(bestAsk: number): OrderBookQuote {
+function quote(bestAsk: number, updatedAt = new Date().toISOString()): OrderBookQuote {
   return {
     tokenId: 'yes-token',
     bestBid: bestAsk - 0.01,
@@ -95,7 +131,7 @@ function quote(bestAsk: number): OrderBookQuote {
     bidDepth: 10,
     askDepth: 10,
     imbalance: 0,
-    updatedAt: new Date().toISOString(),
+    updatedAt,
     source: 'ws',
     bids: [{ price: bestAsk - 0.01, size: 10 }],
     asks: [{ price: bestAsk, size: 10 }],

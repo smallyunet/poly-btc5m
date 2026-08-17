@@ -8,6 +8,7 @@ const DEFAULT_ASSETS = ['btc', 'eth', 'sol', 'doge', 'xrp', 'hype'];
 const INTERVAL_SECONDS = { '5m': 300, '15m': 900, '1h': 3600 };
 const DEFAULT_GAMMA_URL = 'https://gamma-api.polymarket.com';
 const DEFAULT_CLOB_WS_URL = 'wss://ws-subscriptions-clob.polymarket.com/ws/market';
+const MODEL_VERSION = 'best-ask-touch-observation-window-v2';
 
 const args = parseArgs(process.argv.slice(2));
 if (args.help) {
@@ -21,12 +22,14 @@ const config = {
   minPrice: args.minPrice ?? 0.29,
   maxPrice: args.maxPrice ?? 0.49,
   step: args.step ?? 0.01,
-  outDir: path.resolve(args.outDir || `data-lab/pm-${args.interval || '5m'}-touch`),
+  outDir: path.resolve(args.outDir || `data-lab/pm-${args.interval || '5m'}-touch-v2`),
   gammaUrl: stripTrailingSlash(args.gammaUrl || DEFAULT_GAMMA_URL),
   clobWsUrl: args.clobWsUrl || DEFAULT_CLOB_WS_URL,
   discoveryMs: args.discoveryMs ?? 30_000,
   summaryMs: args.summaryMs ?? 5_000,
   lookbackHours: args.lookbackHours ?? numberFromEnv('PM_SIM_LOOKBACK_HOURS', numberFromEnv('PM5M_TOUCH_LOOKBACK_HOURS', 12)),
+  observationLeadSeconds: args.observationLeadSeconds ?? numberFromEnv('PM_TOUCH_OBSERVATION_LEAD_SECONDS', INTERVAL_SECONDS[args.interval || '5m']),
+  maxQuoteAgeSeconds: args.maxQuoteAgeSeconds ?? numberFromEnv('MAX_ORDERBOOK_AGE_SECONDS', 5),
 };
 
 config.roundSeconds = INTERVAL_SECONDS[config.interval];
@@ -35,6 +38,7 @@ if (!config.roundSeconds) throw new Error(`Unsupported interval: ${config.interv
 const priceLevels = buildPriceLevels(config.minPrice, config.maxPrice, config.step);
 const rounds = new Map();
 const tokenIndex = new Map();
+const latestBestAsks = new Map();
 const historicalCompletedResults = loadHistoricalCompletedResults();
 let ws;
 let subscribedKey = '';
@@ -100,6 +104,12 @@ function parseArgs(argv) {
     } else if (arg === '--lookback-hours') {
       parsed.lookbackHours = Number(next);
       index += 1;
+    } else if (arg === '--observation-lead-seconds') {
+      parsed.observationLeadSeconds = Number(next);
+      index += 1;
+    } else if (arg === '--max-quote-age-seconds') {
+      parsed.maxQuoteAgeSeconds = Number(next);
+      index += 1;
     }
   }
   return parsed;
@@ -115,12 +125,14 @@ Options:
   --min-price 0.29
   --max-price 0.49
   --step 0.01
-  --out-dir data-lab/pm-5m-touch
+  --out-dir data-lab/pm-5m-touch-v2
   --gamma-url https://gamma-api.polymarket.com
   --clob-ws-url wss://ws-subscriptions-clob.polymarket.com/ws/market
   --discovery-ms 30000
   --summary-ms 5000
   --lookback-hours 12
+  --observation-lead-seconds 300
+  --max-quote-age-seconds 5
 `);
 }
 
@@ -149,6 +161,11 @@ async function discoverRound(asset, startSec) {
   const noTokenId = tokenIds[downIndex >= 0 ? downIndex : 1];
   if (!yesTokenId || !noTokenId) return;
 
+  const firstSeenAt = new Date().toISOString();
+  const observationStartAt = new Date(Math.max(
+    Date.parse(firstSeenAt),
+    startSec * 1_000 - config.observationLeadSeconds * 1_000,
+  )).toISOString();
   const round = {
     asset,
     interval: config.interval,
@@ -158,7 +175,8 @@ async function discoverRound(asset, startSec) {
     endAt: new Date((startSec + config.roundSeconds) * 1000).toISOString(),
     yesTokenId,
     noTokenId,
-    firstSeenAt: new Date().toISOString(),
+    firstSeenAt,
+    observationStartAt,
     finalized: false,
     levels: Object.fromEntries(priceLevels.map((price) => [priceKey(price), {
       price,
@@ -182,6 +200,8 @@ async function discoverRound(asset, startSec) {
     title: round.title,
     startAt: round.startAt,
     endAt: round.endAt,
+    observationStartAt,
+    modelVersion: MODEL_VERSION,
     yesTokenId,
     noTokenId,
   });
@@ -266,13 +286,18 @@ function handleOrderbookMessage(raw) {
 
 function recordBestAsk(tokenId, bestAsk) {
   if (!tokenId || bestAsk == null) return;
-  const indexed = tokenIndex.get(tokenId);
-  if (!indexed) return;
-  const round = rounds.get(indexed.key);
-  if (!round || round.finalized) return;
   const now = new Date();
+  latestBestAsks.set(tokenId, { bestAsk, updatedAtMs: now.getTime() });
+  if (applyBestAsk(tokenId, bestAsk, now)) writeSummary({ refreshCurrent: false });
+}
+
+function applyBestAsk(tokenId, bestAsk, now) {
+  const indexed = tokenIndex.get(tokenId);
+  if (!indexed) return false;
+  const round = rounds.get(indexed.key);
+  if (!round || round.finalized) return false;
   const nowIso = now.toISOString();
-  if (now < new Date(round.startAt) || now > new Date(round.endAt)) return;
+  if (now < new Date(round.observationStartAt) || now > new Date(round.endAt)) return false;
 
   let touchedAny = false;
   for (const level of Object.values(round.levels)) {
@@ -300,8 +325,18 @@ function recordBestAsk(tokenId, bestAsk) {
       side: indexed.side,
       tokenId,
       bestAsk,
+      observationStartAt: round.observationStartAt,
+      modelVersion: MODEL_VERSION,
     });
-    writeSummary();
+  }
+  return touchedAny;
+}
+
+function refreshCurrentBestAsks() {
+  const now = new Date();
+  for (const [tokenId, latest] of latestBestAsks) {
+    if (now.getTime() - latest.updatedAtMs > config.maxQuoteAgeSeconds * 1_000) continue;
+    applyBestAsk(tokenId, latest.bestAsk, now);
   }
 }
 
@@ -333,6 +368,8 @@ function resultRowsForRound(round) {
       title: round.title,
       startAt: round.startAt,
       endAt: round.endAt,
+      observationStartAt: round.observationStartAt,
+      modelVersion: MODEL_VERSION,
       price: level.price,
       yesTouched: level.yesTouched,
       noTouched: level.noTouched,
@@ -346,7 +383,8 @@ function resultRowsForRound(round) {
   });
 }
 
-function writeSummary() {
+function writeSummary({ refreshCurrent = true } = {}) {
+  if (refreshCurrent) refreshCurrentBestAsks();
   const currentCompletedResults = [];
   const activeResults = [];
   for (const round of rounds.values()) {
@@ -363,7 +401,8 @@ function writeSummary() {
 
   const summary = {
     ok: true,
-    model: 'bestAsk touch-fill',
+    model: 'bestAsk touch-fill over the simulated resting-order observation window',
+    modelVersion: MODEL_VERSION,
     generatedAt: new Date().toISOString(),
     config: {
       assets: config.assets,
@@ -373,6 +412,8 @@ function writeSummary() {
       step: config.step,
       priceLevels,
       lookbackHours: config.lookbackHours,
+      observationLeadSeconds: config.observationLeadSeconds,
+      maxQuoteAgeSeconds: config.maxQuoteAgeSeconds,
       lookbackStartAt: windowStartMs == null ? null : new Date(windowStartMs).toISOString(),
       gammaUrl: config.gammaUrl,
       clobWsUrl: config.clobWsUrl,
@@ -398,6 +439,7 @@ function writeSummary() {
         title: round.title,
         startAt: round.startAt,
         endAt: round.endAt,
+        observationStartAt: round.observationStartAt,
         finalized: round.finalized,
         levels: Object.values(round.levels).map((level) => ({
           price: level.price,

@@ -64,7 +64,13 @@ export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, dat
   const orderbooks = await data.refreshOrderbooks(round);
   const tailOrderbooks = tailRound ? await data.refreshOrderbooks(tailRound) : [];
   const paperOrderbooks = paperWatchTokenIds.length ? data.refreshOrderbooksForTokenIds(paperWatchTokenIds) : [];
-  reconcilePaperOrders({ store, profileId: profile.id, quotes: paperOrderbooks });
+  reconcilePaperOrders({
+    store,
+    profileId: profile.id,
+    quotes: paperOrderbooks,
+    maxQuoteAgeSeconds: appConfig.maxOrderbookAgeSeconds,
+    fillModelVersion: appConfig.paperFillModelVersion,
+  });
   const participation = await participationService.refresh(round);
   diagnostics.push(...participation.diagnostics);
   const features = data.features(round, profile);
@@ -121,7 +127,13 @@ export async function runBotTick(appConfig: AppConfig, store: InMemoryStore, dat
     : confirmedEntry;
   const intents = entry.intents.map((intent) => withProfile(intent, profile));
   store.recordIntents([...intents, ...entry.rejected.map((intent) => withProfile(intent, profile))]);
-  const executionDiagnostics = executePaperIntents({ store, snapshot, intents });
+  const executionDiagnostics = executePaperIntents({
+    store,
+    snapshot,
+    intents,
+    maxQuoteAgeSeconds: appConfig.maxOrderbookAgeSeconds,
+    fillModelVersion: appConfig.paperFillModelVersion,
+  });
   const tailSnapshot = tailRound ? {
     ...snapshot,
     id: `tail-snapshot-${Date.now()}`,
